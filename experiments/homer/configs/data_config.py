@@ -180,7 +180,7 @@ def get_config(config_string):
                     "proprio": {
                         "mean": ACT_MEAN,
                         "std": ACT_STD,
-                    }
+                    },
                 },
             }
         ),
@@ -201,7 +201,7 @@ def get_config(config_string):
                     "proprio": {
                         "mean": ACT_MEAN,
                         "std": ACT_STD,
-                    }
+                    },
                 },
             }
         ),

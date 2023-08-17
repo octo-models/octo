@@ -107,7 +107,6 @@ class VideoRecorder(gym.Wrapper):
         self.num_record_episodes = None
 
     def step(self, action: np.ndarray):  # NOQA
-
         if self.num_record_episodes is None or self.num_record_episodes == 0:
             observation, reward, terminated, truncated, info = self.env.step(action)
 
