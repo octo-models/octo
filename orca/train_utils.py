@@ -1,11 +1,13 @@
+import logging
 import time
 from collections import defaultdict
-import jax
+
 import flax
+import jax
 from flax.training import train_state
-from orca.typing import PRNGKey
 from jax.experimental.compilation_cache import compilation_cache
-import logging
+
+from orca.typing import PRNGKey
 
 
 class TrainState(train_state.TrainState):
