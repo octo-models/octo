@@ -24,6 +24,7 @@ from orca.train_utils import (
     shard_batch,
     Timer,
     format_name_with_config,
+    initialize_compilation_cache,
 )
 import datetime
 
@@ -37,24 +38,26 @@ except ImportError:
 FLAGS = flags.FLAGS
 
 flags.DEFINE_string("name", "experiment", "Experiment name.")
-flags.DEFINE_bool("debug", False, "Debug config")
+flags.DEFINE_bool("debug", False, "Debug config (no wandb logging)")
 
+config_dir = os.path.join(os.path.dirname(__file__), "configs")
 config_flags.DEFINE_config_file(
     "config",
-    None,
+    os.path.join(config_dir, "train_config.py:transformer_bc"),
     "File path to the training hyperparameter configuration.",
     lock_config=False,
 )
 
 config_flags.DEFINE_config_file(
     "bridgedata_config",
-    None,
+    os.path.join(config_dir, "data_config.py:all"),
     "File path to the bridgedata configuration.",
     lock_config=False,
 )
 
 
 def main(_):
+    initialize_compilation_cache()
     devices = jax.local_devices()
     num_devices = len(devices)
     assert FLAGS.config.batch_size % num_devices == 0
@@ -88,6 +91,7 @@ def main(_):
         wandb.config.update(dict(save_dir=save_dir), allow_val_change=True)
         logging.info("Saving to %s", save_dir)
     else:
+        save_dir = None
         logging.info("save_dir not passed in, not saving checkpoints")
     # load datasets
 
