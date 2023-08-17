@@ -1,19 +1,15 @@
-# 2 cores per process
-TPU0="export TPU_VISIBLE_DEVICES=0 TPU_CHIPS_PER_HOST_BOUNDS=1,1,1 TPU_HOST_BOUNDS=1,1,1 TPU_MESH_CONTROLLER_ADDRESS=localhost:8476 TPU_MESH_CONTROLLER_PORT=8476"
-TPU1="export TPU_VISIBLE_DEVICES=1 TPU_CHIPS_PER_HOST_BOUNDS=1,1,1 TPU_HOST_BOUNDS=1,1,1 TPU_MESH_CONTROLLER_ADDRESS=localhost:8477 TPU_MESH_CONTROLLER_PORT=8477"
-TPU2="export TPU_VISIBLE_DEVICES=2 TPU_CHIPS_PER_HOST_BOUNDS=1,1,1 TPU_HOST_BOUNDS=1,1,1 TPU_MESH_CONTROLLER_ADDRESS=localhost:8478 TPU_MESH_CONTROLLER_PORT=8478"
-TPU3="export TPU_VISIBLE_DEVICES=3 TPU_CHIPS_PER_HOST_BOUNDS=1,1,1 TPU_HOST_BOUNDS=1,1,1 TPU_MESH_CONTROLLER_ADDRESS=localhost:8479 TPU_MESH_CONTROLLER_PORT=8479"
+#!/bin/bash
 
-# 4 cores per process
-TPU01="export TPU_VISIBLE_DEVICES=0,1 TPU_CHIPS_PER_HOST_BOUNDS=1,2,1 TPU_HOST_BOUNDS=1,1,1 TPU_MESH_CONTROLLER_ADDRESS=localhost:8476 TPU_MESH_CONTROLLER_PORT=8476"
-TPU23="export TPU_VISIBLE_DEVICES=2,3 TPU_CHIPS_PER_HOST_BOUNDS=1,2,1 TPU_HOST_BOUNDS=1,1,1 TPU_MESH_CONTROLLER_ADDRESS=localhost:8478 TPU_MESH_CONTROLLER_PORT=8478"
-
+CONFIG_NAME=${1:-transformer_bc}
+DATA_CONFIG_NAME=${2:-all}
+echo "Using config $CONFIG_NAME and data config $DATA_CONFIG_NAME"
 NAME="test"
 
 CMD="python experiments/main/train.py \
-    --config experiments/main/configs/train_config.py:transformer_bc \
-    --bridgedata_config experiments/main/configs/data_config.py:all \
+    --config experiments/main/configs/train_config.py:$CONFIG_NAME \
+    --bridgedata_config experiments/main/configs/data_config.py:$DATA_CONFIG_NAME \
     --name $NAME \
     --config.data_path=gs://rail-tpus-homer-v4/data_new"
-
+shift 2
+echo $CMD "$@"
 $CMD "$@"
