@@ -1,6 +1,7 @@
-from .transformer_policy import TransformerPolicy
-from .tokenizers import tokenizers
 import logging
+
+from .tokenizers import tokenizers
+from .transformer_policy import TransformerPolicy
 
 
 def create_model_def(
