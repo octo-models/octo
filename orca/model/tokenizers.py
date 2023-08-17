@@ -4,15 +4,38 @@ import flax.linen as nn
 import jax
 import jax.numpy as jnp
 from jax.scipy.stats import norm
-from orca.networks.clip import (
+from orca.model.clip import (
     CLIPTextTokenizer,
     CLIPVisionTokenizer,
     clip_weights_loader,
 )
-from orca.networks.mlp import MLP
-from orca.vision import encoders
+from orca.model.vision import encoders
+from typing import Callable, Optional, Sequence
 
 EPS = 1e-6
+
+
+# Originally from jaxrl_m/networks/mlp.py
+class MLP(nn.Module):
+    hidden_dims: Sequence[int]
+    activations: Callable[[jnp.ndarray], jnp.ndarray] = nn.swish
+    activate_final: bool = False
+    use_layer_norm: bool = False
+    dropout_rate: Optional[float] = None
+    kernel_init: Callable = nn.initializers.xavier_uniform
+
+    @nn.compact
+    def __call__(self, x: jnp.ndarray, train: bool = False) -> jnp.ndarray:
+        for i, size in enumerate(self.hidden_dims):
+            x = nn.Dense(size, kernel_init=self.kernel_init())(x)
+            if i + 1 < len(self.hidden_dims) or self.activate_final:
+                if self.dropout_rate is not None and self.dropout_rate > 0:
+                    x = nn.Dropout(rate=self.dropout_rate)(x, deterministic=not train)
+                if self.use_layer_norm:
+                    x = nn.LayerNorm()(x)
+                x = self.activations(x)
+        return x
+
 
 # adapted from https://github.com/google-research/robotics_transformer/blob/master/tokenizers/token_learner.py
 class TokenLearner(nn.Module):
