@@ -4,6 +4,8 @@ import jax
 import flax
 from flax.training import train_state
 from orca.typing import PRNGKey
+from jax.experimental.compilation_cache import compilation_cache
+import logging
 
 
 class TrainState(train_state.TrainState):
@@ -97,9 +99,6 @@ class Timer:
 
 
 def initialize_compilation_cache(cache_dir="/tmp/jax_cache"):
-    from jax.experimental.compilation_cache import compilation_cache
-    import logging
-
     compilation_cache.initialize_cache(cache_dir)
 
     for logger in [logging.getLogger(name) for name in logging.root.manager.loggerDict]:

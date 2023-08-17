@@ -20,30 +20,9 @@ def get_config(config_string):
         group=placeholder(str),
         entity=placeholder(str),
     )
-    # "/mnt2/homer/datasets/mujoco_sim/franka_shoe_pick_and_place_2K_20230709-201001"
-    base_sim_config = dict(
-        batch_size=256,
-        num_steps=int(2e6),
-        log_interval=100,
-        eval_interval=5000,
-        save_interval=int(2e6),
-        save_dir=placeholder(str),
-        data_path=placeholder(str),
-        resume_path=placeholder(str),
-        seed=42,
-        env_name="franka_shoe_pick_and_place",
-        save_video=True,
-        max_episode_steps=55,
-        deterministic_eval=True,
-        num_episodes_per_video=8,
-        num_episodes_per_row=4,
-        eval_episodes=20,
-        num_val_batches=8,
-        pretrained_weights=[],
-    )
 
     base_real_config = dict(
-        batch_size=4,
+        batch_size=64,
         num_steps=int(2e6),
         log_interval=100,
         eval_interval=5000,
@@ -103,22 +82,6 @@ def get_config(config_string):
     )
 
     possible_structures = {
-        "sim_transformer_bc": ConfigDict(
-            dict(
-                agent="transformer_bc",
-                obs_horizon=1,
-                model=update_config(
-                    base_model_config,
-                    observation_tokenizers=["sim-obs-tokenizer"],
-                    observation_tokenizer_kwargs={"sim-obs-tokenizer": {}},
-                    task_tokenizers=["sim-goal-obs-tokenizer"],
-                    task_tokenizer_kwargs={"sim-goal-obs-tokenizer": {}},
-                ),
-                optimizer=base_optimizer_config,
-                dataset_kwargs=base_data_config,
-                **base_sim_config,
-            )
-        ),
         "transformer_bc": ConfigDict(
             dict(
                 agent="transformer_bc",
