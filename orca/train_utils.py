@@ -31,6 +31,7 @@ def create_train_state(
     """Utility to create a TrainState."""
     init_rng, state_rng = jax.random.split(rng)
 
+    # Initializing the model in a jit avoids running the model on CPU
     @jax.jit
     def init(rng):
         return model_def.init(rng, *init_args, **init_kwargs)
@@ -93,3 +94,16 @@ class Timer:
         if reset:
             self.reset()
         return ret
+
+
+def initialize_compilation_cache(cache_dir="/tmp/jax_cache"):
+    from jax.experimental.compilation_cache import compilation_cache
+    import logging
+
+    compilation_cache.initialize_cache(cache_dir)
+
+    for logger in [logging.getLogger(name) for name in logging.root.manager.loggerDict]:
+        logger.addFilter(
+            lambda record: "Not writing persistent cache entry for"
+            not in record.getMessage()
+        )

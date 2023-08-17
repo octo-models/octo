@@ -14,8 +14,6 @@ CMD="python experiments/main/train.py \
     --config experiments/main/configs/train_config.py:transformer_bc \
     --bridgedata_config experiments/main/configs/data_config.py:all \
     --name $NAME \
-    --config.data_path=gs://rail-tpus-homer-v4/data_new \
-    --config.save_dir=/tmp/    
-    "
+    --config.data_path=gs://rail-tpus-homer-v4/data_new"
 
-$CMD --debug
+$CMD "$@" 

@@ -2,8 +2,14 @@
 
 A robot foundation model.
 
+## Training
+
+```
+python experiments/main/train.py --config.data_path=<...> --config.save_dir=<...>
+```
+
 ## Contributing
-Experimental things and training/eval scripts should go in `experiments/`. To make any changes to files outside of `experiments/`, please open a pull request.
+Experimental things and training/eval scripts should go in `experiments/<your_name>`. To make any changes to files outside of your experiments directory, please open a pull request.
 
 ## Environment
 ```
