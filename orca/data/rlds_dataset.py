@@ -7,7 +7,6 @@ import numpy as np
 import tensorflow as tf
 import tensorflow_datasets as tfds
 import tqdm
-
 from orca.data.bridge_dataset import BridgeDataset
 from orca.utils.rlds_data_utils import RLDS_TRAJECTORY_MAP_TRANSFORMS
 

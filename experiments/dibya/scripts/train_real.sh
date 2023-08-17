@@ -16,4 +16,4 @@ CMD="python experiments/main/train.py \
     --name $NAME \
     --config.data_path=gs://rail-tpus-homer-v4/data_new"
 
-$CMD "$@" 
+$CMD "$@"
