@@ -6,6 +6,7 @@ import flax
 import jax
 from flax.training import train_state
 from jax.experimental.compilation_cache import compilation_cache
+
 from orca.typing import PRNGKey
 
 
@@ -39,7 +40,7 @@ def create_train_state(
     def init(rng):
         return model_def.init(rng, *init_args, **init_kwargs)
 
-    ev, params = init(init_rng).pop("params")
+    ev, params = flax.core.pop(init(init_rng), "params")
     assert (
         len(ev) == 0
     ), "Are you forgetting to store some variables in the state? {}".format(ev.keys())
