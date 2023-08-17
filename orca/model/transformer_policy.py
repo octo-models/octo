@@ -3,6 +3,7 @@ import flax.linen as nn
 import jax
 import jax.numpy as jnp
 import numpy as np
+
 from orca.model.tokenizers import ActionTokenizer
 from orca.model.transformer import Transformer
 from orca.typing import PRNGKey, Sequence
