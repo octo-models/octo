@@ -12,6 +12,7 @@ def update_config(_prototype, **kwargs):
     result.pop("_overwrite", None)
     return ConfigDict(result)
 
+
 def get_config(config_string):
     base_sim_config = dict(
         batch_size=256,
@@ -102,7 +103,7 @@ def get_config(config_string):
                 task_tokenizers=["sim-goal-obs-tokenizer"],
                 task_tokenizer_kwargs={"sim-goal-obs-tokenizer": {}},
                 dataset_kwargs=base_data_config,
-                **base_sim_config
+                **base_sim_config,
             )
         ),
         "transformer_bc": ConfigDict(
@@ -115,7 +116,7 @@ def get_config(config_string):
                 task_tokenizers=["goal-obs-tokenizer"],
                 task_tokenizer_kwargs={"goal-obs-tokenizer": {}},
                 dataset_kwargs=base_data_config,
-                **base_real_config
+                **base_real_config,
             )
         ),
         "transformer_bc_film_lang": ConfigDict(
@@ -142,9 +143,7 @@ def get_config(config_string):
                 observation_tokenizers=["obs-tokenizer"],
                 observation_tokenizer_kwargs={"obs-tokenizer": {"num_tokens": 64}},
                 task_tokenizers=["language-tokenizer"],
-                task_tokenizer_kwargs={
-                    "language-tokenizer": {"num_tokens": 16}
-                },
+                task_tokenizer_kwargs={"language-tokenizer": {"num_tokens": 16}},
                 **base_real_config,
             )
         ),
