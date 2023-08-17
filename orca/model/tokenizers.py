@@ -5,7 +5,6 @@ import flax.linen as nn
 import jax
 import jax.numpy as jnp
 from jax.scipy.stats import norm
-
 from orca.model.clip import CLIPTextTokenizer, CLIPVisionTokenizer, clip_weights_loader
 from orca.model.vision import encoders
 
