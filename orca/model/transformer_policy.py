@@ -3,9 +3,10 @@ import flax.linen as nn
 import jax
 import jax.numpy as jnp
 import numpy as np
-from orca.common.typing import PRNGKey, Sequence
-from orca.networks.input_tokenizers import ActionTokenizer
-from orca.networks.transformer import Transformer
+
+from orca.model.tokenizers import ActionTokenizer
+from orca.model.transformer import Transformer
+from orca.typing import PRNGKey, Sequence
 
 
 class TransformerPolicy(nn.Module):

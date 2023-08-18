@@ -1,4 +1,5 @@
 from ml_collections import ConfigDict
+from ml_collections.config_dict import placeholder, required_placeholder
 
 
 def update_config(_prototype, **kwargs):
@@ -14,40 +15,26 @@ def update_config(_prototype, **kwargs):
 
 
 def get_config(config_string):
-    base_sim_config = dict(
-        batch_size=256,
-        num_steps=int(2e6),
-        log_interval=100,
-        eval_interval=5000,
-        save_interval=int(2e6),
-        save_dir="/mnt2/homer/jaxrl_log",
-        data_path="/mnt2/homer/datasets/mujoco_sim/franka_shoe_pick_and_place_2K_20230709-201001",
-        resume_path=None,
-        seed=42,
-        env_name="franka_shoe_pick_and_place",
-        save_video=True,
-        max_episode_steps=55,
-        deterministic_eval=True,
-        num_episodes_per_video=8,
-        num_episodes_per_row=4,
-        eval_episodes=20,
-        num_val_batches=8,
-        pretrained_weights=[],
+    base_wandb_config = dict(
+        project="orca",
+        group=placeholder(str),
+        entity=placeholder(str),
     )
 
     base_real_config = dict(
-        batch_size=4,
+        batch_size=64,
         num_steps=int(2e6),
         log_interval=100,
         eval_interval=5000,
         save_interval=5000,
-        save_dir="/mnt2/homer/jaxrl_log",
-        data_path="/nfs/kun2/users/homer/datasets/bridge_data_all/tfrecord_256_test",
-        resume_path=None,
+        save_dir=placeholder(str),
+        data_path=placeholder(str),
+        resume_path=placeholder(str),
         seed=42,
         text_processor="muse_embedding",
         text_processor_kwargs=dict(),
         pretrained_weights=[],
+        wandb=base_wandb_config,
     )
 
     # params that need to be specified multiple places
@@ -76,8 +63,13 @@ def get_config(config_string):
         goal_relabeling_kwargs=dict(reached_proportion=0.0),
         normalization_type=normalization_type,
     )
+    base_optimizer_config = dict(
+        learning_rate=3e-4,
+        warmup_steps=2000,
+        decay_steps=int(2e6),
+    )
 
-    base_transformer_agent_config = dict(
+    base_model_config = dict(
         policy_kwargs=dict(
             num_layers=4,
             layer_size=1024,
@@ -87,34 +79,21 @@ def get_config(config_string):
             dropout_rate=0.1,
             normalization_type=normalization_type,
         ),
-        learning_rate=3e-4,
-        warmup_steps=2000,
-        decay_steps=int(2e6),
     )
 
     possible_structures = {
-        "sim_transformer_bc": ConfigDict(
-            dict(
-                agent="transformer_bc",
-                obs_horizon=1,
-                agent_kwargs=base_transformer_agent_config,
-                observation_tokenizers=["sim-obs-tokenizer"],
-                observation_tokenizer_kwargs={"sim-obs-tokenizer": {}},
-                task_tokenizers=["sim-goal-obs-tokenizer"],
-                task_tokenizer_kwargs={"sim-goal-obs-tokenizer": {}},
-                dataset_kwargs=base_data_config,
-                **base_sim_config,
-            )
-        ),
         "transformer_bc": ConfigDict(
             dict(
                 agent="transformer_bc",
                 obs_horizon=1,
-                agent_kwargs=base_transformer_agent_config,
-                observation_tokenizers=["obs-tokenizer"],
-                observation_tokenizer_kwargs={"obs-tokenizer": {}},
-                task_tokenizers=["goal-obs-tokenizer"],
-                task_tokenizer_kwargs={"goal-obs-tokenizer": {}},
+                model=update_config(
+                    base_model_config,
+                    observation_tokenizers=["obs-tokenizer"],
+                    observation_tokenizer_kwargs={"obs-tokenizer": {}},
+                    task_tokenizers=["goal-obs-tokenizer"],
+                    task_tokenizer_kwargs={"goal-obs-tokenizer": {}},
+                ),
+                optimizer=base_optimizer_config,
                 dataset_kwargs=base_data_config,
                 **base_real_config,
             )
@@ -123,14 +102,17 @@ def get_config(config_string):
             dict(
                 agent="transformer_bc",
                 obs_horizon=1,
-                agent_kwargs=base_transformer_agent_config,
+                model=update_config(
+                    base_model_config,
+                    observation_tokenizers=["obs-film-language-tokenizer"],
+                    observation_tokenizer_kwargs={
+                        "obs-film-language-tokenizer": {"num_tokens": 64}
+                    },
+                    task_tokenizers=[],
+                    task_tokenizer_kwargs={},
+                ),
+                optimizer=base_optimizer_config,
                 dataset_kwargs=base_data_config,
-                observation_tokenizers=["obs-film-language-tokenizer"],
-                observation_tokenizer_kwargs={
-                    "obs-film-language-tokenizer": {"num_tokens": 64}
-                },
-                task_tokenizers=[],
-                task_tokenizer_kwargs={},
                 **base_real_config,
             )
         ),
@@ -138,12 +120,15 @@ def get_config(config_string):
             dict(
                 agent="transformer_bc",
                 obs_horizon=1,
-                agent_kwargs=base_transformer_agent_config,
+                model=update_config(
+                    base_model_config,
+                    observation_tokenizers=["obs-tokenizer"],
+                    observation_tokenizer_kwargs={"obs-tokenizer": {"num_tokens": 64}},
+                    task_tokenizers=["language-tokenizer"],
+                    task_tokenizer_kwargs={"language-tokenizer": {"num_tokens": 16}},
+                ),
+                optimizer=base_optimizer_config,
                 dataset_kwargs=base_data_config,
-                observation_tokenizers=["obs-tokenizer"],
-                observation_tokenizer_kwargs={"obs-tokenizer": {"num_tokens": 64}},
-                task_tokenizers=["language-tokenizer"],
-                task_tokenizer_kwargs={"language-tokenizer": {"num_tokens": 16}},
                 **base_real_config,
             )
         ),
@@ -151,12 +136,15 @@ def get_config(config_string):
             dict(
                 agent="transformer_bc",
                 obs_horizon=1,
-                agent_kwargs=base_transformer_agent_config,
+                model=update_config(
+                    base_model_config,
+                    observation_tokenizers=["obs-tokenizer"],
+                    observation_tokenizer_kwargs={"obs-tokenizer": {"num_tokens": 64}},
+                    task_tokenizers=["clip-text-tokenizer"],
+                    task_tokenizer_kwargs={"clip-text-tokenizer": {"num_tokens": 64}},
+                ),
+                optimizer=base_optimizer_config,
                 dataset_kwargs=base_data_config,
-                observation_tokenizers=["obs-tokenizer"],
-                observation_tokenizer_kwargs={"obs-tokenizer": {"num_tokens": 64}},
-                task_tokenizers=["clip-text-tokenizer"],
-                task_tokenizer_kwargs={"clip-text-tokenizer": {"num_tokens": 64}},
                 **update_config(
                     base_real_config,
                     text_processor="clip_processor",
@@ -168,12 +156,17 @@ def get_config(config_string):
             dict(
                 agent="transformer_bc",
                 obs_horizon=1,
-                agent_kwargs=base_transformer_agent_config,
+                model=update_config(
+                    base_model_config,
+                    observation_tokenizers=["clip-obs-tokenizer"],
+                    observation_tokenizer_kwargs={
+                        "clip-obs-tokenizer": {"num_tokens": 50}
+                    },
+                    task_tokenizers=["clip-text-tokenizer"],
+                    task_tokenizer_kwargs={"clip-text-tokenizer": {"num_tokens": 64}},
+                ),
+                optimizer=base_optimizer_config,
                 dataset_kwargs=update_config(base_data_config, image_processor="clip"),
-                observation_tokenizers=["clip-obs-tokenizer"],
-                observation_tokenizer_kwargs={"clip-obs-tokenizer": {"num_tokens": 50}},
-                task_tokenizers=["clip-text-tokenizer"],
-                task_tokenizer_kwargs={"clip-text-tokenizer": {"num_tokens": 64}},
                 **update_config(
                     base_real_config,
                     text_processor="clip_processor",

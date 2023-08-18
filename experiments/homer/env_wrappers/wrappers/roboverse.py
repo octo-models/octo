@@ -58,7 +58,6 @@ class GCRoboverseWrapper(gym.Wrapper):
         env: gym.Env,
         goal_sampler: Union[np.ndarray, Callable],
     ):
-
         super().__init__(env)
         self.env = env
         self.observation_space = gym.spaces.Dict(
@@ -96,7 +95,6 @@ class GCRoboverseWrapper(gym.Wrapper):
         return self.env.render_obs()
 
     def reset(self, **kwargs):
-
         if not callable(self.goal_sampler):
             idx = np.random.randint(len(self.goal_sampler["observations"]["image"]))
             goal_image = self.goal_sampler["observations"]["image"][idx]

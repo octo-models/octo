@@ -1,26 +1,27 @@
-import sys
-from widowx_envs.widowx.widowx_env import BridgeDataRailRLPrivateWidowX
 import os
-import numpy as np
-from PIL import Image
-from flax.training import checkpoints
+import sys
 import traceback
-import wandb
-from orca.vision import encoders
-from orca.agents import agents
+
 import matplotlib
+import numpy as np
+import wandb
 from absl import app, flags, logging
+from flax.training import checkpoints
+from PIL import Image
+from widowx_envs.widowx.widowx_env import BridgeDataRailRLPrivateWidowX
+
+from orca.agents import agents
+from orca.vision import encoders
 
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 import time
+from collections import deque
 from datetime import datetime
+
 import jax
-import time
+import matplotlib.pyplot as plt
 import tensorflow as tf
 from widowx_envs.utils.multicam_server_rospkg.src.topic_utils import IMTopic
-from collections import deque
-from orca.utils.python_utils import list_of_dicts_to_dict_of_lists
 
 np.set_printoptions(suppress=True)
 
@@ -54,6 +55,16 @@ STICKY_GRIPPER_NUM_STEPS = 1
 FIXED_STD = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
 
 WORKSPACE_BOUNDS = np.array([[0.1, -0.15, -0.1, -1.57, 0], [0.45, 0.25, 0.25, 1.57, 0]])
+
+
+def list_of_dicts_to_dict_of_lists(list_of_dicts):
+    dict_of_lists = {}
+    for dictionary in list_of_dicts:
+        for key, value in dictionary.items():
+            if key not in dict_of_lists:
+                dict_of_lists[key] = []
+            dict_of_lists[key].append(value)
+    return dict_of_lists
 
 
 def unnormalize_action(action, mean, std):

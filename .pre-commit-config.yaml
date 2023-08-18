@@ -22,4 +22,4 @@ repos:
     hooks:
       - id: isort
         exclude: ^experiments/
-        args: ["--profile", "black", "--src", "jaxrl_m", "--src", "experiments"]
+        args: ["--profile", "black", "--src", "orca", "--src", "experiments"]
