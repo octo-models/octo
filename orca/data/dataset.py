@@ -1,11 +1,3 @@
-"""
-tf.data.Dataset based dataloader for the BridgeData format, meaning
-TFRecords with one trajectory per example. See the BridgeDataset class
-below for more details.
-
-Written by Kevin Black (kvablack@berkeley.edu).
-"""
-
 import fnmatch
 from typing import Iterable, Iterator, List, Optional, Union
 
@@ -15,104 +7,32 @@ import tensorflow as tf
 from absl import logging
 from flax.core import FrozenDict
 
-from orca.data.text_processing import TextProcessor
-from orca.data.tf_augmentations import augment
-from orca.data.tf_goal_relabeling import GOAL_RELABELING_FUNCTIONS
+from orca.data.utils.text_processing import TextProcessor
+from orca.data.utils.tf_augmentations import augment
+from orca.data.utils.tf_goal_relabeling import GOAL_RELABELING_FUNCTIONS
 
 
-def glob_to_path_list(
-    glob_strs: Union[str, List[str]], prefix: str = "", exclude: Iterable[str] = ()
-):
-    """Converts a glob string or list of glob strings to a list of paths."""
-    if isinstance(glob_strs, str):
-        glob_strs = [glob_strs]
-    path_list = []
-    for glob_str in glob_strs:
-        paths = tf.io.gfile.glob(f"{prefix}/{glob_str}")
-        filtered_paths = []
-        for path in paths:
-            if not any(fnmatch.fnmatch(path, e) for e in exclude):
-                filtered_paths.append(path)
-            else:
-                logging.info(f"Excluding {path}")
-        assert len(filtered_paths) > 0, f"{glob_str} came up empty"
-        path_list += filtered_paths
-    return path_list
-
-
-@tf.function(jit_compile=True)
-def _binarize_gripper_actions(actions):
-    """Converts gripper actions from continous to binary values (0 and 1).
-
-    We exploit that fact that most of the time, the gripper is fully open (near
-    1.0) or fully closed (near 0.0). As it transitions between the two, it
-    sometimes passes through a few intermediate values. We relabel those
-    intermediate values based on the state that is reached _after_ those
-    intermediate values.
-
-    In the edge case that the trajectory ends with an intermediate value, we
-    give up on binarizing and relabel that chunk of intermediate values as
-    the last action in the trajectory.
-
-    The scan implements the following code:
-
-    new_actions = np.empty_like(actions)
-    carry = actions[-1]
-    for i in reversed(range(actions.shape[0])):
-        if in_between_mask[i]:
-            carry = carry
-        else:
-            carry = float(open_mask[i])
-        new_actions[i] = carry
+class BaseDataset:
     """
-    open_mask = actions > 0.95
-    closed_mask = actions < 0.05
-    in_between_mask = tf.logical_not(tf.logical_or(open_mask, closed_mask))
-
-    is_open_float = tf.cast(open_mask, tf.float32)
-
-    def scan_fn(carry, i):
-        return tf.cond(
-            in_between_mask[i],
-            lambda: tf.cast(carry, tf.float32),
-            lambda: is_open_float[i],
-        )
-
-    new_actions = tf.scan(
-        scan_fn, tf.range(tf.shape(actions)[0]), actions[-1], reverse=True
-    )
-    return new_actions
-
-
-class BridgeDataset:
-    """
-    Fast parallel tf.data.Dataset-based dataloader for a dataset in the
-    BridgeData format. This format consists of TFRecords where each example
-    is one trajectory. See `PROTO_TYPE_SPEC` below for the expected format
-    for each example in more detail. See `_process_trajectory` below for
-    the output format.
+    Fast parallel tf.data.Dataset-based dataloader.
 
     Includes goal relabeling, image augmentations, and sampling from multiple
     datasets with different weights. Goal relabeling uses a 0/-1 reward scheme:
     0 when the next_obs is labeled as the goal, -1 otherwise.
 
     Args:
-        data_paths: List of paths to the data files. If a list of list of paths
-            is provided, the data will be sampled from each sub-list according
-            to "sample_weights".
+        dataset_names: Single dataset name OR list of dataset names OR list of filepath-lists.
+            If more than one element is provided, the data will be sampled from each
+            dataset according to "sample_weights".
         seed: Random seed.
-        action_proprio_metadata: Dictionary containing metadata of the actions and proprio.
-            If provided, actions and proprio will be normalized.
         normalization_type: The type of normalization to apply to the actions
             and proprio.
-        relabel_actions: Whether to relabel the actions with reached states
-            (based on proprioception). Also binarizes gripper actions.
         goal_relabeling_strategy: Goal relabeling strategy. See
-            `orca.data.tf_goal_relabeling` for more details.
+            `orca.data.utils.tf_goal_relabeling` for more details.
         goal_relabeling_kwargs: Keyword arguments for goal relabeling. See
-            `orca.data.tf_goal_relabeling` for more details.
-        sample_weights: If data_paths is a list of list of paths, this is a
-            list of weights with which to sample from each sub-list.
+            `orca.data.utils.tf_goal_relabeling` for more details.
+        sample_weights: If dataset_names has multiple elements, this is a
+            list of weights with which to sample from each dataset.
         batch_size: Batch size.
         shuffle_buffer_size: Size of the shuffle buffer. It is split between
             sub-datasets by `sample_weights`.
@@ -124,18 +44,16 @@ class BridgeDataset:
         augment_next_obs_goal_differently: Whether to use different random seeds
             for augmenting the obs, next_obs, and goal image.
         augment_kwargs: Keyword arguments for image augmentations. See
-            `orca.data.tf_augmentations.augment` for more details.
+            `orca.data.utils.tf_augmentations.augment` for more details.
         act_pred_horizon: Number of consecutive actions that will be predicted.
         obs_horizon: Number of consecutive observations that will be conditioned on.
     """
 
     def __init__(
         self,
-        data_paths: List[Union[str, List[str]]],
+        dataset_names: Union[str, List[str], List[List[str]]],
         seed: int,
-        action_proprio_metadata: Optional[dict] = None,
         normalization_type: Optional[str] = "normal",
-        relabel_actions: bool = True,
         goal_relabeling_strategy: str = "uniform",
         goal_relabeling_kwargs: dict = {},
         sample_weights: Optional[List[float]] = None,
@@ -147,27 +65,26 @@ class BridgeDataset:
         augment: bool = False,
         augment_next_obs_goal_differently: bool = False,
         augment_kwargs: dict = {},
+        # TODO(karl): make this a single horizon parameter
         act_pred_horizon: Optional[int] = None,
         obs_horizon: Optional[int] = None,
-        string_fields: Optional[str] = ["language"],
+        # TODO(karl): these arguments are not documented
+        string_fields: Optional[str] = ["language"],        # TODO(karl): assume that we have only one language string
         text_processor: Optional[TextProcessor] = None,
         image_processor: Optional[str] = "default",
         image_shape: Optional[List[int]] = (256, 256, 3),
         skip_unlabeled: bool = False,
         **kwargs,
     ):
-        logging.warning("Extra kwargs passed to BridgeDataset: %s", kwargs)
-        if isinstance(data_paths[0], str):
-            data_paths = [data_paths]
+        logging.warning("Extra kwargs passed to Dataset: %s", kwargs)
         if sample_weights is None:
             # default to uniform distribution over sub-lists
-            sample_weights = [1 / len(data_paths)] * len(data_paths)
-        assert len(data_paths) == len(sample_weights)
+            sample_weights = [1 / len(dataset_names)] * len(dataset_names)
+        assert len(dataset_names) == len(sample_weights)
         assert np.isclose(sum(sample_weights), 1.0)
 
-        self.relabel_actions = relabel_actions
-        self.action_proprio_metadata = action_proprio_metadata
         self.normalization_type = normalization_type
+        self.action_proprio_metadata = None             # metadata for normalization, maybe computed on the fly
         self.goal_relabeling_strategy = goal_relabeling_strategy
         self.goal_relabeling_kwargs = goal_relabeling_kwargs
         self.cache = cache
@@ -182,13 +99,12 @@ class BridgeDataset:
         self.image_processor = image_processor
         self.image_shape = image_shape
 
-        if self.load_language:
-            self.PROTO_TYPE_SPEC["language"] = tf.string
-
-        # construct a dataset for each sub-list of paths
+        # construct datasets
+        if isinstance(dataset_names, str):
+            dataset_names = [dataset_names]
         datasets = []
-        for sub_data_paths in data_paths:
-            datasets.append(self._construct_tf_dataset(sub_data_paths, seed))
+        for dataset_name in dataset_names:
+            datasets.append(self._construct_tf_dataset(dataset_name, seed))
 
         if train:
             # shuffle and repeat each sub-dataset, allocating the shuffle buffer
@@ -235,16 +151,14 @@ class BridgeDataset:
 
         self.tf_dataset = dataset
 
-    def _construct_tf_dataset(self, paths: List[str], seed: int) -> tf.data.Dataset:
+    def _construct_tf_dataset(self, dataset_name: Union[str, List[str]], seed: int) -> tf.data.Dataset:
         # construct base tf dataset of trajectories
-        dataset = self._construct_base_dataset(paths, seed)
+        dataset = self._construct_base_dataset(dataset_name, seed)
 
-        # yields trajectories
-        dataset = dataset.map(
-            self._process_actions, num_parallel_calls=tf.data.AUTOTUNE
-        )
+        # maybe apply action & proprio normalization
+        dataset = dataset.map(self._normalize_action_proprio, num_parallel_calls=tf.data.AUTOTUNE)
 
-        # yields trajectories
+        # maybe chunks into snippets
         dataset = dataset.map(self._chunk_act_obs, num_parallel_calls=tf.data.AUTOTUNE)
 
         # cache before add_goals because add_goals introduces randomness
@@ -259,80 +173,11 @@ class BridgeDataset:
 
         return dataset
 
-    def _construct_base_dataset(self, paths: List[str], seed: int) -> tf.data.Dataset:
-        """
-        Constructs a tf.data.Dataset from a list of paths.
-        The dataset yields a dictionary of tensors for each trajectory.
-        """
-        # shuffle again using the dataset API so the files are read in a
-        # different order every epoch
-        dataset = tf.data.Dataset.from_tensor_slices(paths).shuffle(len(paths), seed)
+    def _construct_base_dataset(self, dataset_name: Union[str, List[str]], seed: int) -> tf.data.Dataset:
+        """Constructs basic dataset of trajectories."""
+        raise NotImplementedError("This should be implemented in child class.")
 
-        # yields raw serialized examples
-        dataset = tf.data.TFRecordDataset(dataset, num_parallel_reads=tf.data.AUTOTUNE)
-
-        # yields trajectories
-        dataset = dataset.map(self._decode_example, num_parallel_calls=tf.data.AUTOTUNE)
-        return dataset
-
-    # the expected type spec for the serialized examples
-    PROTO_TYPE_SPEC = {
-        "observations/images0": tf.uint8,
-        "observations/state": tf.float32,
-        "next_observations/images0": tf.uint8,
-        "next_observations/state": tf.float32,
-        "actions": tf.float32,
-        "terminals": tf.bool,
-        "truncates": tf.bool,
-    }
-
-    def _decode_example(self, example_proto):
-        # decode the example proto according to PROTO_TYPE_SPEC
-        features = {
-            key: tf.io.FixedLenFeature([], tf.string)
-            for key in self.PROTO_TYPE_SPEC.keys()
-        }
-        parsed_features = tf.io.parse_single_example(example_proto, features)
-        parsed_tensors = {
-            key: tf.io.parse_tensor(parsed_features[key], dtype)
-            for key, dtype in self.PROTO_TYPE_SPEC.items()
-        }
-        # restructure the dictionary into the downstream format
-        return {
-            "observations": {
-                "image": parsed_tensors["observations/images0"],
-                "proprio": parsed_tensors["observations/state"],
-            },
-            "next_observations": {
-                "image": parsed_tensors["next_observations/images0"],
-                "proprio": parsed_tensors["next_observations/state"],
-            },
-            **({"language": parsed_tensors["language"]} if self.load_language else {}),
-            "actions": parsed_tensors["actions"],
-            "terminals": parsed_tensors["terminals"],
-            "truncates": parsed_tensors["truncates"],
-        }
-
-    def _process_actions(self, traj):
-        if self.relabel_actions:
-            # relabel the first 6 action dims (xyz position, xyz rotation)
-            # using the reached proprio
-            movement_actions = (
-                traj["next_observations"]["proprio"][:, :6]
-                - traj["observations"]["proprio"][:, :6]
-            )
-            # binarize the gripper action
-            continuous_gripper_actions = traj["actions"][:, 6]
-            binarized_gripper_actions = _binarize_gripper_actions(
-                continuous_gripper_actions
-            )
-
-            traj["actions"] = tf.concat(
-                [movement_actions, binarized_gripper_actions[:, None]],
-                axis=1,
-            )
-
-        # normalize actions and proprio
+    def _normalize_action_proprio(self, traj):
         if self.action_proprio_metadata is not None:
             if self.normalization_type == "normal":
                 # normalize to mean 0, std 1
@@ -482,5 +327,8 @@ class BridgeDataset:
         # yield FrozenDicts. this can be bypassed by using
         # `dataset.tf_dataset.as_numpy_iterator()` instead
         iterator = map(FrozenDict, self.tf_dataset.as_numpy_iterator())
+
+        # need to tokenize language instructions here already to allow for sharding (str cannot be sharded)
+        # can only apply tokenizers after conversion to numpy
         iterator = map(self._process_string_fields, iterator)
         return iterator

@@ -1,5 +1,4 @@
 """Episode transforms for different RLDS datasets to canonical dataset definition."""
-
 from typing import Any, Dict
 
 import tensorflow as tf
