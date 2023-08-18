@@ -270,6 +270,9 @@ def make_numpy(path, train_proportion):
         rew_train_l.extend(rew_train)
         rew_val_l.extend(rew_val)
 
+    if len(lst_train) == 0 or len(lst_val) == 0:
+        return
+
     with tf.io.gfile.GFile(tf.io.gfile.join(outpath_train, "out.npy"), "wb") as f:
         np.save(f, lst_train)
     with tf.io.gfile.GFile(tf.io.gfile.join(outpath_val, "out.npy"), "wb") as f:

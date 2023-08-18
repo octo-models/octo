@@ -9,7 +9,7 @@ import tensorflow_datasets as tfds
 import tqdm
 
 from orca.data.bridge_dataset import BridgeDataset
-from orca.utils.rlds_data_utils import RLDS_TRAJECTORY_MAP_TRANSFORMS
+from orca.data.rlds_data_utils import RLDS_TRAJECTORY_MAP_TRANSFORMS
 
 
 def _get_splits(tfds_dataset_splits):
