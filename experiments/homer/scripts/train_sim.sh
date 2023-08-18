@@ -13,7 +13,7 @@ export CUDA_VISIBLE_DEVICES=1
 
 NAME="test"
 
-CMD="python experiments/homer/train_sim.py \
+CMD="python experiments/homer/sim/train_sim.py \
     --config experiments/homer/configs/train_config.py:sim_transformer_bc \
     --name $NAME"
 

@@ -10,7 +10,7 @@ def supply_rng(f, rng=jax.random.PRNGKey(0)):
     def wrapped(*args, **kwargs):
         nonlocal rng
         rng, key = jax.random.split(rng)
-        return f(*args, seed=key, **kwargs)
+        return f(*args, rng=key, **kwargs)
 
     return wrapped
 

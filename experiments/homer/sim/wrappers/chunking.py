@@ -3,11 +3,10 @@ from collections import deque
 import gym
 import jax
 import numpy as np
-from orca.utils.python_utils import list_of_dicts_to_dict_of_lists
 
 
 def stack_obs(obs):
-    dict_list = list_of_dicts_to_dict_of_lists(obs)
+    dict_list = {k: [dic[k] for dic in obs] for k in obs[0]}
     return jax.tree_map(
         lambda x: np.stack(x), dict_list, is_leaf=lambda x: type(x) == list
     )
