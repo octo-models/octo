@@ -2,10 +2,7 @@ from typing import Optional
 
 import jax.numpy as jnp
 import tensorflow as tf
-import tensorflow_hub as hub
-import tensorflow_text  # required for muse
 from flax.core import FrozenDict
-from transformers import AutoTokenizer, CLIPProcessor
 
 MULTI_MODULE = "https://tfhub.dev/google/universal-sentence-encoder-multilingual/3"
 
@@ -15,7 +12,7 @@ class TextProcessor:
     Base class for text tokenization or text embedding.
     """
 
-    def encode():
+    def encode(self, strings):
         pass
 
 
@@ -30,6 +27,7 @@ class HFTokenizer(TextProcessor):
             "return_tensors": "np",
         },
     ):
+        from transformers import AutoTokenizer      # lazy import
         self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
         self.tokenizer_kwargs = tokenizer_kwargs
 
@@ -45,6 +43,8 @@ class HFTokenizer(TextProcessor):
 
 class MuseEmbedding(TextProcessor):
     def __init__(self):
+        import tensorflow_hub as hub        # lazy import
+        import tensorflow_text              # required for muse
         self.muse_model = hub.load(MULTI_MODULE)
 
     def encode(self, strings):
@@ -62,6 +62,7 @@ class CLIPTextProcessor(TextProcessor):
             "return_tensors": "np",
         },
     ):
+        from transformers import CLIPProcessor
         self.processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
         self.kwargs = tokenizer_kwargs
 

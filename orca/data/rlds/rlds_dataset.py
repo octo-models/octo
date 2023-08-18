@@ -8,8 +8,8 @@ import tensorflow as tf
 import tensorflow_datasets as tfds
 import tqdm
 
-from orca.data.bridge_dataset import BridgeDataset
-from orca.data.rlds_data_utils import RLDS_TRAJECTORY_MAP_TRANSFORMS
+from orca.data.dataset import BaseDataset
+from orca.data.rlds.rlds_dataset_transforms import RLDS_TRAJECTORY_MAP_TRANSFORMS
 
 
 def _get_splits(tfds_dataset_splits):
@@ -21,8 +21,8 @@ def _get_splits(tfds_dataset_splits):
         return {"train": "train[:95%]", "val": "train[95%:]"}
 
 
-class RLDSDataset(BridgeDataset):
-    """TF dataset that reads RLDS datasets.
+class RLDSDataset(BaseDataset):
+    """Fast parallel tf.data.Dataset-based dataloader for RLDS datasets.
 
     Args:
         image_obs_key: Key used to extract image from raw dataset observation.
@@ -40,13 +40,9 @@ class RLDSDataset(BridgeDataset):
         self._tfds_data_dir = tfds_data_dir
         super().__init__(*args, **kwargs)
 
-    def _construct_base_dataset(self, paths: List[str], seed: int) -> tf.data.Dataset:
-        # can only load single dataset
-        assert len(paths) == 1
-
+    def _construct_base_dataset(self, dataset_name: str, seed: int) -> tf.data.Dataset:
         # load raw dataset of trajectories
         # skips decoding to get list of episode steps instead of RLDS default of steps as a tf.dataset
-        dataset_name = paths[0]
         builder = tfds.builder(dataset_name)
         dataset = builder.as_dataset(
             split=_get_splits(builder.info.splits)["train" if self.is_train else "val"],
@@ -99,6 +95,7 @@ class RLDSDataset(BridgeDataset):
                     "image": padded_img[1:],
                     "proprio": padded_state[1:],
                 },
+                **({"language": trajectory["language_instruction"]} if self.load_language else {}),
                 "actions": trajectory["action"],
                 "terminals": trajectory["is_terminal"],
                 "truncates": tf.math.logical_and(
@@ -118,51 +115,67 @@ class RLDSDataset(BridgeDataset):
             _to_transition_trajectories, num_parallel_calls=tf.data.AUTOTUNE
         )
 
-        # load or compute metadata
-        self.action_metadata = self._get_action_stats(builder, dataset)
+        # load or compute action metadata for normalization
+        self.action_proprio_metadata = self._get_action_proprio_stats(builder, dataset)
 
         return dataset
 
     @staticmethod
-    def _get_action_stats(dataset_builder, dataset):
+    def _get_action_proprio_stats(dataset_builder, dataset):
         # get statistics file path --> embed unique hash that catches if dataset info changed
         data_info_hash = hashlib.sha256(
             str(dataset_builder.info).encode("utf-8")
         ).hexdigest()
         path = os.path.join(
-            dataset_builder.info.data_dir, f"action_stats_{data_info_hash}.json"
+            dataset_builder.info.data_dir, f"action_proprio_stats_{data_info_hash}.json"
         )
 
         # check if stats already exist and load, otherwise compute
         if os.path.exists(path):
-            print(f"Loading existing action statistics for normalization from {path}.")
+            print(f"Loading existing statistics for normalization from {path}.")
             with open(path, "r") as F:
                 return json.load(F)
         else:
-            print("Computing action statistics for normalization...")
+            print("Computing action/proprio statistics for normalization...")
             actions = []
-            for episode in tqdm.tqdm(dataset.take(5000)):
+            proprios = []
+            for episode in tqdm.tqdm(dataset.take(100)):
                 actions.append(episode["actions"].numpy())
+                proprios.append(episode["observations"]["proprio"].numpy())
             actions = np.concatenate(actions)
-            action_metadata = {
-                "mean": [float(e) for e in actions.mean(0)],
-                "std": [float(e) for e in actions.std(0)],
+            proprios = np.concatenate(proprios)
+            action_proprio_metadata = {
+                "action": {
+                    "mean": [float(e) for e in actions.mean(0)],
+                    "std": [float(e) for e in actions.std(0)],
+                    "max": [float(e) for e in actions.max(0)],
+                    "min": [float(e) for e in actions.min(0)],
+                },
+                "proprio": {
+                    "mean": [float(e) for e in proprios.mean(0)],
+                    "std": [float(e) for e in proprios.std(0)],
+                    "max": [float(e) for e in proprios.max(0)],
+                    "min": [float(e) for e in proprios.min(0)],
+                }
             }
             del actions
+            del proprios
             with open(path, "w") as F:
-                json.dump(action_metadata, F)
+                json.dump(action_proprio_metadata, F)
             print("Done!")
-            return action_metadata
+            return action_proprio_metadata
 
 
 if __name__ == "__main__":
     ds = RLDSDataset(
-        data_paths=[
-            ["stanford_kuka_multimodal_dataset"],
-            ["stanford_kuka_multimodal_dataset"],
+        dataset_names=[
+            "stanford_kuka_multimodal_dataset",
+            "stanford_kuka_multimodal_dataset",
         ],
         seed=0,
         goal_relabeling_kwargs={"reached_proportion": 0.1},
+        act_pred_horizon=5,
+        obs_horizon=2
     )
     sample = next(ds.get_iterator())
     print(sample["observations"]["image"].shape)
