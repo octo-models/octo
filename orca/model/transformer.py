@@ -58,9 +58,7 @@ class MlpBlock(nn.Module):
             dtype=self.dtype,
             kernel_init=self.kernel_init,
             bias_init=self.bias_init,
-        )(  # pytype: disable=wrong-arg-types
-            inputs
-        )
+        )(inputs)
         x = nn.gelu(x)
         x = nn.Dropout(rate=self.dropout_rate)(x, deterministic=deterministic)
         output = nn.Dense(
@@ -68,9 +66,7 @@ class MlpBlock(nn.Module):
             dtype=self.dtype,
             kernel_init=self.kernel_init,
             bias_init=self.bias_init,
-        )(  # pytype: disable=wrong-arg-types
-            x
-        )
+        )(x)
         output = nn.Dropout(rate=self.dropout_rate)(output, deterministic=deterministic)
         return output
 
