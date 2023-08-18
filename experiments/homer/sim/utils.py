@@ -15,6 +15,8 @@ from orca.envs.wrappers.mujoco import GCMujocoWrapper
 from orca.envs.wrappers.norm import UnnormalizeActionProprio
 from orca.envs.wrappers.roboverse import GCRoboverseWrapper
 from orca.envs.wrappers.video_recorder import VideoRecorder
+import wandb
+import imageio
 
 
 def wrap_mujoco_gc_env(
@@ -174,3 +176,21 @@ def load_tf_dataset(data_path):
     dataset = dataset.map(_decode_example, num_parallel_calls=tf.data.AUTOTUNE)
 
     return dataset
+
+def load_recorded_video(
+    video_path: str,
+):
+    with tf.io.gfile.GFile(video_path, "rb") as f:
+        video = np.array(imageio.mimread(f, "MP4")).transpose((0, 3, 1, 2))
+        assert video.shape[1] == 3, "Numpy array should be (T, C, H, W)"
+
+    return wandb.Video(video, fps=20)
+
+def list_of_dicts_to_dict_of_lists(list_of_dicts):
+    dict_of_lists = {}
+    for dictionary in list_of_dicts:
+        for key, value in dictionary.items():
+            if key not in dict_of_lists:
+                dict_of_lists[key] = []
+            dict_of_lists[key].append(value)
+    return dict_of_lists

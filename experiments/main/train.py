@@ -21,7 +21,6 @@ from orca.model import create_model_def
 from orca.model.tokenizers import weights_loaders
 from orca.train_utils import (
     Timer,
-    TrainState,
     create_train_state,
     format_name_with_config,
     initialize_compilation_cache,
