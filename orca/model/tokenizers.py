@@ -7,31 +7,10 @@ import jax.numpy as jnp
 from jax.scipy.stats import norm
 
 from orca.model.clip import CLIPTextTokenizer, CLIPVisionTokenizer, clip_weights_loader
+from orca.model.transformer import MlpBlock
 from orca.model.vision import encoders
 
 EPS = 1e-6
-
-
-# Originally from jaxrl_m/networks/mlp.py
-class MLP(nn.Module):
-    hidden_dims: Sequence[int]
-    activations: Callable[[jnp.ndarray], jnp.ndarray] = nn.swish
-    activate_final: bool = False
-    use_layer_norm: bool = False
-    dropout_rate: Optional[float] = None
-    kernel_init: Callable = nn.initializers.xavier_uniform
-
-    @nn.compact
-    def __call__(self, x: jnp.ndarray, train: bool = False) -> jnp.ndarray:
-        for i, size in enumerate(self.hidden_dims):
-            x = nn.Dense(size, kernel_init=self.kernel_init())(x)
-            if i + 1 < len(self.hidden_dims) or self.activate_final:
-                if self.dropout_rate is not None and self.dropout_rate > 0:
-                    x = nn.Dropout(rate=self.dropout_rate)(x, deterministic=not train)
-                if self.use_layer_norm:
-                    x = nn.LayerNorm()(x)
-                x = self.activations(x)
-        return x
 
 
 # adapted from https://github.com/google-research/robotics_transformer/blob/master/tokenizers/token_learner.py
@@ -45,8 +24,11 @@ class TokenLearner(nn.Module):
         if len(inputs.shape) == 4:
             inputs = inputs.reshape(inputs.shape[0], -1, inputs.shape[-1])
         x = nn.LayerNorm()(inputs)
-        x = MLP([self.bottleneck_dim, self.num_tokens], dropout_rate=self.dropout_rate)
-        x = nn.Dropout(rate=self.dropout_rate)(x, deterministic=not train)
+        x = MlpBlock(
+            mlp_dim=self.bottleneck_dim,
+            out_dim=self.num_tokens,
+            dropout_rate=self.dropout_rate,
+        )(x, train=train)
         x = jnp.transpose(x, (0, 2, 1))  # (batch, num_tokens, h*w)
         x = nn.softmax(x, axis=-1)
         return jnp.einsum("bna,baf->bnf", x, inputs)
