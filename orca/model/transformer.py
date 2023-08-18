@@ -1,90 +1,181 @@
-# adapted from https://github.com/google-research/robotics_transformer/blob/master/transformer.py
+# adapted from https://github.com/google-research/vision_transformer/blob/main/vit_jax/models_vit.py
+from typing import Callable, Optional
+
 import flax.linen as nn
 import jax.numpy as jnp
 
+from orca.typing import Array, Dtype, PRNGKey, Shape
 
-class TransformerLayer(nn.Module):
-    layer_size: int = 4096
-    num_heads: int = 8
-    feed_forward_size: int = 512
-    dropout_rate: float = 0.1
+
+class AddPositionEmbs(nn.Module):
+    """Adds learned positional embeddings to the inputs.
+
+    Attributes:
+      posemb_init: positional embedding initializer.
+    """
+
+    posemb_init: Callable[[PRNGKey, Shape, Dtype], Array]
 
     @nn.compact
-    def __call__(self, x, attention_mask, train: bool):
-        """Calls the layer.
+    def __call__(self, inputs):
+        """Applies the AddPositionEmbs module.
 
         Args:
-        x: Input Tensor of shape `(B, T, dim)`.
-        attention_mask: a boolean mask of shape `(B, T, T)`, that prevents
-            attention to certain positions. The boolean mask specifies which query
-            elements can attend to which key elements, 1 indicates attention and 0
-            indicates no attention. Broadcasting can happen for the missing batch
-            dimensions and the head dimension.
-        train: Python boolean indicating whether the layer should behave in
-            train mode (adding dropout) or in inference mode (no dropout).
+          inputs: Inputs to the layer.
 
         Returns:
-        y: Output Tensor of shape `(B, T, dim)`. Also return the attention scores
-        of shape `(B, T, dim)` or None.
+          Output tensor with shape `(bs, timesteps, in_dim)`.
         """
-        x1 = nn.LayerNorm(epsilon=1e-6)(x)
-        x1 = nn.MultiHeadDotProductAttention(
-            qkv_features=self.layer_size,
+        # inputs.shape is (batch_size, seq_len, emb_dim).
+        assert inputs.ndim == 3, (
+            "Number of dimensions should be 3," " but it is: %d" % inputs.ndim
+        )
+        pos_emb_shape = (1, inputs.shape[1], inputs.shape[2])
+        pe = self.param("pos_embedding", self.posemb_init, pos_emb_shape)
+        return inputs + pe
+
+
+class MlpBlock(nn.Module):
+    """Transformer MLP / feed-forward block."""
+
+    mlp_dim: int
+    dtype: Dtype = jnp.float32
+    out_dim: Optional[int] = None
+    dropout_rate: float = 0.1
+    kernel_init: Callable[
+        [PRNGKey, Shape, Dtype], Array
+    ] = nn.initializers.xavier_uniform()
+    bias_init: Callable[[PRNGKey, Shape, Dtype], Array] = nn.initializers.normal(
+        stddev=1e-6
+    )
+
+    @nn.compact
+    def __call__(self, inputs, *, deterministic):
+        """Applies Transformer MlpBlock module."""
+        actual_out_dim = inputs.shape[-1] if self.out_dim is None else self.out_dim
+        x = nn.Dense(
+            features=self.mlp_dim,
+            dtype=self.dtype,
+            kernel_init=self.kernel_init,
+            bias_init=self.bias_init,
+        )(  # pytype: disable=wrong-arg-types
+            inputs
+        )
+        x = nn.gelu(x)
+        x = nn.Dropout(rate=self.dropout_rate)(x, deterministic=deterministic)
+        output = nn.Dense(
+            features=actual_out_dim,
+            dtype=self.dtype,
+            kernel_init=self.kernel_init,
+            bias_init=self.bias_init,
+        )(  # pytype: disable=wrong-arg-types
+            x
+        )
+        output = nn.Dropout(rate=self.dropout_rate)(output, deterministic=deterministic)
+        return output
+
+
+class Encoder1DBlock(nn.Module):
+    """Transformer encoder layer.
+
+    Attributes:
+      inputs: input data.
+      mlp_dim: dimension of the mlp on top of attention block.
+      dtype: the dtype of the computation (default: float32).
+      dropout_rate: dropout rate.
+      attention_dropout_rate: dropout for attention heads.
+      deterministic: bool, deterministic or not (to apply dropout).
+      num_heads: Number of heads in nn.MultiHeadDotProductAttention
+    """
+
+    mlp_dim: int
+    num_heads: int
+    dtype: Dtype = jnp.float32
+    dropout_rate: float = 0.1
+    attention_dropout_rate: float = 0.1
+
+    @nn.compact
+    def __call__(self, inputs, attention_mask, *, deterministic):
+        """Applies Encoder1DBlock module.
+
+        Args:
+          inputs: Inputs to the layer.
+          deterministic: Dropout will not be applied when set to true.
+
+        Returns:
+          output after transformer encoder block.
+        """
+
+        # Attention block.
+        assert inputs.ndim == 3, f"Expected (batch, seq, hidden) got {inputs.shape}"
+        x = nn.LayerNorm(dtype=self.dtype)(inputs)
+        x = nn.MultiHeadDotProductAttention(
+            dtype=self.dtype,
+            kernel_init=nn.initializers.xavier_uniform(),
+            broadcast_dropout=False,
+            deterministic=deterministic,
+            dropout_rate=self.attention_dropout_rate,
             num_heads=self.num_heads,
-            dropout_rate=self.dropout_rate,
-        )(x1, x1, attention_mask, deterministic=not train)
-        x = x + x1
-        y = nn.LayerNorm(epsilon=1e-6)(x)
-        ff_y = nn.Dense(features=self.feed_forward_size)(y)
-        ff_y = nn.Dropout(rate=self.dropout_rate)(ff_y, deterministic=not train)
-        x = x + ff_y
-        return x
+        )(x, x, attention_mask)
+        x = nn.Dropout(rate=self.dropout_rate)(x, deterministic=deterministic)
+        x = x + inputs
+
+        # MLP block.
+        y = nn.LayerNorm(dtype=self.dtype)(x)
+        y = MlpBlock(
+            mlp_dim=self.mlp_dim, dtype=self.dtype, dropout_rate=self.dropout_rate
+        )(y, deterministic=deterministic)
+
+        return x + y
 
 
 class Transformer(nn.Module):
-    num_layers: int = 1
-    layer_size: int = 4096
-    num_heads: int = 8
-    feed_forward_size: int = 512
+    """Transformer Model Encoder for sequence to sequence translation.
+
+    Attributes:
+      num_layers: number of layers
+      mlp_dim: dimension of the mlp on top of attention block
+      num_heads: Number of heads in nn.MultiHeadDotProductAttention
+      dropout_rate: dropout rate.
+      attention_dropout_rate: dropout rate in self attention.
+    """
+
+    num_layers: int
+    mlp_dim: int
+    num_heads: int
     dropout_rate: float = 0.1
-    vocab_size: int = 256
+    attention_dropout_rate: float = 0.1
+    add_position_embedding: bool = True
 
     @nn.compact
-    def __call__(self, x, attention_mask, train: bool):
-        """Calls the layer.
+    def __call__(self, x, attention_mask, *, train):
+        """Applies Transformer model on the inputs.
 
         Args:
-        x: Input Tensor of shape `(B, T, dim)`.
-        train: Python boolean indicating whether the layer should behave in
-            train mode (adding dropout) or in inference mode (no dropout).
-        attention_mask: a boolean mask of shape `(B, T, T)`, that prevents
-            attention to certain positions. The boolean mask specifies which query
-            elements can attend to which key elements, 1 indicates attention and 0
-            indicates no attention. Broadcasting can happen for the missing batch
-            dimensions and the head dimension.
+          x: Inputs to the layer.
+          train: Set to `True` when training.
 
         Returns:
-        x: Output Tensor of shape `(B, T, vocab_size)`. If
-        `return_attention_scores`, also return attention scores of
-        a list of `layer` of elements with shape `(B, T, dim)`.
+          output of a transformer encoder.
         """
+        assert x.ndim == 3  # (batch, len, emb)
 
-        seq_len = x.shape[1]
-        batch_size = x.shape[0]
+        if self.add_position_embedding:
+            x = AddPositionEmbs(
+                posemb_init=nn.initializers.normal(stddev=0.02),  # from BERT.
+                name="posembed_input",
+            )(x)
+            x = nn.Dropout(rate=self.dropout_rate)(x, deterministic=not train)
 
-        positions = jnp.eye(seq_len)[jnp.newaxis, :, :]
-        positions = jnp.repeat(positions, batch_size, axis=0)
+        # Input Encoder
+        for lyr in range(self.num_layers):
+            x = Encoder1DBlock(
+                mlp_dim=self.mlp_dim,
+                dropout_rate=self.dropout_rate,
+                attention_dropout_rate=self.attention_dropout_rate,
+                name=f"encoderblock_{lyr}",
+                num_heads=self.num_heads,
+            )(x, attention_mask, deterministic=not train)
+        encoded = nn.LayerNorm(name="encoder_norm")(x)
 
-        x = nn.Dense(self.feed_forward_size, name="token_emb")(x)
-        x = x + nn.Dense(self.feed_forward_size, name="pos_emb")(positions)
-
-        for i in range(self.num_layers):
-            x = TransformerLayer(
-                self.layer_size,
-                self.num_heads,
-                self.feed_forward_size,
-                self.dropout_rate,
-            )(x, attention_mask, train=train)
-
-        x = nn.Dense(self.vocab_size)(x)
-        return x
+        return encoded
