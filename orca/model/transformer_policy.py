@@ -18,10 +18,9 @@ class TransformerPolicy(nn.Module):
     task_tokenizers: Sequence[nn.Module]
     vocab_size: int = 256
     token_embedding_size: int = 512
-    num_layers: int = 1
-    layer_size: int = 4096
+    num_layers: int = 4
+    mlp_dim: int = 1024
     num_heads: int = 8
-    feed_forward_size: int = 512
     dropout_rate: float = 0.1
     time_sequence_length: int = 1
     action_dim: int = 7
@@ -30,11 +29,9 @@ class TransformerPolicy(nn.Module):
     def setup(self):
         self.transformer = Transformer(
             num_layers=self.num_layers,
-            layer_size=self.layer_size,
+            mlp_dim=self.mlp_dim,
             num_heads=self.num_heads,
-            feed_forward_size=self.feed_forward_size,
             dropout_rate=self.dropout_rate,
-            vocab_size=self.vocab_size,
         )
 
         self.action_tokenizer = ActionTokenizer(
@@ -47,6 +44,7 @@ class TransformerPolicy(nn.Module):
         self.tokens_per_obs = sum(tok.num_tokens for tok in self.observation_tokenizers)
         self.tokens_per_task = sum(tok.num_tokens for tok in self.task_tokenizers)
         self.attention_mask = self.generate_masks()
+        self.vocab_proj = nn.Dense(self.vocab_size)
 
     def __call__(
         self,
@@ -97,6 +95,7 @@ class TransformerPolicy(nn.Module):
         output = self.transformer(
             input_tokens, attention_mask=attention_mask, train=train
         )
+        output = self.vocab_proj(output)
         # remove output corresponding to task
         output = output[:, self.tokens_per_task :]
 
