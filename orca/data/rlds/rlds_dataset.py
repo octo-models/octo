@@ -172,7 +172,7 @@ class RLDSDataset(BaseDataset):
 if __name__ == "__main__":
     from collections import MutableMapping
     ds = RLDSDataset(
-        dataset_names="r2_d2",
+        dataset_names="r2_d2_pen",
         image_obs_key="exterior_image_1_left",
         state_obs_key="joint_position",
         tfds_data_dir="/nfs/kun2/datasets/r2d2/tfds",
