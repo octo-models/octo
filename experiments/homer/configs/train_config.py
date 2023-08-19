@@ -87,10 +87,9 @@ def get_config(config_string):
     base_model_config = dict(
         policy_kwargs=dict(
             num_layers=4,
-            layer_size=1024,
+            mlp_dim=1024,
             vocab_size=256,
             num_heads=8,
-            feed_forward_size=512,
             dropout_rate=0.1,
             normalization_type=normalization_type,
         ),
