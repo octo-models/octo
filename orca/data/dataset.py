@@ -53,8 +53,8 @@ class BaseDataset:
         self,
         dataset_names: Union[str, List[str], List[List[str]]],
         seed: int,
-        normalization_type: Optional[str] = "normal",
-        goal_relabeling_strategy: str = "uniform",
+        normalization_type: Optional[str] = None,
+        goal_relabeling_strategy: Optional[str] = None,
         goal_relabeling_kwargs: dict = {},
         sample_weights: Optional[List[float]] = None,
         batch_size: int = 256,
@@ -77,6 +77,8 @@ class BaseDataset:
         **kwargs,
     ):
         logging.warning("Extra kwargs passed to Dataset: %s", kwargs)
+        if isinstance(dataset_names, str):
+            dataset_names = [dataset_names]
         if sample_weights is None:
             # default to uniform distribution over sub-lists
             sample_weights = [1 / len(dataset_names)] * len(dataset_names)
@@ -100,8 +102,6 @@ class BaseDataset:
         self.image_shape = image_shape
 
         # construct datasets
-        if isinstance(dataset_names, str):
-            dataset_names = [dataset_names]
         datasets = []
         for dataset_name in dataset_names:
             datasets.append(self._construct_tf_dataset(dataset_name, seed))
@@ -156,7 +156,8 @@ class BaseDataset:
         dataset = self._construct_base_dataset(dataset_name, seed)
 
         # maybe apply action & proprio normalization
-        dataset = dataset.map(self._normalize_action_proprio, num_parallel_calls=tf.data.AUTOTUNE)
+        if self.normalization_type is not None:
+            dataset = dataset.map(self._normalize_action_proprio, num_parallel_calls=tf.data.AUTOTUNE)
 
         # maybe chunks into snippets
         dataset = dataset.map(self._chunk_act_obs, num_parallel_calls=tf.data.AUTOTUNE)
@@ -166,7 +167,8 @@ class BaseDataset:
             dataset = dataset.cache()
 
         # yields trajectories
-        dataset = dataset.map(self._add_goals, num_parallel_calls=tf.data.AUTOTUNE)
+        if self.goal_relabeling_strategy is not None:
+            dataset = dataset.map(self._add_goals, num_parallel_calls=tf.data.AUTOTUNE)
 
         # unbatch to yield individual transitions
         dataset = dataset.unbatch()
@@ -278,9 +280,10 @@ class BaseDataset:
         for key, sub_seed in zip(
             ["observations", "next_observations", "goals"], sub_seeds
         ):
-            image[key]["image"] = augment(
-                image[key]["image"], sub_seed, **self.augment_kwargs
-            )
+            if key in image:
+                image[key]["image"] = augment(
+                    image[key]["image"], sub_seed, **self.augment_kwargs
+                )
         return image
 
     def _process_image(self, image):
@@ -305,7 +308,8 @@ class BaseDataset:
 
     def _process_image_fields(self, batch):
         for key in ["observations", "next_observations", "goals"]:
-            batch[key]["image"] = self._process_image(batch[key]["image"])
+            if key in batch:
+                batch[key]["image"] = self._process_image(batch[key]["image"])
         return batch
 
     def _process_strings(self, strings):
