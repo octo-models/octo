@@ -33,10 +33,12 @@ class RLDSDataset(BaseDataset):
         self,
         *args,
         image_obs_key: str = "image",
+        state_obs_key: str = "state",
         tfds_data_dir: Optional[str] = None,
         **kwargs,
     ):
         self._image_obs_key = image_obs_key
+        self._state_obs_key = state_obs_key
         self._tfds_data_dir = tfds_data_dir
         super().__init__(*args, **kwargs)
 
@@ -58,12 +60,13 @@ class RLDSDataset(BaseDataset):
                     # only decode parts of observation we need for improved data loading speed
                     steps["observation"]["image"] = builder.info.features["steps"][
                         "observation"
-                    ]["image"].decode_batch_example(
+                    ][self._image_obs_key].decode_batch_example(
                         steps["observation"][self._image_obs_key]
                     )
                     steps["observation"]["state"] = builder.info.features["steps"][
                         "observation"
-                    ]["state"].decode_batch_example(steps["observation"]["state"])
+                    ][self._state_obs_key].decode_batch_example(
+                        steps["observation"][self._state_obs_key])
                 else:
                     steps[key] = builder.info.features["steps"][
                         key
