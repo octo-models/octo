@@ -45,7 +45,7 @@ class RLDSDataset(BaseDataset):
     def _construct_base_dataset(self, dataset_name: str, seed: int) -> tf.data.Dataset:
         # load raw dataset of trajectories
         # skips decoding to get list of episode steps instead of RLDS default of steps as a tf.dataset
-        builder = tfds.builder(dataset_name)
+        builder = tfds.builder(dataset_name, data_dir=self._tfds_data_dir)
         dataset = builder.as_dataset(
             split=_get_splits(builder.info.splits)["train" if self.is_train else "val"],
             decoders={"steps": tfds.decode.SkipDecoding()},
@@ -142,7 +142,7 @@ class RLDSDataset(BaseDataset):
             print("Computing action/proprio statistics for normalization...")
             actions = []
             proprios = []
-            for episode in tqdm.tqdm(dataset.take(100)):
+            for episode in tqdm.tqdm(dataset.take(1000)):
                 actions.append(episode["actions"].numpy())
                 proprios.append(episode["observations"]["proprio"].numpy())
             actions = np.concatenate(actions)
@@ -170,15 +170,16 @@ class RLDSDataset(BaseDataset):
 
 
 if __name__ == "__main__":
+    from collections import MutableMapping
     ds = RLDSDataset(
-        dataset_names=[
-            "stanford_kuka_multimodal_dataset",
-            "stanford_kuka_multimodal_dataset",
-        ],
+        dataset_names="r2_d2",
+        image_obs_key="exterior_image_1_left",
+        state_obs_key="joint_position",
+        tfds_data_dir="/nfs/kun2/datasets/r2d2/tfds",
+        shuffle_buffer_size=100,
         seed=0,
-        goal_relabeling_kwargs={"reached_proportion": 0.1},
         act_pred_horizon=5,
         obs_horizon=2
     )
     sample = next(ds.get_iterator())
-    print(sample["observations"]["image"].shape)
+    print(sample)

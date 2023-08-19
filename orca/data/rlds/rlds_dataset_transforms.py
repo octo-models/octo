@@ -36,5 +36,5 @@ def r2_d2_dataset_transform(
 
 RLDS_TRAJECTORY_MAP_TRANSFORMS = {
     "stanford_kuka_multimodal_dataset": stanford_kuka_multimodal_dataset_transform,
-    "r2_d2_dataset": r2_d2_dataset_transform,
+    "r2_d2": r2_d2_dataset_transform,
 }
