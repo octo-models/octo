@@ -115,9 +115,6 @@ def main(_):
     obs_horizon = FLAGS.config.get("obs_horizon")
     act_exec_horizon = FLAGS.config.get("act_exec_horizon")
     normalization_type = FLAGS.config.get("normalization_type", "normal")
-    text_processor = text_processors[FLAGS.config.text_processor](
-        **FLAGS.config.text_processor_kwargs
-    )
 
     # create sim environment
     eval_env = make_mujoco_gc_env(
@@ -237,6 +234,22 @@ def main(_):
         loss, info = loss_fn(state.params, state, batch, state.rng, train=False)
         return info
 
+    @partial(jax.jit, static_argnames="argmax")
+    def sample_actions(observations, goals, state, rng, argmax=False, temperature=1.0):
+        observations = jax.tree_map(lambda x: x[None], observations)
+        goals = jax.tree_map(lambda x: x[None], goals)
+        actions = state.apply_fn(
+            {"params": state.params},
+            observations,
+            goals,
+            train=False,
+            argmax=argmax,
+            rng=rng,
+            temperature=temperature,
+            method="predict_action",
+        )
+        return actions[0]
+
     def wandb_log(info, step):
         wandb.log(flatten_dict(info, sep="/"), step=step)
 
@@ -268,7 +281,7 @@ def main(_):
 
             rng, policy_key = jax.random.split(rng)
             policy_fn = supply_rng(
-                partial(agent.sample_actions, argmax=FLAGS.config.deterministic_eval),
+                partial(sample_actions, state=train_state, argmax=FLAGS.config.deterministic_eval),
                 rng=policy_key,
             )
 
@@ -284,10 +297,10 @@ def main(_):
                 num_episodes=FLAGS.config.eval_episodes,
                 return_trajectories=False,
             )
-            wandb_logger.log({f"evaluation": eval_info}, step=i)
+            wandb_log({f"evaluation": eval_info}, step=i)
             if FLAGS.config.save_video:
                 eval_video = load_recorded_video(video_path=eval_env.current_save_path)
-                wandb_logger.log({"evaluation/video": eval_video}, step=i)
+                wandb_log({"evaluation/video": eval_video}, step=i)
             timer.tock("evaluation")
 
         if (i + 1) % FLAGS.config.save_interval == 0 and save_dir is not None:

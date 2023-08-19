@@ -87,10 +87,9 @@ def get_config(config_string):
     base_model_config = dict(
         policy_kwargs=dict(
             num_layers=4,
-            layer_size=1024,
+            mlp_dim=1024,
             vocab_size=256,
             num_heads=8,
-            feed_forward_size=512,
             dropout_rate=0.1,
             normalization_type=normalization_type,
         ),
@@ -101,11 +100,12 @@ def get_config(config_string):
             dict(
                 agent="transformer_bc",
                 obs_horizon=1,
-                agent_kwargs=base_model_config,
-                observation_tokenizers=["sim-obs-tokenizer"],
-                observation_tokenizer_kwargs={"sim-obs-tokenizer": {}},
-                task_tokenizers=["sim-goal-obs-tokenizer"],
-                task_tokenizer_kwargs={"sim-goal-obs-tokenizer": {}},
+                model=update_config(
+                    base_model_config,
+                    observation_tokenizer_kwargs={"sim-obs-tokenizer": {}},
+                    task_tokenizer_kwargs={"sim-goal-obs-tokenizer": {}},
+                ),
+                optimizer=base_optimizer_config,
                 dataset_kwargs=base_data_config,
                 **base_sim_config,
             )
@@ -116,9 +116,7 @@ def get_config(config_string):
                 obs_horizon=1,
                 model=update_config(
                     base_model_config,
-                    observation_tokenizers=["obs-tokenizer"],
                     observation_tokenizer_kwargs={"obs-tokenizer": {}},
-                    task_tokenizers=["goal-obs-tokenizer"],
                     task_tokenizer_kwargs={"goal-obs-tokenizer": {}},
                 ),
                 optimizer=base_optimizer_config,
@@ -132,11 +130,9 @@ def get_config(config_string):
                 obs_horizon=1,
                 model=update_config(
                     base_model_config,
-                    observation_tokenizers=["obs-film-language-tokenizer"],
                     observation_tokenizer_kwargs={
                         "obs-film-language-tokenizer": {"num_tokens": 64}
                     },
-                    task_tokenizers=[],
                     task_tokenizer_kwargs={},
                 ),
                 optimizer=base_optimizer_config,
@@ -150,9 +146,7 @@ def get_config(config_string):
                 obs_horizon=1,
                 model=update_config(
                     base_model_config,
-                    observation_tokenizers=["obs-tokenizer"],
                     observation_tokenizer_kwargs={"obs-tokenizer": {"num_tokens": 64}},
-                    task_tokenizers=["language-tokenizer"],
                     task_tokenizer_kwargs={"language-tokenizer": {"num_tokens": 16}},
                 ),
                 optimizer=base_optimizer_config,
@@ -166,9 +160,7 @@ def get_config(config_string):
                 obs_horizon=1,
                 model=update_config(
                     base_model_config,
-                    observation_tokenizers=["obs-tokenizer"],
                     observation_tokenizer_kwargs={"obs-tokenizer": {"num_tokens": 64}},
-                    task_tokenizers=["clip-text-tokenizer"],
                     task_tokenizer_kwargs={"clip-text-tokenizer": {"num_tokens": 64}},
                 ),
                 optimizer=base_optimizer_config,
@@ -186,11 +178,9 @@ def get_config(config_string):
                 obs_horizon=1,
                 model=update_config(
                     base_model_config,
-                    observation_tokenizers=["clip-obs-tokenizer"],
                     observation_tokenizer_kwargs={
                         "clip-obs-tokenizer": {"num_tokens": 50}
                     },
-                    task_tokenizers=["clip-text-tokenizer"],
                     task_tokenizer_kwargs={"clip-text-tokenizer": {"num_tokens": 64}},
                 ),
                 optimizer=base_optimizer_config,

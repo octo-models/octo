@@ -5,14 +5,12 @@ folder as the dataset. Takes an argument to specify which info key to use as
 the success condition.
 """
 
-import string
-
 import jax
 import numpy as np
 import tensorflow as tf
 from absl import app, flags, logging
 
-from orca.utils.sim_utils import load_tf_dataset
+from utils import load_tf_dataset
 
 FLAGS = flags.FLAGS
 flags.DEFINE_string("data_path", None, "Location of dataset", required=True)

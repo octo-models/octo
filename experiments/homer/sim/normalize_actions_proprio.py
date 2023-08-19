@@ -10,7 +10,7 @@ from absl import app, flags
 from tqdm import tqdm
 from collections import defaultdict
 
-from orca.utils.sim_utils import load_tf_dataset
+from utils import load_tf_dataset
 
 FLAGS = flags.FLAGS
 flags.DEFINE_string("data_path", None, "Location of dataset", required=True)
