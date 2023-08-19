@@ -3,18 +3,13 @@ from typing import Callable, Union
 import gym
 import numpy as np
 
-try:
-    import roboverse
-except ImportError:
-    pass
 import mujoco_manipulation
 import tensorflow as tf
-from orca.envs.wrappers.chunking import ActionChunkingWrapper, ObsHistoryWrapper
-from orca.envs.wrappers.dmcgym import DMCGYM
-from orca.envs.wrappers.mujoco import GCMujocoWrapper
-from orca.envs.wrappers.norm import UnnormalizeActionProprio
-from orca.envs.wrappers.roboverse import GCRoboverseWrapper
-from orca.envs.wrappers.video_recorder import VideoRecorder
+from wrappers.chunking import ActionChunkingWrapper, ObsHistoryWrapper
+from wrappers.dmcgym import DMCGYM
+from wrappers.mujoco import GCMujocoWrapper
+from wrappers.norm import UnnormalizeActionProprio
+from wrappers.video_recorder import VideoRecorder
 import wandb
 import imageio
 
@@ -73,44 +68,6 @@ def make_mujoco_gc_env(
     env.reset()
 
     return env
-
-
-def wrap_roboverse_gc_env(
-    env: gym.Env,
-    max_episode_steps: int,
-    action_metadata: dict,
-    goal_sampler: Union[np.ndarray, Callable],
-):
-    env = GCRoboverseWrapper(env, goal_sampler)
-    env = UnnormalizeAction(env, action_metadata)
-    env = gym.wrappers.TimeLimit(env, max_episode_steps=max_episode_steps)
-    return env
-
-
-def make_roboverse_gc_env(
-    env_name: str,
-    max_episode_steps: int,
-    action_metadata: dict,
-    save_video: bool,
-    save_video_dir: str,
-    save_video_prefix: str,
-    goals: Union[np.ndarray, Callable],
-):
-    env = roboverse.make(env_name, transpose_image=False)
-    env = wrap_roboverse_gc_env(env, max_episode_steps, action_metadata, goals)
-
-    if save_video:
-        env = VideoRecorder(
-            env,
-            save_folder=save_video_dir,
-            save_prefix=save_video_prefix,
-            goal_conditioned=True,
-        )
-
-    env.reset()
-
-    return env
-
 
 PROTO_TYPE_SPEC = {
     "observations/images0": tf.uint8,
@@ -185,12 +142,3 @@ def load_recorded_video(
         assert video.shape[1] == 3, "Numpy array should be (T, C, H, W)"
 
     return wandb.Video(video, fps=20)
-
-def list_of_dicts_to_dict_of_lists(list_of_dicts):
-    dict_of_lists = {}
-    for dictionary in list_of_dicts:
-        for key, value in dictionary.items():
-            if key not in dict_of_lists:
-                dict_of_lists[key] = []
-            dict_of_lists[key].append(value)
-    return dict_of_lists
