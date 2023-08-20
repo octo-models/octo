@@ -66,7 +66,8 @@ class RLDSDataset(BaseDataset):
                     steps["observation"]["state"] = builder.info.features["steps"][
                         "observation"
                     ][self._state_obs_key].decode_batch_example(
-                        steps["observation"][self._state_obs_key])
+                        steps["observation"][self._state_obs_key]
+                    )
                 else:
                     steps[key] = builder.info.features["steps"][
                         key
@@ -98,7 +99,11 @@ class RLDSDataset(BaseDataset):
                     "image": padded_img[1:],
                     "proprio": padded_state[1:],
                 },
-                **({"language": trajectory["language_instruction"]} if self.load_language else {}),
+                **(
+                    {"language": trajectory["language_instruction"]}
+                    if self.load_language
+                    else {}
+                ),
                 "actions": trajectory["action"],
                 "terminals": trajectory["is_terminal"],
                 "truncates": tf.math.logical_and(
@@ -159,7 +164,7 @@ class RLDSDataset(BaseDataset):
                     "std": [float(e) for e in proprios.std(0)],
                     "max": [float(e) for e in proprios.max(0)],
                     "min": [float(e) for e in proprios.min(0)],
-                }
+                },
             }
             del actions
             del proprios
@@ -170,16 +175,39 @@ class RLDSDataset(BaseDataset):
 
 
 if __name__ == "__main__":
-    from collections import MutableMapping
+    base_data_config = dict(
+        shuffle_buffer_size=25000,
+        prefetch_num_batches=20,
+        augment=True,
+        augment_next_obs_goal_differently=False,
+        augment_kwargs=dict(
+            random_resized_crop=dict(scale=[0.8, 1.0], ratio=[0.9, 1.1]),
+            random_brightness=[0.2],
+            random_contrast=[0.8, 1.2],
+            random_saturation=[0.8, 1.2],
+            random_hue=[0.1],
+            augment_order=[
+                "random_resized_crop",
+                "random_brightness",
+                "random_contrast",
+                "random_saturation",
+                "random_hue",
+            ],
+        ),
+        goal_relabeling_strategy="uniform",
+        goal_relabeling_kwargs=dict(reached_proportion=0.0),
+        normalization_type="normal",
+    )
+
     ds = RLDSDataset(
         dataset_names="r2_d2_pen",
         image_obs_key="exterior_image_1_left",
         state_obs_key="joint_position",
-        tfds_data_dir="/nfs/kun2/datasets/r2d2/tfds",
-        shuffle_buffer_size=100,
+        tfds_data_dir="/nfs/kun2/datasets/r2d2/tfds/",
         seed=0,
-        act_pred_horizon=5,
-        obs_horizon=2
+        batch_size=4,
+        obs_horizon=1,
+        **base_data_config,
     )
     sample = next(ds.get_iterator())
     print(sample)

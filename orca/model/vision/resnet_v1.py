@@ -15,6 +15,7 @@ ModuleDef = Any
 
 
 class AddSpatialCoordinates(nn.Module):
+    # TODO (homer): make this work with non-square images
     dtype: Any = jnp.float32
 
     @nn.compact
