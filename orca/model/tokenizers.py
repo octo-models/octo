@@ -150,69 +150,27 @@ class ActionTokenizer(nn.Module):
 tokenizers = {
     "obs-tokenizer": ft.partial(
         ImageTokenizer,
-        encoder="resnetv1-34-bridge",
-        encoder_kwargs=dict(
-            pooling_method="none",
-            add_spatial_coordinates=True,
-            act="swish",
-        ),
         conditioning_type="none",
-        num_tokens=64,
     ),
     "sim-obs-tokenizer": ft.partial(
         ImageTokenizer,
-        encoder="resnetv1-18-bridge",
-        encoder_kwargs=dict(
-            pooling_method="none",
-            add_spatial_coordinates=True,
-            act="swish",
-        ),
         conditioning_type="none",
-        num_tokens=16,
     ),
     "goal-tokenizer": ft.partial(
         ImageTokenizer,
-        encoder="resnetv1-34-bridge",
-        encoder_kwargs=dict(
-            pooling_method="none",
-            add_spatial_coordinates=True,
-            act="swish",
-        ),
         conditioning_type="goal_image_no_obs",
-        num_tokens=64,
     ),
     "goal-obs-tokenizer": ft.partial(
         ImageTokenizer,
-        encoder="resnetv1-34-bridge",
-        encoder_kwargs=dict(
-            pooling_method="none",
-            add_spatial_coordinates=True,
-            act="swish",
-        ),
         conditioning_type="goal_image",
-        num_tokens=64,
     ),
     "sim-goal-obs-tokenizer": ft.partial(
         ImageTokenizer,
-        encoder="resnetv1-18-bridge",
-        encoder_kwargs=dict(
-            pooling_method="none",
-            add_spatial_coordinates=True,
-            act="swish",
-        ),
         conditioning_type="goal_image",
-        num_tokens=16,
     ),
     "obs-film-language-tokenizer": ft.partial(
         ImageTokenizer,
-        encoder="resnetv1-34-bridge-film",
-        encoder_kwargs=dict(
-            pooling_method="none",
-            add_spatial_coordinates=True,
-            act="swish",
-        ),
         conditioning_type="film_language",
-        num_tokens=64,
     ),
     "language-tokenizer": LanguageTokenizer,
     "clip-obs-tokenizer": ft.partial(

@@ -1,10 +1,20 @@
 from ml_collections import ConfigDict
 from ml_collections.config_dict import placeholder
+from copy import deepcopy
+
 
 def update_config(config, **kwargs):
+    new_config = deepcopy(config)
     for key, value in kwargs.items():
-        config[key] = value
-    return ConfigDict(config)
+        if key in config:
+            if isinstance(config[key], dict) or isinstance(config[key], ConfigDict):
+                new_config[key] = update_config(config[key], **value)
+            else:
+                new_config[key] = value
+        else:
+            new_config[key] = value
+    return ConfigDict(new_config)
+
 
 def get_config(config_string):
     base_wandb_config = dict(
@@ -95,6 +105,24 @@ def get_config(config_string):
         ),
     )
 
+    base_encoder_kwargs = dict(
+        encoder="resnetv1-34-bridge",
+        encoder_kwargs=dict(
+            pooling_method="none",
+            add_spatial_coordinates=True,
+            act="swish",
+        ),
+    )
+
+    base_sim_encoder_kwargs = dict(
+        encoder="resnetv1-18-bridge",
+        encoder_kwargs=dict(
+            pooling_method="none",
+            add_spatial_coordinates=True,
+            act="swish",
+        ),
+    )
+
     possible_structures = {
         "sim_transformer_bc": ConfigDict(
             dict(
@@ -102,8 +130,18 @@ def get_config(config_string):
                 obs_horizon=1,
                 model=update_config(
                     base_model_config,
-                    observation_tokenizer_kwargs={"sim-obs-tokenizer": {}},
-                    task_tokenizer_kwargs={"sim-goal-obs-tokenizer": {}},
+                    observation_tokenizer_kwargs={
+                        "sim-obs-tokenizer": {
+                            "num_tokens": 16,
+                            **base_sim_encoder_kwargs,
+                        }
+                    },
+                    task_tokenizer_kwargs={
+                        "sim-goal-obs-tokenizer": {
+                            "num_tokens": 16,
+                            **base_sim_encoder_kwargs,
+                        }
+                    },
                 ),
                 optimizer=base_optimizer_config,
                 dataset_kwargs=base_data_config,
@@ -116,8 +154,42 @@ def get_config(config_string):
                 obs_horizon=1,
                 model=update_config(
                     base_model_config,
-                    observation_tokenizer_kwargs={"obs-tokenizer": {}},
-                    task_tokenizer_kwargs={"goal-obs-tokenizer": {}},
+                    observation_tokenizer_kwargs={
+                        "obs-tokenizer": {"num_tokens": 64, **base_encoder_kwargs}
+                    },
+                    task_tokenizer_kwargs={
+                        "goal-obs-tokenizer": {"num_tokens": 64, **base_encoder_kwargs}
+                    },
+                ),
+                optimizer=base_optimizer_config,
+                dataset_kwargs=base_data_config,
+                **base_real_config,
+            )
+        ),
+        "transformer_bc_r2d2": ConfigDict(
+            dict(
+                agent="transformer_bc",
+                obs_horizon=1,
+                model=update_config(
+                    base_model_config,
+                    observation_tokenizer_kwargs={
+                        "obs-tokenizer": {
+                            "num_tokens": 60,
+                            **update_config(
+                                base_encoder_kwargs,
+                                encoder_kwargs={"add_spatial_coordinates": False},
+                            ),
+                        }
+                    },
+                    task_tokenizer_kwargs={
+                        "goal-obs-tokenizer": {
+                            "num_tokens": 60,
+                            **update_config(
+                                base_encoder_kwargs,
+                                encoder_kwargs={"add_spatial_coordinates": False},
+                            ),
+                        }
+                    },
                 ),
                 optimizer=base_optimizer_config,
                 dataset_kwargs=base_data_config,

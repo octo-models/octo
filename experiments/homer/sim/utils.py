@@ -5,11 +5,11 @@ import numpy as np
 
 import mujoco_manipulation
 import tensorflow as tf
-from wrappers.chunking import ActionChunkingWrapper, ObsHistoryWrapper
-from wrappers.dmcgym import DMCGYM
-from wrappers.mujoco import GCMujocoWrapper
-from wrappers.norm import UnnormalizeActionProprio
-from wrappers.video_recorder import VideoRecorder
+from .wrappers.chunking import ActionChunkingWrapper, ObsHistoryWrapper
+from .wrappers.dmcgym import DMCGYM
+from .wrappers.mujoco import GCMujocoWrapper
+from .wrappers.norm import UnnormalizeActionProprio
+from .wrappers.video_recorder import VideoRecorder
 import wandb
 import imageio
 
