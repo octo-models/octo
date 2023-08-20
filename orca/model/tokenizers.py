@@ -152,19 +152,11 @@ tokenizers = {
         ImageTokenizer,
         conditioning_type="none",
     ),
-    "sim-obs-tokenizer": ft.partial(
-        ImageTokenizer,
-        conditioning_type="none",
-    ),
     "goal-tokenizer": ft.partial(
         ImageTokenizer,
         conditioning_type="goal_image_no_obs",
     ),
     "goal-obs-tokenizer": ft.partial(
-        ImageTokenizer,
-        conditioning_type="goal_image",
-    ),
-    "sim-goal-obs-tokenizer": ft.partial(
         ImageTokenizer,
         conditioning_type="goal_image",
     ),
