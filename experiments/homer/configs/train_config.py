@@ -131,13 +131,13 @@ def get_config(config_string):
                 model=update_config(
                     base_model_config,
                     observation_tokenizer_kwargs={
-                        "sim-obs-tokenizer": {
+                        "obs-tokenizer": {
                             "num_tokens": 16,
                             **base_sim_encoder_kwargs,
                         }
                     },
                     task_tokenizer_kwargs={
-                        "sim-goal-obs-tokenizer": {
+                        "goal-obs-tokenizer": {
                             "num_tokens": 16,
                             **base_sim_encoder_kwargs,
                         }
