@@ -69,7 +69,9 @@ class BaseDataset:
         act_pred_horizon: Optional[int] = None,
         obs_horizon: Optional[int] = None,
         # TODO(karl): these arguments are not documented
-        string_fields: Optional[str] = ["language"],        # TODO(karl): assume that we have only one language string
+        string_fields: Optional[str] = [
+            "language"
+        ],  # TODO(karl): assume that we have only one language string
         text_processor: Optional[TextProcessor] = None,
         image_processor: Optional[str] = "default",
         image_shape: Optional[List[int]] = (256, 256, 3),
@@ -77,7 +79,7 @@ class BaseDataset:
         **kwargs,
     ):
         logging.warning("Extra kwargs passed to Dataset: %s", kwargs)
-        if isinstance(dataset_names, str):
+        if isinstance(dataset_names[0], str):
             dataset_names = [dataset_names]
         if sample_weights is None:
             # default to uniform distribution over sub-lists
@@ -86,7 +88,9 @@ class BaseDataset:
         assert np.isclose(sum(sample_weights), 1.0)
 
         self.normalization_type = normalization_type
-        self.action_proprio_metadata = None             # metadata for normalization, maybe computed on the fly
+        self.action_proprio_metadata = (
+            None  # metadata for normalization, maybe computed on the fly
+        )
         self.goal_relabeling_strategy = goal_relabeling_strategy
         self.goal_relabeling_kwargs = goal_relabeling_kwargs
         self.cache = cache
@@ -151,13 +155,17 @@ class BaseDataset:
 
         self.tf_dataset = dataset
 
-    def _construct_tf_dataset(self, dataset_name: Union[str, List[str]], seed: int) -> tf.data.Dataset:
+    def _construct_tf_dataset(
+        self, dataset_name: Union[str, List[str]], seed: int
+    ) -> tf.data.Dataset:
         # construct base tf dataset of trajectories
         dataset = self._construct_base_dataset(dataset_name, seed)
 
         # maybe apply action & proprio normalization
         if self.normalization_type is not None:
-            dataset = dataset.map(self._normalize_action_proprio, num_parallel_calls=tf.data.AUTOTUNE)
+            dataset = dataset.map(
+                self._normalize_action_proprio, num_parallel_calls=tf.data.AUTOTUNE
+            )
 
         # maybe chunks into snippets
         dataset = dataset.map(self._chunk_act_obs, num_parallel_calls=tf.data.AUTOTUNE)
@@ -175,7 +183,9 @@ class BaseDataset:
 
         return dataset
 
-    def _construct_base_dataset(self, dataset_name: Union[str, List[str]], seed: int) -> tf.data.Dataset:
+    def _construct_base_dataset(
+        self, dataset_name: Union[str, List[str]], seed: int
+    ) -> tf.data.Dataset:
         """Constructs basic dataset of trajectories."""
         raise NotImplementedError("This should be implemented in child class.")
 

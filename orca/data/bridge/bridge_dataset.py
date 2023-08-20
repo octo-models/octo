@@ -93,6 +93,7 @@ class BridgeDataset(BaseDataset):
         action_proprio_metadata: Dictionary containing metadata of the actions and proprio.
             If provided, actions and proprio will be normalized.
     """
+
     # the expected type spec for the serialized examples
     PROTO_TYPE_SPEC = {
         "observations/images0": tf.uint8,
@@ -108,9 +109,11 @@ class BridgeDataset(BaseDataset):
         self,
         *args,
         action_proprio_metadata: Optional[dict] = None,
+        relabel_actions: bool = False,
         **kwargs,
     ):
         self.action_proprio_metadata = action_proprio_metadata
+        self.relabel_actions = relabel_actions
         super().__init__(*args, **kwargs)
 
     def _construct_base_dataset(self, paths: List[str], seed: int) -> tf.data.Dataset:
@@ -129,7 +132,9 @@ class BridgeDataset(BaseDataset):
         dataset = dataset.map(self._decode_example, num_parallel_calls=tf.data.AUTOTUNE)
 
         # optionally process actions
-        dataset = dataset.map(self._process_actions, num_parallel_calls=tf.data.AUTOTUNE)
+        dataset = dataset.map(
+            self._process_actions, num_parallel_calls=tf.data.AUTOTUNE
+        )
         return dataset
 
     def _decode_example(self, example_proto):
@@ -181,5 +186,3 @@ class BridgeDataset(BaseDataset):
                 axis=1,
             )
         return traj
-
-
