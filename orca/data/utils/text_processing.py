@@ -27,7 +27,8 @@ class HFTokenizer(TextProcessor):
             "return_tensors": "np",
         },
     ):
-        from transformers import AutoTokenizer      # lazy import
+        from transformers import AutoTokenizer  # lazy import
+
         self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
         self.tokenizer_kwargs = tokenizer_kwargs
 
@@ -43,8 +44,9 @@ class HFTokenizer(TextProcessor):
 
 class MuseEmbedding(TextProcessor):
     def __init__(self):
-        import tensorflow_hub as hub        # lazy import
-        import tensorflow_text              # required for muse
+        import tensorflow_hub as hub  # lazy import
+        import tensorflow_text  # required for muse
+
         self.muse_model = hub.load(MULTI_MODULE)
 
     def encode(self, strings):
@@ -63,6 +65,7 @@ class CLIPTextProcessor(TextProcessor):
         },
     ):
         from transformers import CLIPProcessor
+
         self.processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
         self.kwargs = tokenizer_kwargs
 

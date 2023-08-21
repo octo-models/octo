@@ -173,22 +173,10 @@ def get_config(config_string):
                 model=update_config(
                     base_model_config,
                     observation_tokenizer_kwargs={
-                        "obs-tokenizer": {
-                            "num_tokens": 60,
-                            **update_config(
-                                base_encoder_kwargs,
-                                encoder_kwargs={"add_spatial_coordinates": False},
-                            ),
-                        }
+                        "obs-tokenizer": {"num_tokens": 60, **base_encoder_kwargs}
                     },
                     task_tokenizer_kwargs={
-                        "goal-obs-tokenizer": {
-                            "num_tokens": 60,
-                            **update_config(
-                                base_encoder_kwargs,
-                                encoder_kwargs={"add_spatial_coordinates": False},
-                            ),
-                        }
+                        "goal-obs-tokenizer": {"num_tokens": 60, **base_encoder_kwargs}
                     },
                 ),
                 optimizer=base_optimizer_config,
