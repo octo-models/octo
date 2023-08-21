@@ -32,8 +32,21 @@ def r2_d2_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
     return trajectory
 
 
+def fmb_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
+    # every input feature is batched, ie has leading batch dimension
+    trajectory["observations"]["state"] = tf.concat(
+        (
+            trajectory["observations"]["state"],
+            trajectory["observations"]["gripper_state"][..., None],
+        ),
+        axis=-1,
+    )
+    return trajectory
+
+
 RLDS_TRAJECTORY_MAP_TRANSFORMS = {
     "stanford_kuka_multimodal_dataset": stanford_kuka_multimodal_dataset_transform,
     "r2_d2": r2_d2_dataset_transform,
     "r2_d2_pen": r2_d2_dataset_transform,
+    "fmb_dataset": fmb_dataset_transform,
 }
