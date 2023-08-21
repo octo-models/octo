@@ -18,3 +18,4 @@ pre-commit == 3.3.3
 transformers >= 4.31.0
 tensorflow_hub >= 0.14.0
 tensorflow_text >= 2.13.0
+tensorflow_datasets >= 4.9.2

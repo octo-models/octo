@@ -26,6 +26,8 @@ from orca.train_utils import (
     initialize_compilation_cache,
     shard_batch,
 )
+from sim.evaluation import evaluate_gc, supply_rng
+from sim.utils import make_mujoco_gc_env, load_recorded_video
 
 try:
     from jax_smi import initialise_tracking  # type: ignore
@@ -97,50 +99,59 @@ def main(_):
     else:
         save_dir = None
         logging.info("save_dir not passed in, not saving checkpoints")
-    # load datasets
 
-    logging.info(f"Loading data from {FLAGS.config.data_path}")
-    assert type(FLAGS.bridgedata_config.include[0]) == list
-    task_paths = [
-        glob_to_path_list(
-            path, prefix=FLAGS.config.data_path, exclude=FLAGS.bridgedata_config.exclude
-        )
-        for path in FLAGS.bridgedata_config.include
-    ]
+    # load action metadata
+    with tf.io.gfile.GFile(
+        tf.io.gfile.join(FLAGS.config.data_path, "train/metadata.npy"), "rb"
+    ) as f:
+        action_proprio_metadata = np.load(f, allow_pickle=True).item()
 
-    train_paths = [
-        [os.path.join(path, "train/out.tfrecord") for path in sub_list]
-        for sub_list in task_paths
-    ]
-    val_paths = [
-        [os.path.join(path, "val/out.tfrecord") for path in sub_list]
-        for sub_list in task_paths
-    ]
+    # load eval goals
+    with tf.io.gfile.GFile(
+        tf.io.gfile.join(FLAGS.config.data_path, "val/eval_goals.npy"), "rb"
+    ) as f:
+        eval_goals = np.load(f, allow_pickle=True).item()
 
     obs_horizon = FLAGS.config.get("obs_horizon")
-    text_processor = text_processors[FLAGS.config.text_processor](
-        **FLAGS.config.text_processor_kwargs
+    act_exec_horizon = FLAGS.config.get("act_exec_horizon")
+    normalization_type = FLAGS.config.get("normalization_type", "normal")
+
+    # create sim environment
+    eval_env = make_mujoco_gc_env(
+        env_name=FLAGS.config.env_name,
+        max_episode_steps=FLAGS.config.max_episode_steps,
+        action_proprio_metadata=action_proprio_metadata,
+        normalization_type=normalization_type,
+        save_video=FLAGS.config.save_video,
+        save_video_dir=tf.io.gfile.join(save_dir, "videos"),
+        save_video_prefix="eval",
+        goals=eval_goals,
+        obs_horizon=obs_horizon,
+        act_exec_horizon=act_exec_horizon,
     )
 
+    # load datasets
+    logging.info(f"Loading data from {FLAGS.config.data_path}")
+    train_paths = tf.io.gfile.glob(f"{FLAGS.config.data_path}/train/*.tfrecord")
+    val_paths = tf.io.gfile.glob(f"{FLAGS.config.data_path}/val/*.tfrecord")
     train_data = BridgeDataset(
         train_paths,
         FLAGS.config.seed,
         batch_size=FLAGS.config.batch_size,
         train=True,
-        action_proprio_metadata=FLAGS.bridgedata_config.action_proprio_metadata,
-        sample_weights=FLAGS.bridgedata_config.sample_weights,
+        action_proprio_metadata=action_proprio_metadata,
+        relabel_actions=False,
         obs_horizon=obs_horizon,
-        text_processor=text_processor,
         **FLAGS.config.dataset_kwargs,
     )
     val_data = BridgeDataset(
         val_paths,
         FLAGS.config.seed,
         batch_size=FLAGS.config.batch_size,
-        action_proprio_metadata=FLAGS.bridgedata_config.action_proprio_metadata,
+        action_proprio_metadata=action_proprio_metadata,
+        relabel_actions=False,
         train=False,
         obs_horizon=obs_horizon,
-        text_processor=text_processor,
         **FLAGS.config.dataset_kwargs,
     )
     train_data_iter = train_data.get_iterator()
@@ -223,6 +234,22 @@ def main(_):
         loss, info = loss_fn(state.params, state, batch, state.rng, train=False)
         return info
 
+    @partial(jax.jit, static_argnames="argmax")
+    def sample_actions(observations, goals, state, rng, argmax=False, temperature=1.0):
+        observations = jax.tree_map(lambda x: x[None], observations)
+        goals = jax.tree_map(lambda x: x[None], goals)
+        actions = state.apply_fn(
+            {"params": state.params},
+            observations,
+            goals,
+            train=False,
+            argmax=argmax,
+            rng=rng,
+            temperature=temperature,
+            method="predict_action",
+        )
+        return actions[0]
+
     def wandb_log(info, step):
         wandb.log(flatten_dict(info, sep="/"), step=step)
 
@@ -239,14 +266,42 @@ def main(_):
         timer.tock("train")
 
         if (i + 1) % FLAGS.config.eval_interval == 0:
-            logging.info("Evaluating...")
+            logging.info("Validation...")
             timer.tick("val")
             metrics = []
+            j = 0
             for batch in val_data.get_iterator():
                 metrics.append(eval_step(train_state, batch))
+                j += 1
+                if j >= FLAGS.config.num_val_batches:
+                    break
             metrics = jax.tree_map(lambda *xs: np.mean(xs), *metrics)
             wandb_log({"validation": metrics}, step=i)
             timer.tock("val")
+
+            rng, policy_key = jax.random.split(rng)
+            policy_fn = supply_rng(
+                partial(sample_actions, state=train_state, argmax=FLAGS.config.deterministic_eval),
+                rng=policy_key,
+            )
+
+            logging.info("Evaluating...")
+            timer.tick("evaluation")
+            eval_env.goal_sampler = eval_goals
+            eval_env.start_recording(
+                FLAGS.config.num_episodes_per_video, FLAGS.config.num_episodes_per_row
+            )
+            eval_info = evaluate_gc(
+                policy_fn,
+                eval_env,
+                num_episodes=FLAGS.config.eval_episodes,
+                return_trajectories=False,
+            )
+            wandb_log({f"evaluation": eval_info}, step=i)
+            if FLAGS.config.save_video:
+                eval_video = load_recorded_video(video_path=eval_env.current_save_path)
+                wandb_log({"evaluation/video": eval_video}, step=i)
+            timer.tock("evaluation")
 
         if (i + 1) % FLAGS.config.save_interval == 0 and save_dir is not None:
             logging.info("Saving checkpoint...")
