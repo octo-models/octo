@@ -20,9 +20,7 @@ def stanford_kuka_multimodal_dataset_transform(
     return trajectory
 
 
-def r2_d2_dataset_transform(
-    trajectory: Dict[str, Any]
-) -> Dict[str, Any]:
+def r2_d2_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
     # every input feature is batched, ie has leading batch dimension
     trajectory["action"] = tf.concat(
         (

@@ -15,7 +15,6 @@ ModuleDef = Any
 
 
 class AddSpatialCoordinates(nn.Module):
-    # TODO (homer): make this work with non-square images
     dtype: Any = jnp.float32
 
     @nn.compact
@@ -26,7 +25,7 @@ class AddSpatialCoordinates(nn.Module):
                 axis=-1,
             ),
             dtype=self.dtype,
-        )
+        ).transpose(1, 0, 2)
 
         if x.ndim == 4:
             grid = jnp.broadcast_to(grid, [x.shape[0], *grid.shape])
