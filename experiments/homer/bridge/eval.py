@@ -1,27 +1,25 @@
 import os
 import sys
 import traceback
-
-import matplotlib
 import numpy as np
 import wandb
 from absl import app, flags, logging
 from flax.training import checkpoints
 from PIL import Image
 from widowx_envs.widowx.widowx_env import BridgeDataRailRLPrivateWidowX
-
-from orca.agents import agents
-from orca.vision import encoders
-
+import matplotlib
 matplotlib.use("Agg")
 import time
 from collections import deque
 from datetime import datetime
-
 import jax
 import matplotlib.pyplot as plt
 import tensorflow as tf
 from widowx_envs.utils.multicam_server_rospkg.src.topic_utils import IMTopic
+from orca.model import create_model_def
+from functools import partial
+from orca.train_utils import create_train_state
+import optax
 
 np.set_printoptions(suppress=True)
 
@@ -56,23 +54,11 @@ FIXED_STD = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
 
 WORKSPACE_BOUNDS = np.array([[0.1, -0.15, -0.1, -1.57, 0], [0.45, 0.25, 0.25, 1.57, 0]])
 
-
-def list_of_dicts_to_dict_of_lists(list_of_dicts):
-    dict_of_lists = {}
-    for dictionary in list_of_dicts:
-        for key, value in dictionary.items():
-            if key not in dict_of_lists:
-                dict_of_lists[key] = []
-            dict_of_lists[key].append(value)
-    return dict_of_lists
-
-
 def unnormalize_action(action, mean, std):
     return action * std + mean
 
-
 def stack_obs(obs):
-    dict_list = list_of_dicts_to_dict_of_lists(obs)
+    dict_list = {k: [dic[k] for dic in obs] for k in obs[0]}
     return jax.tree_map(
         lambda x: np.stack(x), dict_list, is_leaf=lambda x: type(x) == list
     )
@@ -82,9 +68,6 @@ def load_checkpoint(path, wandb_run_name):
     # load information from wandb
     api = wandb.Api()
     run = api.run(wandb_run_name)
-
-    # create encoder from wandb config
-    encoder_def = encoders[run.config["encoder"]](**run.config["encoder_kwargs"])
 
     if FLAGS.act_pred_horizon is not None:
         example_actions = np.zeros((1, FLAGS.act_pred_horizon, 7), dtype=np.float32)
@@ -110,44 +93,69 @@ def load_checkpoint(path, wandb_run_name):
         "actions": example_actions,
     }
 
-    # create agent from wandb config
+    # create train_state from wandb config
     rng = jax.random.PRNGKey(0)
     rng, construct_rng = jax.random.split(rng)
-    agent = agents[run.config["agent"]].create(
-        rng=construct_rng,
-        observations=example_batch["observations"],
-        goals=example_batch["goals"],
-        actions=example_batch["actions"],
-        encoder_def=encoder_def,
-        **run.config["agent_kwargs"],
+
+    model_def = create_model_def(
+        action_dim=example_batch["actions"].shape[-1],
+        time_sequence_length=example_batch["observations"]["image"].shape[1],
+        **run.config["model"],
     )
+
+    tx = optax.adam(0)
+    train_state = create_train_state(
+        construct_rng,
+        model_def,
+        tx,
+        init_args=(
+            example_batch["observations"],
+            example_batch["goals"],
+            example_batch["actions"],
+        ),
+    )
+
+    # hydrate train_state with parameters from checkpoint
+    train_state = checkpoints.restore_checkpoint(path, train_state)
 
     # load action metadata from wandb
     action_metadata = run.config["bridgedata_config"]["action_metadata"]
     action_mean = np.array(action_metadata["mean"])
     action_std = np.array(action_metadata["std"])
 
-    # hydrate agent with parameters from checkpoint
-    agent = checkpoints.restore_checkpoint(path, agent)
+    return train_state, action_mean, action_std
 
-    return agent, action_mean, action_std
-
+@partial(jax.jit, static_argnames="argmax")
+def sample_actions(observations, goals, state, rng, argmax=False, temperature=1.0):
+    observations = jax.tree_map(lambda x: x[None], observations)
+    goals = jax.tree_map(lambda x: x[None], goals)
+    actions = state.apply_fn(
+        {"params": state.params},
+        observations,
+        goals,
+        train=False,
+        argmax=argmax,
+        rng=rng,
+        temperature=temperature,
+        method="predict_action",
+    )
+    return actions[0]
 
 def main(_):
     assert len(FLAGS.checkpoint_path) == len(FLAGS.wandb_run_name)
 
-    # policies is a dict from run_name to (agent, action_mean, action_std)
+    # policies is a dict from run_name to (train_state, action_mean, action_std)
     policies = {}
     for checkpoint_path, wandb_run_name in zip(
         FLAGS.checkpoint_path, FLAGS.wandb_run_name
     ):
         assert tf.io.gfile.exists(checkpoint_path), checkpoint_path
-        agent, action_mean, action_std = load_checkpoint(
+        train_state, action_mean, action_std = load_checkpoint(
             checkpoint_path, wandb_run_name
         )
         checkpoint_num = int(checkpoint_path.split("_")[-1])
         run_name = wandb_run_name.split("/")[-1]
-        policies[f"{run_name}-{checkpoint_num}"] = (agent, action_mean, action_std)
+        policies[f"{run_name}-{checkpoint_num}"] = (train_state, action_mean, action_std)
 
     if FLAGS.initial_eep is not None:
         assert isinstance(FLAGS.initial_eep, list)
@@ -216,7 +224,7 @@ def main(_):
             policy_idx = int(input("select policy: "))
 
         policy_name = list(policies.keys())[policy_idx]
-        agent, action_mean, action_std = policies[policy_name]
+        train_state, action_mean, action_std = policies[policy_name]
         try:
             env.reset()
             env.start()
@@ -268,8 +276,8 @@ def main(_):
 
                     rng, key = jax.random.split(rng)
                     actions = np.array(
-                        agent.sample_actions(
-                            obs, goal_obs, seed=key, argmax=FLAGS.deterministic
+                        sample_actions(
+                            obs, goal_obs, train_state, rng=key, argmax=FLAGS.deterministic
                         )
                     )
                     if len(actions.shape) == 1:
