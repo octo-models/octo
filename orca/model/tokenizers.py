@@ -6,7 +6,7 @@ import jax
 import jax.numpy as jnp
 from jax.scipy.stats import norm
 
-from orca.model.clip import CLIPTextTokenizer, CLIPVisionTokenizer, clip_weights_loader
+from orca.model.clip import CLIPTextTokenizer, CLIPVisionTokenizer
 from orca.model.transformer import MlpBlock
 from orca.model.vision import encoders
 
@@ -177,11 +177,6 @@ tokenizers = {
     # TODO (andre) other possible tokenizers:
     # "language-wordpiece-tokenizer": use token-level embeddings
     # "proprio": use proprio from observations
-}
-
-# TODO this belongs somewhere else
-weights_loaders = {
-    "clip": clip_weights_loader,
 }
 
 if __name__ == "__main__":
