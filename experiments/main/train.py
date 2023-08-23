@@ -18,7 +18,7 @@ from ml_collections import config_flags
 from orca.data.bridge.bridge_dataset import BridgeDataset, glob_to_path_list
 from orca.data.utils.text_processing import text_processors
 from orca.model import create_model_def
-from orca.model.tokenizers import weights_loaders
+from orca.model.weights import weights_loaders
 from orca.train_utils import (
     Timer,
     create_train_state,
