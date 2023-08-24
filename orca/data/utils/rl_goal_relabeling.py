@@ -153,10 +153,3 @@ def geometric(traj, *, reached_proportion, discount):
     traj["masks"] = tf.logical_not(traj["terminals"])
 
     return traj
-
-
-GOAL_RELABELING_FUNCTIONS = {
-    "uniform": uniform,
-    "last_state_upweighted": last_state_upweighted,
-    "geometric": geometric,
-}
