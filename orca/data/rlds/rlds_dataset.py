@@ -22,7 +22,7 @@ def get_action_proprio_stats(
     if tf.io.gfile.exists(path):
         logging.info(f"Loading existing statistics for normalization from {path}.")
         with tf.io.gfile.GFile(path, "r") as f:
-            meatadata = json.load(f)
+            metadata = json.load(f)
     else:
         logging.info("Computing action/proprio statistics for normalization...")
         actions = []
@@ -54,5 +54,5 @@ def get_action_proprio_stats(
 
     return {
         k: {k2: tf.convert_to_tensor(v2, dtype=tf.float32) for k2, v2 in v.items()}
-        for k, v in meatadata.items()
+        for k, v in metadata.items()
     }
