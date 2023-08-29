@@ -18,9 +18,7 @@ def update_config(config, **kwargs):
 
 def get_config(config_string):
     base_wandb_config = dict(
-        project="orca",
-        group=placeholder(str),
-        entity=placeholder(str),
+        project="orca", group=placeholder(str), entity=placeholder(str)
     )
 
     base_sim_config = dict(
@@ -46,13 +44,13 @@ def get_config(config_string):
     )
 
     base_real_config = dict(
-        batch_size=256,
+        batch_size=4,
         num_steps=int(2e6),
         log_interval=100,
         eval_interval=5000,
         save_interval=5000,
         save_dir="/mnt2/homer/jaxrl_log",
-        data_path="/nfs/kun2/users/homer/datasets/bridge_data_all/tfrecord_256_test",
+        data_path="/nfs/kun2/datasets/r2d2/tfds",
         resume_path=placeholder(str),
         seed=42,
         text_processor="muse_embedding",
@@ -89,9 +87,7 @@ def get_config(config_string):
     )
 
     base_optimizer_config = dict(
-        learning_rate=3e-4,
-        warmup_steps=2000,
-        decay_steps=int(2e6),
+        learning_rate=3e-4, warmup_steps=2000, decay_steps=int(2e6)
     )
 
     base_model_config = dict(
@@ -102,24 +98,20 @@ def get_config(config_string):
             num_heads=8,
             dropout_rate=0.1,
             normalization_type=normalization_type,
-        ),
+        )
     )
 
     base_encoder_kwargs = dict(
         encoder="resnetv1-34-bridge",
         encoder_kwargs=dict(
-            pooling_method="none",
-            add_spatial_coordinates=True,
-            act="swish",
+            pooling_method="none", add_spatial_coordinates=True, act="swish"
         ),
     )
 
     base_sim_encoder_kwargs = dict(
         encoder="resnetv1-18-bridge",
         encoder_kwargs=dict(
-            pooling_method="none",
-            add_spatial_coordinates=True,
-            act="swish",
+            pooling_method="none", add_spatial_coordinates=True, act="swish"
         ),
     )
 
@@ -131,10 +123,7 @@ def get_config(config_string):
                 model=update_config(
                     base_model_config,
                     observation_tokenizer_kwargs={
-                        "obs-tokenizer": {
-                            "num_tokens": 16,
-                            **base_sim_encoder_kwargs,
-                        }
+                        "obs-tokenizer": {"num_tokens": 16, **base_sim_encoder_kwargs}
                     },
                     task_tokenizer_kwargs={
                         "goal-obs-tokenizer": {

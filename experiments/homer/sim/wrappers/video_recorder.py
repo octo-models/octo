@@ -11,9 +11,7 @@ import tensorflow as tf
 
 
 def compose_frames(
-    all_frames: List[np.ndarray],
-    num_videos_per_row: int,
-    margin: int = 4,
+    all_frames: List[np.ndarray], num_videos_per_row: int, margin: int = 4
 ):
     num_episodes = len(all_frames)
 

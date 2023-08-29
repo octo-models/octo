@@ -38,35 +38,19 @@ def get_config(config_string):
                 "exclude": [],
                 "sample_weights": None,
                 "action_proprio_metadata": {
-                    "action": {
-                        "mean": ACT_MEAN,
-                        "std": ACT_STD,
-                    },
-                    "proprio": {
-                        "mean": ACT_MEAN,
-                        "std": ACT_STD,
-                    },
+                    "action": {"mean": ACT_MEAN, "std": ACT_STD},
+                    "proprio": {"mean": ACT_MEAN, "std": ACT_STD},
                 },
             }
         ),
         "test": ml_collections.ConfigDict(
             {
-                "include": [
-                    [
-                        "rss/?*/?*/?*",
-                    ]
-                ],
+                "include": [["rss/?*/?*/?*"]],
                 "exclude": [],
                 "sample_weights": None,
                 "action_proprio_metadata": {
-                    "action": {
-                        "mean": ACT_MEAN,
-                        "std": ACT_STD,
-                    },
-                    "proprio": {
-                        "mean": ACT_MEAN,
-                        "std": ACT_STD,
-                    },
+                    "action": {"mean": ACT_MEAN, "std": ACT_STD},
+                    "proprio": {"mean": ACT_MEAN, "std": ACT_STD},
                 },
             }
         ),
@@ -84,10 +68,7 @@ def get_config(config_string):
                 ],
                 "exclude": [],
                 "sample_weights": None,
-                "action_metadata": {
-                    "mean": ACT_MEAN,
-                    "std": ACT_STD,
-                },
+                "action_metadata": {"mean": ACT_MEAN, "std": ACT_STD},
             }
         ),
         "franka": ml_collections.ConfigDict(
@@ -139,10 +120,7 @@ def get_config(config_string):
                     "*icra/toykitchen_fixed_cam_resetfree_push_sweep/tabletop*",
                 ],
                 "sample_weights": None,
-                "action_metadata": {
-                    "mean": ACT_MEAN,
-                    "std": ACT_STD,
-                },
+                "action_metadata": {"mean": ACT_MEAN, "std": ACT_STD},
             }
         ),
         "all_finetune": ml_collections.ConfigDict(
@@ -166,10 +144,7 @@ def get_config(config_string):
                     "*icra/toykitchen_fixed_cam_resetfree_push_sweep/tabletop*",
                 ],
                 "sample_weights": [0.9, 0.1],
-                "action_metadata": {
-                    "mean": ACT_MEAN,
-                    "std": ACT_STD,
-                },
+                "action_metadata": {"mean": ACT_MEAN, "std": ACT_STD},
             }
         ),
         "all_finetune_autonomous": ml_collections.ConfigDict(
@@ -196,10 +171,7 @@ def get_config(config_string):
                     "*sweep_12-03*",
                 ],
                 "sample_weights": [0.9, 0.1],
-                "action_metadata": {
-                    "mean": ACT_MEAN,
-                    "std": ACT_STD,
-                },
+                "action_metadata": {"mean": ACT_MEAN, "std": ACT_STD},
             }
         ),
         "all_finetune_autonomous_oracle": ml_collections.ConfigDict(
@@ -226,10 +198,7 @@ def get_config(config_string):
                     "*icra/toykitchen_fixed_cam_resetfree_push_sweep/tabletop*",
                 ],
                 "sample_weights": [0.9, 0.1],
-                "action_metadata": {
-                    "mean": ACT_MEAN,
-                    "std": ACT_STD,
-                },
+                "action_metadata": {"mean": ACT_MEAN, "std": ACT_STD},
             }
         ),
     }

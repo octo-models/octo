@@ -20,9 +20,7 @@ def convert_obs(obs):
 
 
 def filter_info_keys(info):
-    keep_keys = [
-        "place_success",
-    ]
+    keep_keys = ["place_success"]
     return {k: v for k, v in info.items() if k in keep_keys}
 
 
@@ -35,11 +33,7 @@ class GCMujocoWrapper(gym.Wrapper):
     returns a goal (e.g an affordance model).
     """
 
-    def __init__(
-        self,
-        env: gym.Env,
-        goal_sampler: Union[np.ndarray, Callable],
-    ):
+    def __init__(self, env: gym.Env, goal_sampler: Union[np.ndarray, Callable]):
         super().__init__(env)
         self.env = env
         self.observation_space = gym.spaces.Dict(
@@ -50,9 +44,7 @@ class GCMujocoWrapper(gym.Wrapper):
                     dtype=np.uint8,
                 ),
                 "proprio": gym.spaces.Box(
-                    low=np.zeros((8,)),
-                    high=np.ones((8,)),
-                    dtype=np.uint8,
+                    low=np.zeros((8,)), high=np.ones((8,)), dtype=np.uint8
                 ),
             }
         )
