@@ -8,6 +8,7 @@ from flax.training import checkpoints
 from PIL import Image
 from widowx_envs.widowx.widowx_env import BridgeDataRailRLPrivateWidowX
 import matplotlib
+
 matplotlib.use("Agg")
 import time
 from collections import deque
@@ -30,11 +31,7 @@ FLAGS = flags.FLAGS
 flags.DEFINE_multi_string("checkpoint_path", None, "Path to checkpoint", required=True)
 flags.DEFINE_multi_string("wandb_run_name", None, "Name of wandb run", required=True)
 flags.DEFINE_string("video_save_path", None, "Path to save video")
-flags.DEFINE_string(
-    "goal_image_path",
-    None,
-    "Path to a single goal image",
-)
+flags.DEFINE_string("goal_image_path", None, "Path to a single goal image")
 flags.DEFINE_integer("num_timesteps", 120, "num timesteps")
 flags.DEFINE_bool("blocking", False, "Use the blocking controller")
 flags.DEFINE_spaceseplist("goal_eep", None, "Goal position")
@@ -54,8 +51,10 @@ FIXED_STD = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
 
 WORKSPACE_BOUNDS = np.array([[0.1, -0.15, -0.1, -1.57, 0], [0.45, 0.25, 0.25, 1.57, 0]])
 
+
 def unnormalize_action(action, mean, std):
     return action * std + mean
+
 
 def stack_obs(obs):
     dict_list = {k: [dic[k] for dic in obs] for k in obs[0]}
@@ -103,7 +102,14 @@ def load_checkpoint(path, wandb_run_name):
         **run.config["model"],
     )
 
-    tx = optax.adam(0)
+    lr_schedule = optax.warmup_cosine_decay_schedule(
+        init_value=0.0,
+        peak_value=run.config["optimizer"]["learning_rate"],
+        warmup_steps=run.config["optimizer"]["warmup_steps"],
+        decay_steps=run.config["optimizer"]["decay_steps"],
+        end_value=0.0,
+    )
+    tx = optax.adam(lr_schedule)
     train_state = create_train_state(
         construct_rng,
         model_def,
@@ -125,6 +131,7 @@ def load_checkpoint(path, wandb_run_name):
 
     return train_state, action_mean, action_std
 
+
 @partial(jax.jit, static_argnames="argmax")
 def sample_actions(observations, goals, state, rng, argmax=False, temperature=1.0):
     observations = jax.tree_map(lambda x: x[None], observations)
@@ -141,6 +148,7 @@ def sample_actions(observations, goals, state, rng, argmax=False, temperature=1.
     )
     return actions[0]
 
+
 def main(_):
     assert len(FLAGS.checkpoint_path) == len(FLAGS.wandb_run_name)
 
@@ -155,7 +163,11 @@ def main(_):
         )
         checkpoint_num = int(checkpoint_path.split("_")[-1])
         run_name = wandb_run_name.split("/")[-1]
-        policies[f"{run_name}-{checkpoint_num}"] = (train_state, action_mean, action_std)
+        policies[f"{run_name}-{checkpoint_num}"] = (
+            train_state,
+            action_mean,
+            action_std,
+        )
 
     if FLAGS.initial_eep is not None:
         assert isinstance(FLAGS.initial_eep, list)
@@ -262,9 +274,7 @@ def main(_):
                         * 255
                     ).astype(np.uint8)
                     obs = {"image": image_obs, "proprio": obs["state"]}
-                    goal_obs = {
-                        "image": image_goal,
-                    }
+                    goal_obs = {"image": image_goal}
                     if FLAGS.obs_horizon is not None:
                         if len(obs_hist) == 0:
                             obs_hist.extend([obs] * FLAGS.obs_horizon)
@@ -277,7 +287,11 @@ def main(_):
                     rng, key = jax.random.split(rng)
                     actions = np.array(
                         sample_actions(
-                            obs, goal_obs, train_state, rng=key, argmax=FLAGS.deterministic
+                            obs,
+                            goal_obs,
+                            train_state,
+                            rng=key,
+                            argmax=FLAGS.deterministic,
                         )
                     )
                     if len(actions.shape) == 1:

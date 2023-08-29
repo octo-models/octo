@@ -98,10 +98,7 @@ def evaluate_with_trajectories(
 
 
 def evaluate_gc(
-    policy_fn,
-    env: gym.Env,
-    num_episodes: int,
-    return_trajectories: bool = False,
+    policy_fn, env: gym.Env, num_episodes: int, return_trajectories: bool = False
 ) -> Dict[str, float]:
     stats = defaultdict(list)
 

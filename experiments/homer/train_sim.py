@@ -67,13 +67,9 @@ def main(_):
     tf.config.set_visible_devices([], "GPU")
 
     # set up wandb and logging
-    name = format_name_with_config(
-        FLAGS.name,
-        FLAGS.config.to_dict(),
-    )
+    name = format_name_with_config(FLAGS.name, FLAGS.config.to_dict())
     wandb_id = "{name}_{time}".format(
-        name=name,
-        time=datetime.datetime.now().strftime("%Y%m%d_%H%M%S"),
+        name=name, time=datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     )
     wandb.init(
         config=FLAGS.config.to_dict(),
@@ -281,7 +277,11 @@ def main(_):
 
             rng, policy_key = jax.random.split(rng)
             policy_fn = supply_rng(
-                partial(sample_actions, state=train_state, argmax=FLAGS.config.deterministic_eval),
+                partial(
+                    sample_actions,
+                    state=train_state,
+                    argmax=FLAGS.config.deterministic_eval,
+                ),
                 rng=policy_key,
             )
 
