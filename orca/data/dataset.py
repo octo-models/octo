@@ -48,6 +48,12 @@ def _normalize_action_and_proprio(traj, metadata, normalization_type):
 
 
 def _chunk_act_obs(traj, act_horizon, obs_horizon):
+    """Chunks actions and observations into the given horizons.
+
+    The "actions" and "observations" keys are each given a new axis (at index 1) of size `act_horizon` and
+    `obs_horizon`, respectively. The actions are chunked into the future while the observations are chunked into the
+    past.
+    """
     traj_len = tf.shape(traj["actions"])[0]
     if act_horizon is not None:
         chunk_indices = tf.broadcast_to(
