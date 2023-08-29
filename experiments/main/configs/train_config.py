@@ -1,6 +1,26 @@
 from ml_collections import ConfigDict
 from ml_collections.config_dict import placeholder, required_placeholder
 
+ACT_MEAN = [
+    1.9296819e-04,
+    1.3667766e-04,
+    -1.4583133e-04,
+    -1.8390431e-04,
+    -3.0808983e-04,
+    2.7425270e-04,
+    5.9716219e-01,
+]
+
+ACT_STD = [
+    0.00912848,
+    0.0127196,
+    0.01229497,
+    0.02606696,
+    0.02875283,
+    0.07807977,
+    0.48710242,
+]
+
 
 def update_config(_prototype, **kwargs):
     result = dict(_prototype)
@@ -23,6 +43,7 @@ def get_config(config_string):
 
     base_real_config = dict(
         batch_size=64,
+        shuffle_buffer_size=1000,
         num_steps=int(2e6),
         log_interval=100,
         eval_interval=5000,
@@ -41,10 +62,6 @@ def get_config(config_string):
     normalization_type = "normal"
 
     base_data_config = dict(
-        shuffle_buffer_size=25000,
-        prefetch_num_batches=20,
-        augment=True,
-        augment_next_obs_goal_differently=False,
         augment_kwargs=dict(
             random_resized_crop=dict(scale=[0.8, 1.0], ratio=[0.9, 1.1]),
             random_brightness=[0.2],
@@ -60,8 +77,17 @@ def get_config(config_string):
             ],
         ),
         goal_relabeling_strategy="uniform",
-        goal_relabeling_kwargs=dict(reached_proportion=0.0),
-        normalization_type=normalization_type,
+        action_proprio_normalization_type=normalization_type,
+        action_proprio_metadata={
+            "action": {
+                "mean": ACT_MEAN,
+                "std": ACT_STD,
+            },
+            "proprio": {
+                "mean": ACT_MEAN,
+                "std": ACT_STD,
+            },
+        },
     )
     base_optimizer_config = dict(
         learning_rate=3e-4,
@@ -76,7 +102,7 @@ def get_config(config_string):
             vocab_size=256,
             num_heads=8,
             dropout_rate=0.1,
-            normalization_type=normalization_type,
+            action_proprio_normalization_type=normalization_type,
         ),
     )
 
@@ -165,7 +191,9 @@ def get_config(config_string):
                     task_tokenizer_kwargs={"clip-text-tokenizer": {"num_tokens": 64}},
                 ),
                 optimizer=base_optimizer_config,
-                dataset_kwargs=update_config(base_data_config, image_processor="clip"),
+                dataset_kwargs=update_config(
+                    base_data_config, use_clip_image_preprocessing=True
+                ),
                 **update_config(
                     base_real_config,
                     text_processor="clip_processor",
