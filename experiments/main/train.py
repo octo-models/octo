@@ -15,7 +15,7 @@ from flax.training import checkpoints
 from flax.traverse_util import flatten_dict
 from ml_collections import config_flags
 
-from orca.data.bridge.bridge_dataset import BridgeDataset, glob_to_path_list
+from orca.data.dataset import make_bridge_dataset
 from orca.data.utils.text_processing import text_processors
 from orca.model import create_model_def
 from orca.model.weights import weights_loaders
@@ -47,19 +47,16 @@ config_flags.DEFINE_config_file(
     lock_config=False,
 )
 
-config_flags.DEFINE_config_file(
-    "bridgedata_config",
-    os.path.join(config_dir, "data_config.py:all"),
-    "File path to the bridgedata configuration.",
-    lock_config=False,
-)
-
 
 def main(_):
     initialize_compilation_cache()
     devices = jax.local_devices()
     num_devices = len(devices)
     assert FLAGS.config.batch_size % num_devices == 0
+
+    # we shard the leading dimension (batch dimension) accross all devices evenly
+    sharding = jax.sharding.PositionalSharding(devices)
+    shard_fn = partial(shard_batch, sharding=sharding)
 
     # prevent tensorflow from using GPUs
     tf.config.set_visible_devices([], "GPU")
@@ -97,53 +94,49 @@ def main(_):
     else:
         save_dir = None
         logging.info("save_dir not passed in, not saving checkpoints")
+
     # load datasets
-
     logging.info(f"Loading data from {FLAGS.config.data_path}")
-    assert type(FLAGS.bridgedata_config.include[0]) == list
-    task_paths = [
-        glob_to_path_list(
-            path, prefix=FLAGS.config.data_path, exclude=FLAGS.bridgedata_config.exclude
-        )
-        for path in FLAGS.bridgedata_config.include
-    ]
-
-    train_paths = [
-        [os.path.join(path, "train/out.tfrecord") for path in sub_list]
-        for sub_list in task_paths
-    ]
-    val_paths = [
-        [os.path.join(path, "val/out.tfrecord") for path in sub_list]
-        for sub_list in task_paths
-    ]
-
     obs_horizon = FLAGS.config.get("obs_horizon")
     text_processor = text_processors[FLAGS.config.text_processor](
         **FLAGS.config.text_processor_kwargs
     )
+    assert (
+        "action_proprio_metadata" in FLAGS.config.dataset_kwargs
+    ), "action_proprio_metadata must be specified in dataset_kwargs"
 
-    train_data = BridgeDataset(
-        train_paths,
-        FLAGS.config.seed,
-        batch_size=FLAGS.config.batch_size,
-        train=True,
-        action_proprio_metadata=FLAGS.bridgedata_config.action_proprio_metadata,
-        sample_weights=FLAGS.bridgedata_config.sample_weights,
-        obs_horizon=obs_horizon,
-        text_processor=text_processor,
-        **FLAGS.config.dataset_kwargs,
+    def process_text(batch):
+        batch["language"] = text_processor.encode(
+            [s.decode("utf-8") for s in batch["language"]]
+        )
+        return batch
+
+    train_data = (
+        make_bridge_dataset(
+            FLAGS.config.data_path,
+            train=True,
+            obs_horizon=obs_horizon,
+            **FLAGS.config.dataset_kwargs,
+        )
+        .unbatch()
+        .shuffle(FLAGS.config.shuffle_buffer_size)
+        .repeat()
+        .batch(FLAGS.config.batch_size)
     )
-    val_data = BridgeDataset(
-        val_paths,
-        FLAGS.config.seed,
-        batch_size=FLAGS.config.batch_size,
-        action_proprio_metadata=FLAGS.bridgedata_config.action_proprio_metadata,
-        train=False,
-        obs_horizon=obs_horizon,
-        text_processor=text_processor,
-        **FLAGS.config.dataset_kwargs,
+    val_data = (
+        make_bridge_dataset(
+            FLAGS.config.data_path,
+            train=False,
+            obs_horizon=obs_horizon,
+            **FLAGS.config.dataset_kwargs,
+        )
+        .unbatch()
+        .shuffle(FLAGS.config.shuffle_buffer_size)
+        .repeat()
+        .batch(FLAGS.config.batch_size)
     )
-    train_data_iter = train_data.get_iterator()
+    train_data_iter = map(shard_fn, map(process_text, train_data.iterator()))
+    val_data_iter = map(shard_fn, map(process_text, val_data.iterator()))
 
     example_batch = next(train_data_iter)
     logging.info(f"Batch size: {example_batch['observations']['image'].shape[0]}")
@@ -151,10 +144,6 @@ def main(_):
     logging.info(
         f"Batch size per device: {example_batch['observations']['image'].shape[0] // num_devices}"
     )
-
-    # we shard the leading dimension (batch dimension) accross all devices evenly
-    sharding = jax.sharding.PositionalSharding(devices)
-    example_batch = shard_batch(example_batch, sharding)
 
     model_def = create_model_def(
         action_dim=example_batch["actions"].shape[-1],
@@ -231,7 +220,7 @@ def main(_):
         timer.tick("total")
 
         timer.tick("dataset")
-        batch = shard_batch(next(train_data_iter), sharding)
+        batch = next(train_data_iter)
         timer.tock("dataset")
 
         timer.tick("train")
@@ -242,7 +231,7 @@ def main(_):
             logging.info("Evaluating...")
             timer.tick("val")
             metrics = []
-            for batch in val_data.get_iterator():
+            for _, batch in zip(range(FLAGS.config.num_val_batches), val_data_iter):
                 metrics.append(eval_step(train_state, batch))
             metrics = jax.tree_map(lambda *xs: np.mean(xs), *metrics)
             wandb_log({"validation": metrics}, step=i)
