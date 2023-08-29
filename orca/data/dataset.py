@@ -108,8 +108,8 @@ def apply_common_transforms(
         goal_relabeling_strategy (Optional[str], optional): The goal relabeling strategy to use, or None for no goal
             relabeling. See `bc_goal_relabeling.py`.
         goal_relabeling_kwargs (dict, optional): Additional keyword arguments to pass to the goal relabeling function.
-        augment_kwargs (dict, optional): Keyword arguments to pass to the augmentation function. See the dlimp
-            augmentations module for documentation.
+        augment_kwargs (dict, optional): Keyword arguments to pass to the augmentation function. See
+            `dlimp.augmentations.augment_image` for documentation.
         act_horizon (Optional[int], optional): The future horizon to chunk actions, or None for no chunking.
         obs_horizon (Optional[int], optional): The past horizon to chunk observations, or None for no chunking.
         skip_unlabeled (bool, optional): Whether to skip trajectories with no language labels.
