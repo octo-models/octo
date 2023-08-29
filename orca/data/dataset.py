@@ -116,7 +116,7 @@ def apply_common_transforms(
         action_proprio_metadata (Optional[dict], optional): A dictionary containing metadata about the action and
             proprio statistics. If None, no normalization is performed.
         action_proprio_normalization_type (Optional[str], optional): The type of normalization to perform on the action,
-            proprio, or both. Can be "normal" (mean 0, std 1) or "bounds" (normalized to [0, 1]).
+            proprio, or both. Can be "normal" (mean 0, std 1) or "bounds" (normalized to [-1, 1]).
         use_clip_image_preprocessing (bool, optional): Whether to perform the CLIP image preprocessing step.
     """
     if skip_unlabeled:
