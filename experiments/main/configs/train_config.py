@@ -21,8 +21,8 @@ def get_config(config_string):
         project="orca", group=placeholder(str), entity=placeholder(str)
     )
 
-    base_real_config = dict(
-        batch_size=4,
+    base_config = dict(
+        batch_size=256,
         num_steps=int(2e6),
         log_interval=100,
         eval_interval=5000,
@@ -88,7 +88,7 @@ def get_config(config_string):
     )
 
     possible_structures = {
-        "transformer_bc": ConfigDict(
+        "transformer_bc_bridge": ConfigDict(
             dict(
                 agent="transformer_bc",
                 obs_horizon=1,
@@ -103,7 +103,25 @@ def get_config(config_string):
                 ),
                 optimizer=base_optimizer_config,
                 dataset_kwargs=base_data_config,
-                **base_real_config,
+                **base_config,
+            )
+        ),
+        "transformer_bc_r2d2": ConfigDict(
+            dict(
+                agent="transformer_bc",
+                obs_horizon=1,
+                model=update_config(
+                    base_model_config,
+                    observation_tokenizer_kwargs={
+                        "obs-tokenizer": {"num_tokens": 60, **base_encoder_kwargs}
+                    },
+                    task_tokenizer_kwargs={
+                        "goal-obs-tokenizer": {"num_tokens": 60, **base_encoder_kwargs}
+                    },
+                ),
+                optimizer=base_optimizer_config,
+                dataset_kwargs=base_data_config,
+                **base_config,
             )
         ),
         "transformer_bc_film_lang": ConfigDict(
@@ -119,7 +137,7 @@ def get_config(config_string):
                 ),
                 optimizer=base_optimizer_config,
                 dataset_kwargs=base_data_config,
-                **base_real_config,
+                **base_config,
             )
         ),
         "transformer_bc_lang": ConfigDict(
@@ -133,7 +151,7 @@ def get_config(config_string):
                 ),
                 optimizer=base_optimizer_config,
                 dataset_kwargs=base_data_config,
-                **base_real_config,
+                **base_config,
             )
         ),
         "transformer_bc_clip_text": ConfigDict(
@@ -148,7 +166,7 @@ def get_config(config_string):
                 optimizer=base_optimizer_config,
                 dataset_kwargs=base_data_config,
                 **update_config(
-                    base_real_config,
+                    base_config,
                     text_processor="clip_processor",
                     pretrained_weights=["clip"],
                 ),
@@ -168,7 +186,7 @@ def get_config(config_string):
                 optimizer=base_optimizer_config,
                 dataset_kwargs=update_config(base_data_config, image_processor="clip"),
                 **update_config(
-                    base_real_config,
+                    base_config,
                     text_processor="clip_processor",
                     pretrained_weights=["clip"],
                 ),
