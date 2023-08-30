@@ -29,6 +29,15 @@ def r2_d2_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
         ),
         axis=-1,
     )
+    keep_keys = [
+        "observation",
+        "action",
+        "language_instruction",
+        "is_terminal",
+        "is_last",
+        "_traj_index",
+    ]
+    trajectory = {k: v for k, v in trajectory.items() if k in keep_keys}
     return trajectory
 
 
