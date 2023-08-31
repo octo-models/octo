@@ -15,7 +15,7 @@ from flax.training import checkpoints
 from flax.traverse_util import flatten_dict
 from ml_collections import config_flags
 
-from orca.data.dataset import make_bridge_dataset
+from orca.data.dataset import make_rlds_dataset
 from orca.data.utils.text_processing import text_processors
 from orca.model import create_model_def
 from orca.model.weights import weights_loaders
@@ -97,39 +97,31 @@ def main(_):
 
     # load datasets
     logging.info(f"Loading data from {FLAGS.config.data_path}")
-    obs_horizon = FLAGS.config.get("obs_horizon")
-    text_processor = text_processors[FLAGS.config.text_processor](
-        **FLAGS.config.text_processor_kwargs
-    )
-    assert (
-        "action_proprio_metadata" in FLAGS.config.dataset_kwargs
-    ), "action_proprio_metadata must be specified in dataset_kwargs"
+    if FLAGS.config.text_processor is None:
+        text_processor = None
+    else:
+        text_processor = text_processors[FLAGS.config.text_processor](
+            **FLAGS.config.text_processor_kwargs
+        )
 
     def process_text(batch):
-        batch["language"] = text_processor.encode(
-            [s.decode("utf-8") for s in batch["language"]]
-        )
+        if text_processor is None:
+            batch.pop("language")
+        else:
+            batch["language"] = text_processor.encode(
+                [s.decode("utf-8") for s in batch["language"]]
+            )
         return batch
 
     train_data = (
-        make_bridge_dataset(
-            FLAGS.config.data_path,
-            train=True,
-            obs_horizon=obs_horizon,
-            **FLAGS.config.dataset_kwargs,
-        )
+        make_rlds_dataset(**FLAGS.config.dataset_kwargs, train=True)
         .unbatch()
         .shuffle(FLAGS.config.shuffle_buffer_size)
         .repeat()
         .batch(FLAGS.config.batch_size)
     )
     val_data = (
-        make_bridge_dataset(
-            FLAGS.config.data_path,
-            train=False,
-            obs_horizon=obs_horizon,
-            **FLAGS.config.dataset_kwargs,
-        )
+        make_rlds_dataset(**FLAGS.config.dataset_kwargs, train=False)
         .unbatch()
         .shuffle(FLAGS.config.shuffle_buffer_size)
         .repeat()
