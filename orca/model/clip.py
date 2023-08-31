@@ -7,6 +7,18 @@ from transformers.models.clip.modeling_flax_clip import (
     FlaxCLIPVisionTransformer,
 )
 
+# TODO: this would need to be integrated if we want to use CLIP visual encoder
+# def _clip_image_preprocess(image):
+#     # this should be exactly the same as HF's CLIPProcessor
+#     image = tf.image.resize(image, (224, 224), method="bicubic")
+#     image = image / 255.0
+#     image = (image - [0.48145466, 0.4578275, 0.40821073]) / [
+#         0.26862954,
+#         0.26130258,
+#         0.27577711,
+#     ]
+#     return image
+
 
 class CLIPVisionTokenizer(nn.Module):
     source: str = "openai/clip-vit-base-patch32"
