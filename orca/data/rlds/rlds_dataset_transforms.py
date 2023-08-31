@@ -3,6 +3,8 @@ from typing import Any, Dict
 
 import tensorflow as tf
 
+from orca.data.bridge import bridge_dataset as bridge
+
 
 def stanford_kuka_multimodal_dataset_transform(
     trajectory: Dict[str, Any]
@@ -54,6 +56,15 @@ def fmb_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def bridge_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
+    trajectory["action"] = tf.concat(
+        [
+            trajectory["action"][:, :6],
+            bridge.binarize_gripper_actions(trajectory["action"][:, -1])[:, None],
+        ],
+        axis=1,
+    )
+    trajectory = bridge.relabel_actions(trajectory)
+    # trajectory = tf.nest.map_structure(lambda y: y[:-1], trajectory)
     keep_keys = [
         "observation",
         "action",
