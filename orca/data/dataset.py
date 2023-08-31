@@ -74,18 +74,6 @@ def _chunk_act_obs(traj, act_horizon, obs_horizon):
     return traj
 
 
-def _clip_image_preprocess(image):
-    # this should be exactly the same as HF's CLIPProcessor
-    image = tf.image.resize(image, (224, 224), method="bicubic")
-    image = image / 255.0
-    image = (image - [0.48145466, 0.4578275, 0.40821073]) / [
-        0.26862954,
-        0.26130258,
-        0.27577711,
-    ]
-    return image
-
-
 def apply_common_transforms(
     dataset: tf.data.Dataset,
     *,
@@ -98,7 +86,6 @@ def apply_common_transforms(
     skip_unlabeled: bool = False,
     action_proprio_metadata: Optional[dict] = None,
     action_proprio_normalization_type: Optional[str] = None,
-    use_clip_image_preprocessing: bool = False,
 ):
     """Common transforms shared between all datasets.
 
@@ -117,7 +104,6 @@ def apply_common_transforms(
             proprio statistics. If None, no normalization is performed.
         action_proprio_normalization_type (Optional[str], optional): The type of normalization to perform on the action,
             proprio, or both. Can be "normal" (mean 0, std 1) or "bounds" (normalized to [-1, 1]).
-        use_clip_image_preprocessing (bool, optional): Whether to perform the CLIP image preprocessing step.
     """
     if skip_unlabeled:
         dataset = dataset.filter(lambda x: tf.math.reduce_any(x["language"] != ""))
@@ -140,15 +126,6 @@ def apply_common_transforms(
             partial(
                 dl.transforms.augment,
                 augment_kwargs=augment_kwargs,
-            )
-        )
-
-    if use_clip_image_preprocessing:
-        dataset = dataset.map(
-            partial(
-                dl.transforms.selective_tree_map,
-                match="image",
-                map_fn=_clip_image_preprocess,
             )
         )
 
