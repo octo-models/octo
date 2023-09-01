@@ -1,5 +1,7 @@
 import datetime
+import json
 import os
+from functools import partial
 
 import jax
 import jax.numpy as jnp
@@ -45,53 +47,6 @@ config_flags.DEFINE_config_file(
     lock_config=False,
 )
 
-config_flags.DEFINE_config_file(
-    "bridgedata_config",
-    os.path.join(config_dir, "data_config.py:all"),
-    "File path to the bridgedata configuration.",
-    lock_config=False,
-)
-
-
-def loss_fn(params, state, batch, rng, train=True):
-    info = state.apply_fn(
-        {"params": params},
-        batch["observations"],
-        batch["goals"],
-        batch["actions"],
-        train=train,
-        rngs={"dropout": rng},
-    )
-    return info["loss"], info
-
-
-@jax.jit
-def train_step(state, batch):
-    rng, dropout_rng = jax.random.split(state.rng)
-    (loss, info), grads = jax.value_and_grad(loss_fn, has_aux=True)(
-        state.params, state, batch, dropout_rng, train=True
-    )
-    new_state = state.apply_gradients(grads=grads, rng=rng)
-    return new_state, info
-
-
-@jax.jit
-def eval_step(state, batch):
-    loss, info = loss_fn(state.params, state, batch, state.rng, train=False)
-    return info
-
-
-def wandb_log(info, step):
-    wandb.log(flatten_dict(info, sep="/"), step=step)
-
-
-def tokenize_language(batch, text_processor):
-    if text_processor is None:
-        batch.pop("language")
-    else:
-        batch["language"] = text_processor.encode(batch["language"])
-    return batch
-
 
 def main(_):
     initialize_compilation_cache()
@@ -99,13 +54,21 @@ def main(_):
     num_devices = len(devices)
     assert FLAGS.config.batch_size % num_devices == 0
 
+    # we shard the leading dimension (batch dimension) accross all devices evenly
+    sharding = jax.sharding.PositionalSharding(devices)
+    shard_fn = partial(shard_batch, sharding=sharding)
+
     # prevent tensorflow from using GPUs
     tf.config.set_visible_devices([], "GPU")
 
     # set up wandb and logging
-    name = format_name_with_config(FLAGS.name, FLAGS.config.to_dict())
+    name = format_name_with_config(
+        FLAGS.name,
+        FLAGS.config.to_dict(),
+    )
     wandb_id = "{name}_{time}".format(
-        name=name, time=datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        name=name,
+        time=datetime.datetime.now().strftime("%Y%m%d_%H%M%S"),
     )
     wandb.init(
         config=FLAGS.config.to_dict(),
@@ -133,7 +96,22 @@ def main(_):
         logging.info("save_dir not passed in, not saving checkpoints")
 
     # load datasets
-    logging.info(f"Loading data from {FLAGS.config.data_path}")
+    logging.info(f"Loading data from {FLAGS.config.dataset_kwargs.data_dir}")
+    if FLAGS.config.text_processor is None:
+        text_processor = None
+    else:
+        text_processor = text_processors[FLAGS.config.text_processor](
+            **FLAGS.config.text_processor_kwargs
+        )
+
+    def process_text(batch):
+        if text_processor is None:
+            batch.pop("language")
+        else:
+            batch["language"] = text_processor.encode(
+                [s.decode("utf-8") for s in batch["language"]]
+            )
+        return batch
 
     train_data = (
         make_rlds_dataset(**FLAGS.config.dataset_kwargs, train=True)
@@ -149,14 +127,8 @@ def main(_):
         .repeat()
         .batch(FLAGS.config.batch_size)
     )
-    train_data_iter = train_data.as_numpy_iterator()
-
-    if FLAGS.config.text_processor is None:
-        text_processor = None
-    else:
-        text_processor = text_processors[FLAGS.config.text_processor](
-            **FLAGS.config.text_processor_kwargs
-        )
+    train_data_iter = map(shard_fn, map(process_text, train_data.iterator()))
+    val_data_iter = map(shard_fn, map(process_text, val_data.iterator()))
 
     example_batch = next(train_data_iter)
     logging.info(f"Batch size: {example_batch['observations']['image'].shape[0]}")
@@ -164,11 +136,6 @@ def main(_):
     logging.info(
         f"Batch size per device: {example_batch['observations']['image'].shape[0] // num_devices}"
     )
-
-    # we shard the leading dimension (batch dimension) accross all devices evenly
-    sharding = jax.sharding.PositionalSharding(devices)
-    example_batch = tokenize_language(example_batch, text_processor)
-    example_batch = shard_batch(example_batch, sharding)
 
     model_def = create_model_def(
         action_dim=example_batch["actions"].shape[-1],
@@ -212,13 +179,40 @@ def main(_):
         jax.tree_map(jnp.array, train_state), sharding.replicate()
     )
 
+    def loss_fn(params, state, batch, rng, train=True):
+        info = state.apply_fn(
+            {"params": params},
+            batch["observations"],
+            batch["goals"],
+            batch["actions"],
+            train=train,
+            rngs={"dropout": rng},
+        )
+        return info["loss"], info
+
+    @jax.jit
+    def train_step(state, batch):
+        rng, dropout_rng = jax.random.split(state.rng)
+        (loss, info), grads = jax.value_and_grad(loss_fn, has_aux=True)(
+            state.params, state, batch, dropout_rng, train=True
+        )
+        new_state = state.apply_gradients(grads=grads, rng=rng)
+        return new_state, info
+
+    @jax.jit
+    def eval_step(state, batch):
+        loss, info = loss_fn(state.params, state, batch, state.rng, train=False)
+        return info
+
+    def wandb_log(info, step):
+        wandb.log(flatten_dict(info, sep="/"), step=step)
+
     timer = Timer()
     for i in tqdm.tqdm(range(int(FLAGS.config.num_steps))):
         timer.tick("total")
 
         timer.tick("dataset")
-        batch = tokenize_language(next(train_data_iter), text_processor)
-        batch = shard_batch(batch, sharding)
+        batch = next(train_data_iter)
         timer.tock("dataset")
 
         timer.tick("train")
@@ -229,7 +223,7 @@ def main(_):
             logging.info("Evaluating...")
             timer.tick("val")
             metrics = []
-            for batch in val_data.as_numpy_iterator():
+            for _, batch in zip(range(FLAGS.config.num_val_batches), val_data_iter):
                 metrics.append(eval_step(train_state, batch))
             metrics = jax.tree_map(lambda *xs: np.mean(xs), *metrics)
             wandb_log({"validation": metrics}, step=i)
