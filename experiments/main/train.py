@@ -96,7 +96,7 @@ def main(_):
         logging.info("save_dir not passed in, not saving checkpoints")
 
     # load datasets
-    logging.info(f"Loading data from {FLAGS.config.data_path}")
+    logging.info(f"Loading data from {FLAGS.config.dataset_kwargs.data_dir}")
     if FLAGS.config.text_processor is None:
         text_processor = None
     else:
