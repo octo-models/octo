@@ -165,12 +165,12 @@ def make_bridge_dataset(
     ).map(dl.transforms.unflatten_dict)
 
     def restructure(traj):
-        traj["observations"] = traj.pop("obs")
+        # traj["observations"] = traj.pop("obs")
         traj["observations"] = {
             "image": traj["observations"]["images0"],  # always take images0 for now
             "proprio": tf.cast(traj["observations"]["state"], tf.float32),
         }
-        traj["language"] = traj.pop("lang")
+        # traj["language"] = traj.pop("lang")
         traj["actions"] = tf.cast(traj["actions"], tf.float32)
         traj["actions"] = tf.concat(
             [
@@ -187,7 +187,7 @@ def make_bridge_dataset(
     # preprocessing, so we must discard the last timestep. if relabeling, this happens in relabel_actions (since
     # relabeling uses the last observation); otherwise, we do it manually.
     if relabel_actions:
-        dataset = dataset.map(bridge.relabel_actions)
+        dataset = dataset.map(bridge.relabel_actions_bridge)
     else:
         dataset = dataset.map(lambda x: tf.nest.map_structure(lambda y: y[:-1], x))
 
