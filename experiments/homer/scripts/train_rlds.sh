@@ -14,4 +14,4 @@ CMD="python experiments/homer/train_rlds.py \
     --config experiments/homer/configs/train_config.py:transformer_bc_bridge \
     --name $NAME"
 
-$CMD
+$CMD --debug

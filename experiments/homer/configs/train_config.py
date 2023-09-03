@@ -47,12 +47,12 @@ def get_config(config_string):
     )
 
     base_real_config = dict(
-        batch_size=256,
+        batch_size=4,
         num_steps=int(2e6),
         log_interval=1000,
         eval_interval=10000,
         save_interval=10000,
-        save_dir="gs://rail-tpus-homer-v4/log",
+        save_dir="/mnt2/homer/jaxrl_log",
         resume_path=placeholder(str),
         seed=42,
         text_processor=None,
@@ -72,7 +72,7 @@ def get_config(config_string):
         # image_obs_key="exterior_image_1_left",
         # state_obs_key="joint_position",
         name="bridge_dataset",
-        data_dir="gs://rail-orca-central2",
+        data_dir="/nfs/kun2/datasets/tfds",
         image_obs_key="image_0",
         state_obs_key="state",
         obs_horizon=1,
@@ -112,7 +112,7 @@ def get_config(config_string):
     )
 
     base_encoder_kwargs = dict(
-        encoder="resnetv1-34-bridge",
+        encoder="resnetv1-50-bridge",
         encoder_kwargs=dict(
             pooling_method="none", add_spatial_coordinates=True, act="swish"
         ),
