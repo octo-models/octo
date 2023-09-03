@@ -66,3 +66,25 @@ def relabel_actions(traj: Dict[str, Any]) -> Dict[str, Any]:
     )
 
     return traj_truncated
+
+
+def relabel_actions_bridge(traj: Dict[str, Any]) -> Dict[str, Any]:
+    """Relabels the actions in BridgeData to used the reached proprio instead. Discards the last timestep of the
+    trajectory (since we don't have a next state to compute the action.)
+    """
+    # relabel the first 6 action dims (xyz position, xyz rotation) using the reached proprio
+    movement_actions = (
+        traj["observations"]["proprio"][1:, :6]
+        - traj["observations"]["proprio"][:-1, :6]
+    )
+
+    # discard the last timestep of the trajectory
+    traj_truncated = tf.nest.map_structure(lambda x: x[:-1], traj)
+
+    # recombine to get full actions
+    traj_truncated["actions"] = tf.concat(
+        [movement_actions, traj["actions"][:-1, -1:]],
+        axis=1,
+    )
+
+    return traj_truncated
