@@ -25,12 +25,12 @@ def get_config(config_string):
     base_config = dict(
         batch_size=4,
         shuffle_buffer_size=1000,
+        num_val_batches=8,
         num_steps=int(2e6),
         log_interval=100,
         eval_interval=5000,
         save_interval=5000,
         save_dir="/mnt2/homer/jaxrl_log",
-        data_path="/nfs/kun2/datasets/r2d2/tfds",
         resume_path=placeholder(str),
         seed=42,
         text_processor="muse_embedding",
