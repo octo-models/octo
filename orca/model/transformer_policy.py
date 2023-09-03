@@ -45,6 +45,14 @@ class TransformerPolicy(nn.Module):
         self.tokens_per_task = sum(tok.num_tokens for tok in self.task_tokenizers)
         self.attention_mask = self.generate_masks()
         self.vocab_proj = nn.Dense(self.vocab_size)
+        self.obs_proj = [
+            nn.Dense(self.token_embedding_size)
+            for _ in range(len(self.observation_tokenizers))
+        ]
+        self.task_proj = [
+            nn.Dense(self.token_embedding_size)
+            for _ in range(len(self.task_tokenizers))
+        ]
 
     def __call__(
         self,
@@ -181,7 +189,8 @@ class TransformerPolicy(nn.Module):
 
         # a list of (batch, time_seq_len, tokens_per_X, token_embedding_size)
         obs_tokens = [
-            tok(observations, goals, train=train) for tok in self.observation_tokenizers
+            proj(tok(observations, goals, train=train))
+            for tok, proj in zip(self.observation_tokenizers, self.obs_proj)
         ]
         # (batch, time_seq_len, tokens_per_obs, token_embedding_size)
         obs_tokens = jnp.concatenate(obs_tokens, axis=-2)
@@ -190,7 +199,8 @@ class TransformerPolicy(nn.Module):
         if len(self.task_tokenizers) > 0:
             # a list of (batch, tokens_per_X, token_embedding_size)
             task_tokens = [
-                tok(observations, goals, train=train) for tok in self.task_tokenizers
+                proj(tok(observations, goals, train=train))
+                for tok, proj in zip(self.task_tokenizers, self.task_proj)
             ]
             # (batch, tokens_per_task, token_embedding_size)
             task_tokens = jnp.concatenate(task_tokens, axis=-2)
