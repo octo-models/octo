@@ -200,7 +200,7 @@ def make_rlds_dataset(
     name: str,
     data_dir: str,
     train: bool,
-    image_obs_key: str = "image",
+    image_obs_keys: Union[str, List[str]] = "image_0",
     state_obs_key: str = "state",
     **kwargs,
 ) -> tf.data.Dataset:
@@ -210,7 +210,7 @@ def make_rlds_dataset(
         name (str): The name of the RLDS dataset (usually "name" or "name:version").
         data_dir (str): The path to the data directory.
         train (bool): Whether to use the training or validation set.
-        image_obs_key (str, optional): The key to use for the image observation. Defaults to "image".
+        image_obs_keys (str, List[str], optional): The key(s) to use for the image observation. Defaults to "image_0".
         state_obs_key (str, optional): The key to use for the state observation. Defaults to "state".
         **kwargs: Additional keyword arguments to pass to `apply_common_transforms`.
     """
@@ -222,24 +222,27 @@ def make_rlds_dataset(
 
     dataset = dl.DLataset.from_rlds(builder, split=split)
 
+    if not isinstance(image_obs_keys, list):
+        image_obs_keys = [image_obs_keys]
+
     def restructure(traj):
         # apply any dataset-specific transforms
         if name in RLDS_TRAJECTORY_MAP_TRANSFORMS:
             traj = RLDS_TRAJECTORY_MAP_TRANSFORMS[name](traj)
 
-        # restructure RLDS dataset to match BridgeData format. extracts only 2 keys from the "observation" sub-dict: one
-        # image (based on image_obs_key) and some sort of proprio (based on state_obs_key)
+        # restructure RLDS dataset to match BridgeData format.
+        # extracts images (based on image_obs_keys list) and some sort of proprio (based on state_obs_key)
         traj["observations"] = {
-            "image": traj["observation"][image_obs_key],
-            "proprio": tf.cast(traj["observation"][state_obs_key], tf.float32),
+            key: traj["observation"][key] for key in image_obs_keys
         }
-        del traj["observation"]
+        traj["proprio"] = tf.cast(traj["observation"][state_obs_key], tf.float32)
         traj["language"] = traj.pop("language_instruction")
         traj["actions"] = tf.cast(traj.pop("action"), tf.float32)
         traj["terminals"] = traj.pop("is_terminal")
         traj["truncates"] = tf.math.logical_and(
             traj.pop("is_last"), tf.math.logical_not(traj["terminals"])
         )
+        del traj["observation"]
 
         return traj
 
