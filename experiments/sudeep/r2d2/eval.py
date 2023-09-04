@@ -57,7 +57,8 @@ def stack_obs(obs):
 
 
 def load_checkpoint(path):
-    # load information from wandb
+    # our R2D2 machine cannot connect to internet when robot is on
+    # so we pickle the wandb config dict and load offline
     with open(path + '/cfg.pkl', 'rb') as f:
         cfg = pkl.load(f)
 
