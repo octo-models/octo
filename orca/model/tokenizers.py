@@ -41,6 +41,8 @@ class ImageTokenizer(nn.Module):
     use_token_learner: bool = False
     num_tokens: int = 8  # this is not enforced unless use_token_learner is True
     conditioning_type: str = "none"
+    image_obs_keys: List[str] = ["image_0"]   # list of image keys to tokenize
+    stack_image_obs: bool = True        # if True, stacks image observation inputs channel-wise
 
     @nn.compact
     def __call__(
@@ -49,29 +51,34 @@ class ImageTokenizer(nn.Module):
         goals=None,
         train: bool = True,
     ):
+        def assemble_image_obs(obs):
+            if len(self.image_obs_keys) > 1:
+                assert self.stack_image_obs     # currently only support stacking for multi-image inputs
+            return jnp.concatenate([obs[key] for key in self.image_obs_keys], axis=-1)
+
         # observations["image"] is (batch, obs_horizon, height, width, channel)
         # goals["image"] is (batch, height, width, channel)
-        b, t, h, w, c = observations["image"].shape
+        image = assemble_image_obs(observations)
+        b, t, h, w, c = image.shape
         if self.conditioning_type == "none":
             # late-fusion architecture, image encoder doesn't see task and obs together
-            image = observations["image"]
             image = jnp.reshape(image, (b * t, h, w, c))
             image_tokens = encoders[self.encoder](**self.encoder_kwargs)(image)
             image_tokens = jnp.reshape(image_tokens, (b, t, -1, image_tokens.shape[-1]))
         elif self.conditioning_type == "goal_image":
             # early-fusion goal-image only architecture, concatenate obs and goal image channel-wise
             image = jnp.concatenate(
-                [observations["image"][:, -1], goals["image"]], axis=-1
+                [image[:, -1],
+                 assemble_image_obs(goals["image"])], axis=-1
             )
             image_tokens = encoders[self.encoder](**self.encoder_kwargs)(image)
             image_tokens = jnp.reshape(image_tokens, (b, -1, image_tokens.shape[-1]))
         elif self.conditioning_type == "goal_image_no_obs":
-            image = goals["image"]
+            image = assemble_image_obs(goals["image"])
             image_tokens = encoders[self.encoder](**self.encoder_kwargs)(image)
             image_tokens = jnp.reshape(image_tokens, (b, -1, image_tokens.shape[-1]))
         elif self.conditioning_type == "film_language":
             # encode task and pass into encoder with FiLM
-            image = observations["image"]
             image = jnp.reshape(image, (b * t, h, w, c))
             lang = goals["language"]
             lang = lang[:, None, :].repeat(t, axis=1)
