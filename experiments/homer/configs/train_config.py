@@ -3,6 +3,26 @@ from ml_collections.config_dict import placeholder
 from copy import deepcopy
 
 
+ACT_MEAN = [
+    1.9296819e-04,
+    1.3667766e-04,
+    -1.4583133e-04,
+    -1.8390431e-04,
+    -3.0808983e-04,
+    2.7425270e-04,
+    5.9716219e-01,
+]
+
+ACT_STD = [
+    0.00912848,
+    0.0127196,
+    0.01229497,
+    0.02606696,
+    0.02875283,
+    0.07807977,
+    0.48710242,
+]
+
 def update_config(config, **kwargs):
     new_config = deepcopy(config)
     for key, value in kwargs.items():
@@ -47,12 +67,12 @@ def get_config(config_string):
     )
 
     base_real_config = dict(
-        batch_size=4,
+        batch_size=256,
         num_steps=int(2e6),
         log_interval=1000,
-        eval_interval=1,
+        eval_interval=10000,
         save_interval=10000,
-        save_dir="/mnt2/homer/jaxrl_log",
+        save_dir="gs://rail-tpus-homer-v4/log",
         resume_path=placeholder(str),
         seed=42,
         text_processor=None,
@@ -75,7 +95,17 @@ def get_config(config_string):
         # data_dir="gs://rail-orca-central2",
         # image_obs_key="image_0",
         # state_obs_key="state",
-        data_path="/nfs/kun2/users/homer/datasets/bridge_data_all/tfrecord_256_test/rss/toykitchen2/set_table/40",
+        data_path="gs://rail-tpus-kevin-central2/dlimp/bridge_256",
+        action_proprio_metadata=dict(
+            action=dict(
+                mean=ACT_MEAN,
+                std=ACT_STD
+            ),
+            proprio=dict(
+                mean=ACT_MEAN,
+                std=ACT_STD
+            )
+        ),
         obs_horizon=1,
         augment_kwargs=dict(
             random_resized_crop=dict(scale=[0.8, 1.0], ratio=[0.9, 1.1]),
