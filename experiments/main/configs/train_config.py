@@ -109,7 +109,7 @@ def get_config(config_string):
                     base_data_config,
                     name="bridge_dataset",
                     data_dir="/nfs/kun2/datasets/tfds",
-                )
+                ),
                 **base_config,
             )
         ),
@@ -139,6 +139,7 @@ def get_config(config_string):
                     name="r2_d2_pen",
                     data_dir="/nfs/kun2/datasets/r2d2/tfds",
                     image_obs_keys=["image_0", "image_1", "image_2"],
+                    state_obs_key="joint_position",
                 ),
                 **base_config,
             )
