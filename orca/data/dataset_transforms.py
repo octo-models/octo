@@ -3,7 +3,7 @@ from typing import Any, Dict
 
 import tensorflow as tf
 
-from orca.data.bridge import bridge_dataset as bridge
+import orca.data.utils.bridge_utils as bridge
 
 
 def stanford_kuka_multimodal_dataset_transform(
@@ -63,6 +63,7 @@ def bridge_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
         ],
         axis=1,
     )
+    # TODO (homer) commit to relabeling actions or just removing the last timestep
     trajectory = bridge.relabel_actions(trajectory)
     # trajectory = tf.nest.map_structure(lambda y: y[:-1], trajectory)
     keep_keys = [
