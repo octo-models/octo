@@ -18,7 +18,9 @@ def update_config(config, **kwargs):
 
 def get_config(config_string):
     base_wandb_config = dict(
-        project="orca", group=placeholder(str), entity=placeholder(str)
+        project="orca",
+        group=placeholder(str),
+        entity=placeholder(str)
     )
 
     base_sim_config = dict(
@@ -41,32 +43,39 @@ def get_config(config_string):
         num_val_batches=8,
         pretrained_weights=[],
         wandb=base_wandb_config,
+        shuffle_buffer_size=25000,
     )
 
     base_real_config = dict(
-        batch_size=4,
+        batch_size=256,
         num_steps=int(2e6),
-        log_interval=100,
-        eval_interval=5000,
-        save_interval=5000,
-        save_dir="/mnt2/homer/jaxrl_log",
-        data_path="/nfs/kun2/datasets/r2d2/tfds",
+        log_interval=1000,
+        eval_interval=10000,
+        save_interval=10000,
+        save_dir="gs://rail-tpus-homer-v4/log",
         resume_path=placeholder(str),
         seed=42,
-        text_processor="muse_embedding",
+        text_processor=None,
         text_processor_kwargs=dict(),
         pretrained_weights=[],
         wandb=base_wandb_config,
+        shuffle_buffer_size=25000,
+        num_val_batches=8,
     )
 
     # params that need to be specified multiple places
     normalization_type = "normal"
 
     base_data_config = dict(
-        shuffle_buffer_size=25000,
-        prefetch_num_batches=20,
-        augment=True,
-        augment_next_obs_goal_differently=False,
+        # name="r2_d2_pen",
+        # data_dir="/nfs/kun2/datasets/r2d2/tfds",
+        # image_obs_key="exterior_image_1_left",
+        # state_obs_key="joint_position",
+        name="bridge_dataset",
+        data_dir="gs://rail-orca-central2",
+        image_obs_key="image_0",
+        state_obs_key="state",
+        obs_horizon=1,
         augment_kwargs=dict(
             random_resized_crop=dict(scale=[0.8, 1.0], ratio=[0.9, 1.1]),
             random_brightness=[0.2],
@@ -82,12 +91,13 @@ def get_config(config_string):
             ],
         ),
         goal_relabeling_strategy="uniform",
-        goal_relabeling_kwargs=dict(reached_proportion=0.0),
-        normalization_type=normalization_type,
+        action_proprio_normalization_type=normalization_type,
     )
 
     base_optimizer_config = dict(
-        learning_rate=3e-4, warmup_steps=2000, decay_steps=int(2e6)
+        learning_rate=3e-4,
+        warmup_steps=2000,
+        decay_steps=int(2e6)
     )
 
     base_model_config = dict(
@@ -119,7 +129,6 @@ def get_config(config_string):
         "sim_transformer_bc": ConfigDict(
             dict(
                 agent="transformer_bc",
-                obs_horizon=1,
                 model=update_config(
                     base_model_config,
                     observation_tokenizer_kwargs={
@@ -137,10 +146,9 @@ def get_config(config_string):
                 **base_sim_config,
             )
         ),
-        "transformer_bc": ConfigDict(
+        "transformer_bc_bridge": ConfigDict(
             dict(
                 agent="transformer_bc",
-                obs_horizon=1,
                 model=update_config(
                     base_model_config,
                     observation_tokenizer_kwargs={
@@ -158,7 +166,6 @@ def get_config(config_string):
         "transformer_bc_r2d2": ConfigDict(
             dict(
                 agent="transformer_bc",
-                obs_horizon=1,
                 model=update_config(
                     base_model_config,
                     observation_tokenizer_kwargs={
@@ -176,7 +183,6 @@ def get_config(config_string):
         "transformer_bc_film_lang": ConfigDict(
             dict(
                 agent="transformer_bc",
-                obs_horizon=1,
                 model=update_config(
                     base_model_config,
                     observation_tokenizer_kwargs={
@@ -192,7 +198,6 @@ def get_config(config_string):
         "transformer_bc_lang": ConfigDict(
             dict(
                 agent="transformer_bc",
-                obs_horizon=1,
                 model=update_config(
                     base_model_config,
                     observation_tokenizer_kwargs={"obs-tokenizer": {"num_tokens": 64}},
@@ -206,7 +211,6 @@ def get_config(config_string):
         "transformer_bc_clip_text": ConfigDict(
             dict(
                 agent="transformer_bc",
-                obs_horizon=1,
                 model=update_config(
                     base_model_config,
                     observation_tokenizer_kwargs={"obs-tokenizer": {"num_tokens": 64}},
@@ -224,7 +228,6 @@ def get_config(config_string):
         "transformer_bc_clip_vit_and_text": ConfigDict(
             dict(
                 agent="transformer_bc",
-                obs_horizon=1,
                 model=update_config(
                     base_model_config,
                     observation_tokenizer_kwargs={

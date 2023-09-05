@@ -176,7 +176,7 @@ class TransformerPolicy(nn.Module):
 
     def get_tokens(self, observations, goals, train: bool = False):
         """
-        Tokenize obervation/action history and task (either goal image or language).
+        Tokenize observation/action history and task (either goal image or language).
         """
 
         # a list of (batch, time_seq_len, tokens_per_X, token_embedding_size)
