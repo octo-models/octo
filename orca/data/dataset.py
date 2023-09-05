@@ -1,5 +1,5 @@
 from functools import partial
-from typing import Optional
+from typing import Optional, Union, List
 
 import dlimp as dl
 import tensorflow as tf

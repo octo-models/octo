@@ -131,15 +131,15 @@ def main(_):
     val_data_iter = map(shard_fn, map(process_text, val_data.iterator()))
 
     example_batch = next(train_data_iter)
-    logging.info(f"Batch size: {example_batch['observations']['image'].shape[0]}")
+    logging.info(f"Batch size: {example_batch['observations']['image_0'].shape[0]}")
     logging.info(f"Number of devices: {num_devices}")
     logging.info(
-        f"Batch size per device: {example_batch['observations']['image'].shape[0] // num_devices}"
+        f"Batch size per device: {example_batch['observations']['image_0'].shape[0] // num_devices}"
     )
 
     model_def = create_model_def(
         action_dim=example_batch["actions"].shape[-1],
-        time_sequence_length=example_batch["observations"]["image"].shape[1],
+        time_sequence_length=example_batch["observations"]["image_0"].shape[1],
         **FLAGS.config.model.to_dict(),
     )
 
