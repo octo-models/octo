@@ -15,10 +15,10 @@ from flax.training import checkpoints
 from flax.traverse_util import flatten_dict
 from ml_collections import config_flags
 
-from orca.data.rlds.rlds_dataset import RLDSDataset
+from orca.data.dataset import make_rlds_dataset
 from orca.data.utils.text_processing import text_processors
 from orca.model import create_model_def
-from orca.model.tokenizers import weights_loaders
+from orca.model.weights import weights_loaders
 from orca.train_utils import (
     Timer,
     create_train_state,
@@ -47,13 +47,6 @@ config_flags.DEFINE_config_file(
     lock_config=False,
 )
 
-config_flags.DEFINE_config_file(
-    "bridgedata_config",
-    os.path.join(config_dir, "data_config.py:all"),
-    "File path to the bridgedata configuration.",
-    lock_config=False,
-)
-
 
 def main(_):
     initialize_compilation_cache()
@@ -61,13 +54,21 @@ def main(_):
     num_devices = len(devices)
     assert FLAGS.config.batch_size % num_devices == 0
 
+    # we shard the leading dimension (batch dimension) accross all devices evenly
+    sharding = jax.sharding.PositionalSharding(devices)
+    shard_fn = partial(shard_batch, sharding=sharding)
+
     # prevent tensorflow from using GPUs
     tf.config.set_visible_devices([], "GPU")
 
     # set up wandb and logging
-    name = format_name_with_config(FLAGS.name, FLAGS.config.to_dict())
+    name = format_name_with_config(
+        FLAGS.name,
+        FLAGS.config.to_dict(),
+    )
     wandb_id = "{name}_{time}".format(
-        name=name, time=datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        name=name,
+        time=datetime.datetime.now().strftime("%Y%m%d_%H%M%S"),
     )
     wandb.init(
         config=FLAGS.config.to_dict(),
@@ -95,36 +96,39 @@ def main(_):
         logging.info("save_dir not passed in, not saving checkpoints")
 
     # load datasets
-    logging.info(f"Loading data from {FLAGS.config.data_path}")
-    obs_horizon = FLAGS.config.get("obs_horizon")
-    text_processor = text_processors[FLAGS.config.text_processor](
-        **FLAGS.config.text_processor_kwargs
-    )
+    logging.info(f"Loading data from {FLAGS.config.dataset_kwargs.data_dir}")
+    if FLAGS.config.text_processor is None:
+        text_processor = None
+    else:
+        text_processor = text_processors[FLAGS.config.text_processor](
+            **FLAGS.config.text_processor_kwargs
+        )
 
-    train_data = RLDSDataset(
-        dataset_names="r2_d2_pen",
-        image_obs_key="exterior_image_1_left",
-        state_obs_key="joint_position",
-        tfds_data_dir=FLAGS.config.data_path,
-        seed=FLAGS.config.seed,
-        batch_size=FLAGS.config.batch_size,
-        obs_horizon=obs_horizon,
-        text_processor=text_processor,
-        **FLAGS.config.dataset_kwargs,
+    def process_text(batch):
+        if text_processor is None:
+            batch.pop("language")
+        else:
+            batch["language"] = text_processor.encode(
+                [s.decode("utf-8") for s in batch["language"]]
+            )
+        return batch
+
+    train_data = (
+        make_rlds_dataset(**FLAGS.config.dataset_kwargs, train=True)
+        .unbatch()
+        .shuffle(FLAGS.config.shuffle_buffer_size)
+        .repeat()
+        .batch(FLAGS.config.batch_size)
     )
-    val_data = RLDSDataset(
-        dataset_names="r2_d2_pen",
-        image_obs_key="exterior_image_1_left",
-        state_obs_key="joint_position",
-        tfds_data_dir=FLAGS.config.data_path,
-        seed=FLAGS.config.seed,
-        batch_size=FLAGS.config.batch_size,
-        obs_horizon=obs_horizon,
-        text_processor=text_processor,
-        train=False,
-        **FLAGS.config.dataset_kwargs,
+    val_data = (
+        make_rlds_dataset(**FLAGS.config.dataset_kwargs, train=False)
+        .unbatch()
+        .shuffle(FLAGS.config.shuffle_buffer_size)
+        .repeat()
+        .batch(FLAGS.config.batch_size)
     )
-    train_data_iter = train_data.get_iterator()
+    train_data_iter = map(shard_fn, map(process_text, train_data.iterator()))
+    val_data_iter = map(shard_fn, map(process_text, val_data.iterator()))
 
     example_batch = next(train_data_iter)
     logging.info(f"Batch size: {example_batch['observations']['image'].shape[0]}")
@@ -132,10 +136,6 @@ def main(_):
     logging.info(
         f"Batch size per device: {example_batch['observations']['image'].shape[0] // num_devices}"
     )
-
-    # we shard the leading dimension (batch dimension) accross all devices evenly
-    sharding = jax.sharding.PositionalSharding(devices)
-    example_batch = shard_batch(example_batch, sharding)
 
     model_def = create_model_def(
         action_dim=example_batch["actions"].shape[-1],
@@ -212,7 +212,7 @@ def main(_):
         timer.tick("total")
 
         timer.tick("dataset")
-        batch = shard_batch(next(train_data_iter), sharding)
+        batch = next(train_data_iter)
         timer.tock("dataset")
 
         timer.tick("train")
@@ -223,7 +223,7 @@ def main(_):
             logging.info("Evaluating...")
             timer.tick("val")
             metrics = []
-            for batch in val_data.get_iterator():
+            for _, batch in zip(range(FLAGS.config.num_val_batches), val_data_iter):
                 metrics.append(eval_step(train_state, batch))
             metrics = jax.tree_map(lambda *xs: np.mean(xs), *metrics)
             wandb_log({"validation": metrics}, step=i)
