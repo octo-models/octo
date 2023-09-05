@@ -47,10 +47,10 @@ def get_config(config_string):
     )
 
     base_real_config = dict(
-        batch_size=4,
+        batch_size=256,
         num_steps=int(2e6),
         log_interval=1000,
-        eval_interval=1,
+        eval_interval=10000,
         save_interval=10000,
         save_dir="/mnt2/homer/jaxrl_log",
         resume_path=placeholder(str),
@@ -71,11 +71,10 @@ def get_config(config_string):
         # data_dir="/nfs/kun2/datasets/r2d2/tfds",
         # image_obs_key="exterior_image_1_left",
         # state_obs_key="joint_position",
-        # name="bridge_dataset",
-        # data_dir="gs://rail-orca-central2",
-        # image_obs_key="image_0",
-        # state_obs_key="state",
-        data_path="/nfs/kun2/users/homer/datasets/bridge_data_all/tfrecord_256_test/rss/toykitchen2/set_table/40",
+        name="bridge_dataset",
+        data_dir="/nfs/kun2/datasets/tfds",
+        image_obs_key="image_0",
+        state_obs_key="state",
         obs_horizon=1,
         augment_kwargs=dict(
             random_resized_crop=dict(scale=[0.8, 1.0], ratio=[0.9, 1.1]),
