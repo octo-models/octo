@@ -2,6 +2,7 @@ from ml_collections import ConfigDict
 from ml_collections.config_dict import placeholder
 from copy import deepcopy
 
+
 def update_config(config, **kwargs):
     new_config = deepcopy(config)
     for key, value in kwargs.items():
@@ -43,13 +44,9 @@ def get_config(config_string):
     normalization_type = "normal"
 
     base_data_config = dict(
-        # name="r2_d2_pen",
-        # data_dir="/nfs/kun2/datasets/r2d2/tfds",
-        # image_obs_key="exterior_image_1_left",
-        # state_obs_key="joint_position",
         name="bridge_dataset",
         data_dir="/nfs/kun2/datasets/tfds",
-        image_obs_key="image_0",
+        image_obs_keys="image_0",
         state_obs_key="state",
         obs_horizon=1,
         augment_kwargs=dict(
@@ -108,7 +105,11 @@ def get_config(config_string):
                     },
                 ),
                 optimizer=base_optimizer_config,
-                dataset_kwargs=base_data_config,
+                dataset_kwargs=update_config(
+                    base_data_config,
+                    name="bridge_dataset",
+                    data_dir="/nfs/kun2/datasets/tfds",
+                )
                 **base_config,
             )
         ),
@@ -118,14 +119,27 @@ def get_config(config_string):
                 model=update_config(
                     base_model_config,
                     observation_tokenizer_kwargs={
-                        "obs-tokenizer": {"num_tokens": 60, **base_encoder_kwargs}
+                        "obs-tokenizer": {
+                            "num_tokens": 60,
+                            "image_obs_keys": ("image_0", "image_1", "image_2"),
+                            **base_encoder_kwargs
+                        }
                     },
                     task_tokenizer_kwargs={
-                        "goal-obs-tokenizer": {"num_tokens": 60, **base_encoder_kwargs}
+                        "goal-obs-tokenizer": {
+                            "num_tokens": 60,
+                            "image_obs_keys": ("image_0", "image_1", "image_2"),
+                            **base_encoder_kwargs
+                        }
                     },
                 ),
                 optimizer=base_optimizer_config,
-                dataset_kwargs=base_data_config,
+                dataset_kwargs=update_config(
+                    base_data_config,
+                    name="r2_d2_pen",
+                    data_dir="/nfs/kun2/datasets/r2d2/tfds",
+                    image_obs_keys=["image_0", "image_1", "image_2"],
+                ),
                 **base_config,
             )
         ),
