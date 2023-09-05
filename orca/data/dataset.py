@@ -182,7 +182,7 @@ def apply_common_transforms(
             )
         )
 
-    # adds the "goals" key
+    # adds the "tasks" key
     if goal_relabeling_strategy is not None:
         dataset = dataset.map(
             partial(
