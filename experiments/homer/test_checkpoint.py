@@ -31,7 +31,7 @@ def load_checkpoint(path, wandb_run_name):
 
     example_batch = {
         "observations": example_obs,
-        "goals": {"image": np.zeros((1, im_height, im_width, 3), dtype=np.uint8)},
+        "tasks": {"image": np.zeros((1, im_height, im_width, 3), dtype=np.uint8)},
         "actions": example_actions,
     }
 
@@ -59,7 +59,7 @@ def load_checkpoint(path, wandb_run_name):
         tx,
         init_args=(
             example_batch["observations"],
-            example_batch["goals"],
+            example_batch["tasks"],
             example_batch["actions"],
         ),
     )

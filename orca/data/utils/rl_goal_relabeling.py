@@ -3,8 +3,8 @@ Contains goal relabeling and reward logic written in TensorFlow.
 
 Each relabeling function takes a trajectory with keys "observations",
 "next_observations", and "terminals". It returns a new trajectory with the added
-keys "goals", "rewards", and "masks". Keep in mind that "observations" and
-"next_observations" may themselves be dictionaries, and "goals" must match their
+keys "tasks", "rewards", and "masks". Keep in mind that "observations" and
+"next_observations" may themselves be dictionaries, and "tasks" must match their
 structure.
 
 "masks" determines when the next Q-value is masked out. Typically this is NOT(terminals).
@@ -44,8 +44,8 @@ def uniform(traj, *, reached_proportion):
     # make goal-reaching transitions have an offset of 0
     goal_idxs = tf.where(goal_reached_mask, tf.range(traj_len), goal_idxs)
 
-    # select goals
-    traj["goals"] = tf.nest.map_structure(
+    # select tasks
+    traj["tasks"] = tf.nest.map_structure(
         lambda x: tf.gather(x, goal_idxs),
         traj["next_observations"],
     )
@@ -93,8 +93,8 @@ def last_state_upweighted(traj, *, reached_proportion):
     # clamp out of bounds indices to the last transition
     indices = tf.minimum(indices, traj_len - 1)
 
-    # select goals
-    traj["goals"] = tf.nest.map_structure(
+    # select tasks
+    traj["tasks"] = tf.nest.map_structure(
         lambda x: tf.gather(x, indices),
         traj["next_observations"],
     )
@@ -140,8 +140,8 @@ def geometric(traj, *, reached_proportion, discount):
     # make goal-reaching transitions have an offset of 0
     goal_idxs = tf.where(goal_reached_mask, tf.range(traj_len), goal_idxs)
 
-    # select goals
-    traj["goals"] = tf.nest.map_structure(
+    # select tasks
+    traj["tasks"] = tf.nest.map_structure(
         lambda x: tf.gather(x, goal_idxs),
         traj["next_observations"],
     )

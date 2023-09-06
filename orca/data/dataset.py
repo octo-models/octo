@@ -1,14 +1,67 @@
+import hashlib
+import json
+import logging
 from functools import partial
-from typing import Optional
+from typing import Dict, List, Optional
 
 import dlimp as dl
+import numpy as np
 import tensorflow as tf
 import tensorflow_datasets as tfds
+import tqdm
+from tensorflow_datasets.core.dataset_builder import DatasetBuilder
 
-from orca.data.bridge import bridge_dataset as bridge
-from orca.data.rlds import rlds_dataset as rlds
-from orca.data.rlds.rlds_dataset_transforms import RLDS_TRAJECTORY_MAP_TRANSFORMS
+from orca.data.dataset_transforms import RLDS_TRAJECTORY_MAP_TRANSFORMS
 from orca.data.utils import bc_goal_relabeling
+
+
+def get_action_proprio_stats(
+    builder: DatasetBuilder, dataset: tf.data.Dataset
+) -> Dict[str, Dict[str, List[float]]]:
+    # get statistics file path --> embed unique hash that catches if dataset info changed
+    data_info_hash = hashlib.sha256(str(builder.info).encode("utf-8")).hexdigest()
+    path = tf.io.gfile.join(
+        builder.info.data_dir, f"action_proprio_stats_{data_info_hash}.json"
+    )
+
+    # check if stats already exist and load, otherwise compute
+    if tf.io.gfile.exists(path):
+        logging.info(f"Loading existing statistics for normalization from {path}.")
+        with tf.io.gfile.GFile(path, "r") as f:
+            metadata = json.load(f)
+    else:
+        logging.info("Computing action/proprio statistics for normalization...")
+        actions = []
+        proprios = []
+        for episode in tqdm.tqdm(dataset.take(1000)):
+            actions.append(episode["actions"].numpy())
+            proprios.append(episode["observations"]["proprio"].numpy())
+        actions = np.concatenate(actions)
+        proprios = np.concatenate(proprios)
+        metadata = {
+            "action": {
+                "mean": [float(e) for e in actions.mean(0)],
+                "std": [float(e) for e in actions.std(0)],
+                "max": [float(e) for e in actions.max(0)],
+                "min": [float(e) for e in actions.min(0)],
+            },
+            "proprio": {
+                "mean": [float(e) for e in proprios.mean(0)],
+                "std": [float(e) for e in proprios.std(0)],
+                "max": [float(e) for e in proprios.max(0)],
+                "min": [float(e) for e in proprios.min(0)],
+            },
+        }
+        del actions
+        del proprios
+        with tf.io.gfile.GFile(path, "w") as f:
+            json.dump(metadata, f)
+        logging.info("Done!")
+
+    return {
+        k: {k2: tf.convert_to_tensor(v2, dtype=tf.float32) for k2, v2 in v.items()}
+        for k, v in metadata.items()
+    }
 
 
 def _normalize_action_and_proprio(traj, metadata, normalization_type):
@@ -129,7 +182,7 @@ def apply_common_transforms(
             )
         )
 
-    # adds the "goals" key
+    # adds the "tasks" key
     if goal_relabeling_strategy is not None:
         dataset = dataset.map(
             partial(
@@ -146,57 +199,7 @@ def apply_common_transforms(
     return dataset
 
 
-def make_bridge_dataset(
-    data_path: str,
-    train: bool,
-    relabel_actions: bool = True,
-    **kwargs,
-) -> tf.data.Dataset:
-    """Creates a dataset from the BridgeData format.
-
-    Args:
-        data_path (str): The path to the data directory (must contain "train" and "val" subdirectories).
-        train (bool): Whether to use the training or validation set.
-        relabel_actions (bool, optional): Whether to relabel the actions using the reached proprio. Defaults to True.
-        **kwargs: Additional keyword arguments to pass to `apply_common_transforms`.
-    """
-    dataset = dl.DLataset.from_tfrecords(
-        f"{data_path}/{'train' if train else 'val'}"
-    ).map(dl.transforms.unflatten_dict)
-
-    def restructure(traj):
-        # traj["observations"] = traj.pop("obs")
-        traj["observations"] = {
-            "image": traj["observations"]["images0"],  # always take images0 for now
-            "proprio": tf.cast(traj["observations"]["state"], tf.float32),
-        }
-        # traj["language"] = traj.pop("lang")
-        traj["actions"] = tf.cast(traj["actions"], tf.float32)
-        traj["actions"] = tf.concat(
-            [
-                traj["actions"][:, :6],
-                bridge.binarize_gripper_actions(traj["actions"][:, -1])[:, None],
-            ],
-            axis=1,
-        )
-        return traj
-
-    dataset = dataset.map(restructure)
-
-    # bridgedata has one more observation than action in each trajectory; we pad with a zero action during
-    # preprocessing, so we must discard the last timestep. if relabeling, this happens in relabel_actions (since
-    # relabeling uses the last observation); otherwise, we do it manually.
-    if relabel_actions:
-        dataset = dataset.map(bridge.relabel_actions_bridge)
-    else:
-        dataset = dataset.map(lambda x: tf.nest.map_structure(lambda y: y[:-1], x))
-
-    dataset = apply_common_transforms(dataset, train=train, **kwargs)
-
-    return dataset
-
-
-def make_rlds_dataset(
+def make_dataset(
     name: str,
     data_dir: str,
     train: bool,
@@ -245,7 +248,7 @@ def make_rlds_dataset(
 
     dataset = dataset.map(restructure)
 
-    action_proprio_metadata = rlds.get_action_proprio_stats(builder, dataset)
+    action_proprio_metadata = get_action_proprio_stats(builder, dataset)
 
     dataset = apply_common_transforms(
         dataset, train=train, action_proprio_metadata=action_proprio_metadata, **kwargs
