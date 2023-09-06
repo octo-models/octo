@@ -1,5 +1,5 @@
 from functools import partial
-from typing import List, Optional, Union
+from typing import List, Optional, Sequence, Union
 
 import dlimp as dl
 import tensorflow as tf
@@ -222,7 +222,7 @@ def make_rlds_dataset(
 
     dataset = dl.DLataset.from_rlds(builder, split=split)
 
-    if not isinstance(image_obs_keys, list):
+    if not isinstance(image_obs_keys, Sequence):
         image_obs_keys = [image_obs_keys]
 
     def restructure(traj):
@@ -232,8 +232,11 @@ def make_rlds_dataset(
 
         # restructure RLDS dataset to match BridgeData format.
         # extracts images (based on image_obs_keys list) and some sort of proprio (based on state_obs_key)
+        # TODO(karl): avoid two naming structures here --> always use RLDS default keys
         traj["observations"] = {key: traj["observation"][key] for key in image_obs_keys}
-        traj["proprio"] = tf.cast(traj["observation"][state_obs_key], tf.float32)
+        traj["observations"]["proprio"] = tf.cast(
+            traj["observation"][state_obs_key], tf.float32
+        )
         traj["language"] = traj.pop("language_instruction")
         traj["actions"] = tf.cast(traj.pop("action"), tf.float32)
         traj["terminals"] = traj.pop("is_terminal")
