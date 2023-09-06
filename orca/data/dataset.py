@@ -34,8 +34,8 @@ def get_action_proprio_stats(
         actions = []
         proprios = []
         for episode in tqdm.tqdm(dataset.take(1000)):
-            actions.append(episode["actions"].numpy())
-            proprios.append(episode["observations"]["proprio"].numpy())
+            actions.append(episode["action"].numpy())
+            proprios.append(episode["observation"]["proprio"].numpy())
         actions = np.concatenate(actions)
         proprios = np.concatenate(proprios)
         metadata = {
@@ -67,8 +67,8 @@ def get_action_proprio_stats(
 def _normalize_action_and_proprio(traj, metadata, normalization_type):
     # maps keys of `metadata` to corresponding keys in `traj`
     keys_to_normalize = {
-        "action": "actions",
-        "proprio": "observations/proprio",
+        "action": "action",
+        "proprio": "observation/proprio",
     }
     if normalization_type == "normal":
         # normalize to mean 0, std 1
@@ -103,26 +103,26 @@ def _normalize_action_and_proprio(traj, metadata, normalization_type):
 def _chunk_act_obs(traj, act_horizon, obs_horizon):
     """Chunks actions and observations into the given horizons.
 
-    The "actions" and "observations" keys are each given a new axis (at index 1) of size `act_horizon` and
+    The "action" and "observation" keys are each given a new axis (at index 1) of size `act_horizon` and
     `obs_horizon`, respectively. The actions are chunked into the future while the observations are chunked into the
     past.
     """
-    traj_len = tf.shape(traj["actions"])[0]
+    traj_len = tf.shape(traj["action"])[0]
     if act_horizon is not None:
         chunk_indices = tf.broadcast_to(
             tf.range(act_horizon), [traj_len, act_horizon]
         ) + tf.broadcast_to(tf.range(traj_len)[:, None], [traj_len, act_horizon])
         # pads by repeating the last action
         chunk_indices = tf.minimum(chunk_indices, traj_len - 1)
-        traj["actions"] = tf.gather(traj["actions"], chunk_indices)
+        traj["action"] = tf.gather(traj["action"], chunk_indices)
     if obs_horizon is not None:
         chunk_indices = tf.broadcast_to(
             tf.range(-obs_horizon + 1, 1), [traj_len, obs_horizon]
         ) + tf.broadcast_to(tf.range(traj_len)[:, None], [traj_len, obs_horizon])
         # pads by repeating the first observation
         chunk_indices = tf.maximum(chunk_indices, 0)
-        traj["observations"] = tf.nest.map_structure(
-            lambda x: tf.gather(x, chunk_indices), traj["observations"]
+        traj["observation"] = tf.nest.map_structure(
+            lambda x: tf.gather(x, chunk_indices), traj["observation"]
         )
     return traj
 
@@ -159,7 +159,9 @@ def apply_common_transforms(
             proprio, or both. Can be "normal" (mean 0, std 1) or "bounds" (normalized to [-1, 1]).
     """
     if skip_unlabeled:
-        dataset = dataset.filter(lambda x: tf.math.reduce_any(x["language"] != ""))
+        dataset = dataset.filter(
+            lambda x: tf.math.reduce_any(x["language_instruction"] != "")
+        )
 
     if action_proprio_metadata is not None:
         dataset = dataset.map(
@@ -219,6 +221,16 @@ def make_dataset(
         state_obs_keys (str, List[str], optional): List of low-dim observation keys to be decoded.
           Get concatenated and mapped to "proprio".
         **kwargs: Additional keyword arguments to pass to `apply_common_transforms`.
+    Returns:
+        Dataset of trajectories where each step has the following fields:
+        - observation:
+            - image_[0...N]        # RGB image observations
+            - depth_[0...N]        # depth image observations
+            - proprio              # concatenated low-dim observations
+        - action                   # action vector
+        - language_instruction     # language instruction string
+        - is_last                  # boolean indicator, 1 on last step
+        - is_terminal              # boolean indicator, 1 on last step *if not timeout*
     """
     builder = tfds.builder(name, data_dir=data_dir)
     if "val" not in builder.info.splits:
@@ -244,28 +256,23 @@ def make_dataset(
             traj = RLDS_TRAJECTORY_MAP_TRANSFORMS[name](traj)
 
         # extracts RGB images, depth images and proprio based on provided keys
-        # TODO(karl): avoid two naming structures here --> always use RLDS default keys
-        traj["observations"] = {}
+        orig_obs = traj.pop("observation")
+        traj["observation"] = {}
         for i, key in enumerate(image_obs_keys):
-            traj["observations"][f"image_{i}"] = traj["observation"][key]
+            traj["observation"][f"image_{i}"] = orig_obs[key]
         for i, key in enumerate(depth_obs_keys):
-            traj["observations"][f"depth_{i}"] = traj["observation"][key]
+            traj["observation"][f"depth_{i}"] = orig_obs[key]
         if state_obs_keys:
-            traj["observations"]["proprio"] = tf.concat(
-                [
-                    tf.cast(traj["observation"][key], tf.float32)
-                    for key in state_obs_keys
-                ],
+            traj["observation"]["proprio"] = tf.concat(
+                [tf.cast(orig_obs[key], tf.float32) for key in state_obs_keys],
                 axis=-1,
             )
 
-        traj["language"] = traj.pop("language_instruction")
-        traj["actions"] = tf.cast(traj.pop("action"), tf.float32)
-        traj["terminals"] = traj.pop("is_terminal")
-        traj["truncates"] = tf.math.logical_and(
-            traj.pop("is_last"), tf.math.logical_not(traj["terminals"])
-        )
-        del traj["observation"]
+        # check that all other keys are present
+        for key in ["action", "language_instruction", "is_last", "is_terminal"]:
+            if key not in traj:
+                raise ValueError(f"Key {key} is missing from trajectory: {traj}")
+
         return traj
 
     dataset = dataset.map(restructure)
