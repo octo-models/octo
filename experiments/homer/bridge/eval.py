@@ -86,7 +86,7 @@ def load_checkpoint(path, wandb_run_name):
 
     example_batch = {
         "observations": example_obs,
-        "goals": {
+        "tasks": {
             "image": np.zeros((1, FLAGS.im_size, FLAGS.im_size, 3), dtype=np.uint8)
         },
         "actions": example_actions,
@@ -116,7 +116,7 @@ def load_checkpoint(path, wandb_run_name):
         tx,
         init_args=(
             example_batch["observations"],
-            example_batch["goals"],
+            example_batch["tasks"],
             example_batch["actions"],
         ),
     )
@@ -133,13 +133,13 @@ def load_checkpoint(path, wandb_run_name):
 
 
 @partial(jax.jit, static_argnames="argmax")
-def sample_actions(observations, goals, state, rng, argmax=False, temperature=1.0):
+def sample_actions(observations, tasks, state, rng, argmax=False, temperature=1.0):
     observations = jax.tree_map(lambda x: x[None], observations)
-    goals = jax.tree_map(lambda x: x[None], goals)
+    tasks = jax.tree_map(lambda x: x[None], tasks)
     actions = state.apply_fn(
         {"params": state.params},
         observations,
-        goals,
+        tasks,
         train=False,
         argmax=argmax,
         rng=rng,
