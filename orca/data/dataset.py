@@ -1,5 +1,5 @@
 from functools import partial
-from typing import Optional, Union, List
+from typing import List, Optional, Union
 
 import dlimp as dl
 import tensorflow as tf
@@ -232,9 +232,7 @@ def make_rlds_dataset(
 
         # restructure RLDS dataset to match BridgeData format.
         # extracts images (based on image_obs_keys list) and some sort of proprio (based on state_obs_key)
-        traj["observations"] = {
-            key: traj["observation"][key] for key in image_obs_keys
-        }
+        traj["observations"] = {key: traj["observation"][key] for key in image_obs_keys}
         traj["proprio"] = tf.cast(traj["observation"][state_obs_key], tf.float32)
         traj["language"] = traj.pop("language_instruction")
         traj["actions"] = tf.cast(traj.pop("action"), tf.float32)

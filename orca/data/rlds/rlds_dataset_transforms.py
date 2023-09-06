@@ -44,8 +44,12 @@ def r2_d2_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
     trajectory = {k: v for k, v in trajectory.items() if k in keep_keys}
 
     # map image observations
-    trajectory["observation"]["image_0"] = trajectory["observation"]["exterior_image_1_left"]
-    trajectory["observation"]["image_1"] = trajectory["observation"]["exterior_image_2_left"]
+    trajectory["observation"]["image_0"] = trajectory["observation"][
+        "exterior_image_1_left"
+    ]
+    trajectory["observation"]["image_1"] = trajectory["observation"][
+        "exterior_image_2_left"
+    ]
     trajectory["observation"]["image_2"] = trajectory["observation"]["wrist_image_left"]
     return trajectory
 
@@ -65,10 +69,18 @@ def fmb_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
     trajectory["observation"]["image_1"] = trajectory["observation"]["image_side_2"]
     trajectory["observation"]["image_2"] = trajectory["observation"]["image_wrist_1"]
     trajectory["observation"]["image_3"] = trajectory["observation"]["image_wrist_2"]
-    trajectory["observation"]["depth_0"] = trajectory["observation"]["image_side_1_depth"]
-    trajectory["observation"]["depth_1"] = trajectory["observation"]["image_side_2_depth"]
-    trajectory["observation"]["depth_2"] = trajectory["observation"]["image_wrist_1_depth"]
-    trajectory["observation"]["depth_3"] = trajectory["observation"]["image_wrist_2_depth"]
+    trajectory["observation"]["depth_0"] = trajectory["observation"][
+        "image_side_1_depth"
+    ]
+    trajectory["observation"]["depth_1"] = trajectory["observation"][
+        "image_side_2_depth"
+    ]
+    trajectory["observation"]["depth_2"] = trajectory["observation"][
+        "image_wrist_1_depth"
+    ]
+    trajectory["observation"]["depth_3"] = trajectory["observation"][
+        "image_wrist_2_depth"
+    ]
     return trajectory
 
 

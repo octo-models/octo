@@ -41,8 +41,10 @@ class ImageTokenizer(nn.Module):
     use_token_learner: bool = False
     num_tokens: int = 8  # this is not enforced unless use_token_learner is True
     conditioning_type: str = "none"
-    image_obs_keys: Tuple[str] = ("image_0",)   # list of image keys to tokenize
-    stack_image_obs: bool = True        # if True, stacks image observation inputs channel-wise
+    image_obs_keys: Tuple[str] = ("image_0",)  # list of image keys to tokenize
+    stack_image_obs: bool = (
+        True  # if True, stacks image observation inputs channel-wise
+    )
 
     @nn.compact
     def __call__(
@@ -53,7 +55,9 @@ class ImageTokenizer(nn.Module):
     ):
         def assemble_image_obs(obs):
             if len(self.image_obs_keys) > 1:
-                assert self.stack_image_obs     # currently only support stacking for multi-image inputs
+                assert (
+                    self.stack_image_obs
+                )  # currently only support stacking for multi-image inputs
             return jnp.concatenate([obs[key] for key in self.image_obs_keys], axis=-1)
 
         # observations["image"] is (batch, obs_horizon, height, width, channel)
@@ -67,10 +71,7 @@ class ImageTokenizer(nn.Module):
             image_tokens = jnp.reshape(image_tokens, (b, t, -1, image_tokens.shape[-1]))
         elif self.conditioning_type == "goal_image":
             # early-fusion goal-image only architecture, concatenate obs and goal image channel-wise
-            image = jnp.concatenate(
-                [image[:, -1],
-                 assemble_image_obs(goals)], axis=-1
-            )
+            image = jnp.concatenate([image[:, -1], assemble_image_obs(goals)], axis=-1)
             image_tokens = encoders[self.encoder](**self.encoder_kwargs)(image)
             image_tokens = jnp.reshape(image_tokens, (b, -1, image_tokens.shape[-1]))
         elif self.conditioning_type == "goal_image_no_obs":
