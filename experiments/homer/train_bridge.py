@@ -15,7 +15,7 @@ from flax.training import checkpoints
 from flax.traverse_util import flatten_dict
 from ml_collections import config_flags
 
-from orca.data.dataset import make_bridge_dataset
+from bridge.bridge_dataset import make_bridge_dataset
 from orca.data.utils.text_processing import text_processors
 from orca.model import create_model_def
 from orca.model.weights import weights_loaders
