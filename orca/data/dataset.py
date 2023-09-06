@@ -203,9 +203,9 @@ def make_dataset(
     name: str,
     data_dir: str,
     train: bool,
-    image_obs_keys: Union[str, List[str]] = None,
-    depth_obs_keys: Union[str, List[str]] = None,
-    state_obs_keys: Union[str, List[str]] = None,
+    image_obs_keys: Union[str, List[str]] = [],
+    depth_obs_keys: Union[str, List[str]] = [],
+    state_obs_keys: Union[str, List[str]] = [],
     **kwargs,
 ) -> tf.data.Dataset:
     """Creates a dataset from the RLDS format.
@@ -245,7 +245,7 @@ def make_dataset(
 
         # extracts RGB images, depth images and proprio based on provided keys
         # TODO(karl): avoid two naming structures here --> always use RLDS default keys
-        traj["observations"] = []
+        traj["observations"] = {}
         for i, key in enumerate(image_obs_keys):
             traj["observations"][f"image_{i}"] = traj["observation"][key]
         for i, key in enumerate(depth_obs_keys):
