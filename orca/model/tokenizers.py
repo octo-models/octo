@@ -1,5 +1,4 @@
 import functools as ft
-from typing import Callable, Optional, Sequence, Tuple
 
 import flax.linen as nn
 import jax
@@ -41,10 +40,6 @@ class ImageTokenizer(nn.Module):
     use_token_learner: bool = False
     num_tokens: int = 8  # this is not enforced unless use_token_learner is True
     conditioning_type: str = "none"
-    image_obs_keys: Tuple[str] = ("image_0",)  # list of image keys to tokenize
-    stack_image_obs: bool = (
-        True  # if True, stacks image observation inputs channel-wise
-    )
 
     @nn.compact
     def __call__(
@@ -54,14 +49,13 @@ class ImageTokenizer(nn.Module):
         train: bool = True,
     ):
         def assemble_image_obs(obs):
-            if len(self.image_obs_keys) > 1:
-                assert (
-                    self.stack_image_obs
-                )  # currently only support stacking for multi-image inputs
-            return jnp.concatenate([obs[key] for key in self.image_obs_keys], axis=-1)
+            return jnp.concatenate(
+                [obs[key] for key in obs if ("image_" in key or "depth_" in key)],
+                axis=-1,
+            )
 
-        # observations["image"] is (batch, obs_horizon, height, width, channel)
-        # tasks["image"] is (batch, height, width, channel)
+        # observations["image_XXX"] is (batch, obs_horizon, height, width, channel)
+        # tasks["image_XXX"] is (batch, height, width, channel)
         image = assemble_image_obs(observations)
         b, t, h, w, c = image.shape
         if self.conditioning_type == "none":
