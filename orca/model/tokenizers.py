@@ -50,7 +50,7 @@ class ImageTokenizer(nn.Module):
     def __call__(
         self,
         observations,
-        goals=None,
+        tasks=None,
         train: bool = True,
     ):
         def assemble_image_obs(obs):
@@ -61,7 +61,7 @@ class ImageTokenizer(nn.Module):
             return jnp.concatenate([obs[key] for key in self.image_obs_keys], axis=-1)
 
         # observations["image"] is (batch, obs_horizon, height, width, channel)
-        # goals["image"] is (batch, height, width, channel)
+        # tasks["image"] is (batch, height, width, channel)
         image = assemble_image_obs(observations)
         b, t, h, w, c = image.shape
         if self.conditioning_type == "none":
@@ -71,17 +71,17 @@ class ImageTokenizer(nn.Module):
             image_tokens = jnp.reshape(image_tokens, (b, t, -1, image_tokens.shape[-1]))
         elif self.conditioning_type == "goal_image":
             # early-fusion goal-image only architecture, concatenate obs and goal image channel-wise
-            image = jnp.concatenate([image[:, -1], assemble_image_obs(goals)], axis=-1)
+            image = jnp.concatenate([image[:, -1], assemble_image_obs(tasks)], axis=-1)
             image_tokens = encoders[self.encoder](**self.encoder_kwargs)(image)
             image_tokens = jnp.reshape(image_tokens, (b, -1, image_tokens.shape[-1]))
         elif self.conditioning_type == "goal_image_no_obs":
-            image = assemble_image_obs(goals)
+            image = assemble_image_obs(tasks)
             image_tokens = encoders[self.encoder](**self.encoder_kwargs)(image)
             image_tokens = jnp.reshape(image_tokens, (b, -1, image_tokens.shape[-1]))
         elif self.conditioning_type == "film_language":
             # encode task and pass into encoder with FiLM
             image = jnp.reshape(image, (b * t, h, w, c))
-            lang = goals["language"]
+            lang = tasks["language"]
             lang = lang[:, None, :].repeat(t, axis=1)
             lang = jnp.reshape(lang, (b * t, -1))
             image_tokens = encoders[self.encoder](**self.encoder_kwargs)(
@@ -108,16 +108,16 @@ class LanguageTokenizer(nn.Module):
     def __call__(
         self,
         observations,
-        goals=None,
+        tasks=None,
         train: bool = True,
     ):
         # TODO (andre) will need an actual encoder if we want token-level embeddings
 
         # add a time dimension to language
-        if goals["language"].ndim == 2:
-            tokens = goals["language"][:, None, :]
+        if tasks["language"].ndim == 2:
+            tokens = tasks["language"][:, None, :]
         else:
-            tokens = goals["language"]
+            tokens = tasks["language"]
 
         return tokens
 

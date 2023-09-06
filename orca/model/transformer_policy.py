@@ -49,13 +49,13 @@ class TransformerPolicy(nn.Module):
     def __call__(
         self,
         observations,
-        goals,
+        tasks,
         actions,
         train: bool = False,
     ):
         output = self.transformer_call(
             observations,
-            goals,
+            tasks,
             self.attention_mask,
             train=train,
         )
@@ -82,12 +82,12 @@ class TransformerPolicy(nn.Module):
     def transformer_call(
         self,
         observations,
-        goals,
+        tasks,
         attention_mask,
         train: bool = False,
     ):
         task_tokens, obs_tokens, action_tokens = self.get_tokens(
-            observations, goals, train=train
+            observations, tasks, train=train
         )
         input_tokens = self.assemble_input_tokens(
             task_tokens, obs_tokens, action_tokens
@@ -113,7 +113,7 @@ class TransformerPolicy(nn.Module):
     def predict_action(
         self,
         observations,
-        goals,
+        tasks,
         train: bool = False,
         argmax: bool = False,
         rng: PRNGKey = None,
@@ -121,7 +121,7 @@ class TransformerPolicy(nn.Module):
     ):
         output = self.transformer_call(
             observations,
-            goals,
+            tasks,
             self.attention_mask,
             train=train,
         )
@@ -174,14 +174,14 @@ class TransformerPolicy(nn.Module):
 
         return full_mask
 
-    def get_tokens(self, observations, goals, train: bool = False):
+    def get_tokens(self, observations, tasks, train: bool = False):
         """
         Tokenize observation/action history and task (either goal image or language).
         """
 
         # a list of (batch, time_seq_len, tokens_per_X, token_embedding_size)
         obs_tokens = [
-            tok(observations, goals, train=train) for tok in self.observation_tokenizers
+            tok(observations, tasks, train=train) for tok in self.observation_tokenizers
         ]
         # (batch, time_seq_len, tokens_per_obs, token_embedding_size)
         obs_tokens = jnp.concatenate(obs_tokens, axis=-2)
@@ -190,7 +190,7 @@ class TransformerPolicy(nn.Module):
         if len(self.task_tokenizers) > 0:
             # a list of (batch, tokens_per_X, token_embedding_size)
             task_tokens = [
-                tok(observations, goals, train=train) for tok in self.task_tokenizers
+                tok(observations, tasks, train=train) for tok in self.task_tokenizers
             ]
             # (batch, tokens_per_task, token_embedding_size)
             task_tokens = jnp.concatenate(task_tokens, axis=-2)

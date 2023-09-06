@@ -3,6 +3,8 @@ from typing import Any, Dict
 
 import tensorflow as tf
 
+import orca.data.utils.bridge_utils as bridge
+
 
 def stanford_kuka_multimodal_dataset_transform(
     trajectory: Dict[str, Any]
@@ -85,6 +87,16 @@ def fmb_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def bridge_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
+    trajectory["action"] = tf.concat(
+        [
+            trajectory["action"][:, :6],
+            bridge.binarize_gripper_actions(trajectory["action"][:, -1])[:, None],
+        ],
+        axis=1,
+    )
+    # TODO (homer) commit to relabeling actions or just removing the last timestep
+    trajectory = bridge.relabel_actions(trajectory)
+    # trajectory = tf.nest.map_structure(lambda y: y[:-1], trajectory)
     keep_keys = [
         "observation",
         "action",
