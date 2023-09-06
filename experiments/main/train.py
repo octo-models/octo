@@ -108,9 +108,10 @@ def main(_):
         if text_processor is None:
             batch.pop("language")
         else:
-            batch["language"] = text_processor.encode(
+            batch["goals"]["language"] = text_processor.encode(
                 [s.decode("utf-8") for s in batch["language"]]
             )
+            batch.pop("language")
         return batch
 
     train_data = (
