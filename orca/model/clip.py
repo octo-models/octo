@@ -32,7 +32,7 @@ class CLIPVisionTokenizer(nn.Module):
         # CLIP ViT uses 768 dim tokens but we use 512
         self.projection = nn.Dense(self.output_dim)
 
-    def __call__(self, observations, goals, train: bool = True):
+    def __call__(self, observations, tasks, train: bool = True):
         b, t, h, w, c = observations["image"].shape
         if self.conditioning_type == "obs_image":
             pixel_values = observations["image"]
@@ -43,7 +43,7 @@ class CLIPVisionTokenizer(nn.Module):
             tokens = tokens.reshape((b, t, *tokens.shape[1:]))
 
         elif self.conditioning_type == "goal_image":
-            pixel_values = goals["image"]
+            pixel_values = tasks["image"]
             tokens = self.clip_vision_transformer(
                 pixel_values=pixel_values, deterministic=not train
             ).last_hidden_state
@@ -65,9 +65,9 @@ class CLIPTextTokenizer(nn.Module):
         config = CLIPTextConfig.from_pretrained(self.source)
         self.clip_text_transformer = FlaxCLIPTextTransformer(config)
 
-    def __call__(self, observations, goals, train: bool = True):
+    def __call__(self, observations, tasks, train: bool = True):
         return self.clip_text_transformer(
-            **goals["language"], deterministic=not train
+            **tasks["language"], deterministic=not train
         ).last_hidden_state
 
 
@@ -103,22 +103,22 @@ if __name__ == "__main__":
 
     tokenizer = CLIPVisionTokenizer()
     observations = {"image": np.random.randn(2, 4, 224, 224, 3).astype(np.float32)}
-    goals = {"image": np.random.randn(2, 224, 224, 3).astype(np.float32)}
-    params = tokenizer.init(rng, observations, goals)
-    tokens = tokenizer.apply(params, observations, goals)
+    tasks = {"image": np.random.randn(2, 224, 224, 3).astype(np.float32)}
+    params = tokenizer.init(rng, observations, tasks)
+    tokens = tokenizer.apply(params, observations, tasks)
     print(tokens.shape)
     # (2, 4, 50, 512)
 
     # test CLIPTextTokenizer
     tokenizer = CLIPTextTokenizer()
-    goals = {
+    tasks = {
         "language": {
             "input_ids": np.random.randint(0, 100, (2, 4)),
             "attention_mask": np.ones((2, 4)),
             "position_ids": np.arange(4),
         }
     }
-    params = tokenizer.init(rng, observations, goals)
-    tokens = tokenizer.apply(params, observations, goals)
+    params = tokenizer.init(rng, observations, tasks)
+    tokens = tokenizer.apply(params, observations, tasks)
     print(tokens.shape)
     # (2, 4, 512)

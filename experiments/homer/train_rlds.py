@@ -163,7 +163,7 @@ def main(_):
         tx,
         init_args=(
             example_batch["observations"],
-            example_batch["goals"],
+            example_batch["tasks"],
             example_batch["actions"],
         ),
         pretrained_loaders=pretrained_loaders,
@@ -183,7 +183,7 @@ def main(_):
         info = state.apply_fn(
             {"params": params},
             batch["observations"],
-            batch["goals"],
+            batch["tasks"],
             batch["actions"],
             train=train,
             rngs={"dropout": rng},
