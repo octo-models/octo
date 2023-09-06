@@ -75,7 +75,7 @@ class ImageTokenizer(nn.Module):
         elif self.conditioning_type == "film_language":
             # encode task and pass into encoder with FiLM
             image = jnp.reshape(image, (b * t, h, w, c))
-            lang = tasks["language"]
+            lang = tasks["language_instruction"]
             lang = lang[:, None, :].repeat(t, axis=1)
             lang = jnp.reshape(lang, (b * t, -1))
             image_tokens = encoders[self.encoder](**self.encoder_kwargs)(
@@ -108,10 +108,10 @@ class LanguageTokenizer(nn.Module):
         # TODO (andre) will need an actual encoder if we want token-level embeddings
 
         # add a time dimension to language
-        if tasks["language"].ndim == 2:
-            tokens = tasks["language"][:, None, :]
+        if tasks["language_instruction"].ndim == 2:
+            tokens = tasks["language_instruction"][:, None, :]
         else:
-            tokens = tasks["language"]
+            tokens = tasks["language_instruction"]
 
         return tokens
 
