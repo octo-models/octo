@@ -267,6 +267,7 @@ def make_dataset(
                 [tf.cast(orig_obs[key], tf.float32) for key in state_obs_keys],
                 axis=-1,
             )
+        traj["action"] = tf.cast(traj["action"], tf.float32)
 
         # check that all other keys are present
         for key in ["action", "language_instruction", "is_last", "is_terminal"]:
