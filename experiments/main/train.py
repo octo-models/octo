@@ -15,7 +15,7 @@ from flax.training import checkpoints
 from flax.traverse_util import flatten_dict
 from ml_collections import config_flags
 
-from orca.data.dataset import make_rlds_dataset
+from orca.data.dataset import make_dataset
 from orca.data.utils.text_processing import text_processors
 from orca.model import create_model_def
 from orca.model.weights import weights_loaders
@@ -114,14 +114,14 @@ def main(_):
         return batch
 
     train_data = (
-        make_rlds_dataset(**FLAGS.config.dataset_kwargs, train=True)
+        make_dataset(**FLAGS.config.dataset_kwargs, train=True)
         .unbatch()
         .shuffle(FLAGS.config.shuffle_buffer_size)
         .repeat()
         .batch(FLAGS.config.batch_size)
     )
     val_data = (
-        make_rlds_dataset(**FLAGS.config.dataset_kwargs, train=False)
+        make_dataset(**FLAGS.config.dataset_kwargs, train=False)
         .unbatch()
         .shuffle(FLAGS.config.shuffle_buffer_size)
         .repeat()
