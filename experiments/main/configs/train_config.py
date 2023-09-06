@@ -109,6 +109,8 @@ def get_config(config_string):
                     base_data_config,
                     name="bridge_dataset",
                     data_dir="/nfs/kun2/datasets/tfds",
+                    image_obs_keys=["image_0"],
+                    state_obs_keys=["state"],
                 ),
                 **base_config,
             )
@@ -121,14 +123,12 @@ def get_config(config_string):
                     observation_tokenizer_kwargs={
                         "obs-tokenizer": {
                             "num_tokens": 60,
-                            "image_obs_keys": ("image_0", "image_1", "image_2"),
                             **base_encoder_kwargs
                         }
                     },
                     task_tokenizer_kwargs={
                         "goal-obs-tokenizer": {
                             "num_tokens": 60,
-                            "image_obs_keys": ("image_0", "image_1", "image_2"),
                             **base_encoder_kwargs
                         }
                     },
@@ -138,8 +138,8 @@ def get_config(config_string):
                     base_data_config,
                     name="r2_d2_pen",
                     data_dir="/nfs/kun2/datasets/r2d2/tfds",
-                    image_obs_keys=["image_0", "image_1", "image_2"],
-                    state_obs_key="joint_position",
+                    image_obs_keys=["exterior_image_1_left", "exterior_image_3_left", "wrist_image_left"],
+                    state_obs_key=["joint_position"],
                 ),
                 **base_config,
             )

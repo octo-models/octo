@@ -203,8 +203,9 @@ def make_dataset(
     name: str,
     data_dir: str,
     train: bool,
-    image_obs_keys: Union[str, List[str]] = "image_0",
-    state_obs_key: str = "state",
+    image_obs_keys: Union[str, List[str]] = None,
+    depth_obs_keys: Union[str, List[str]] = None,
+    state_obs_keys: Union[str, List[str]] = None,
     **kwargs,
 ) -> tf.data.Dataset:
     """Creates a dataset from the RLDS format.
@@ -213,8 +214,10 @@ def make_dataset(
         name (str): The name of the RLDS dataset (usually "name" or "name:version").
         data_dir (str): The path to the data directory.
         train (bool): Whether to use the training or validation set.
-        image_obs_keys (str, List[str], optional): The key(s) to use for the image observation. Defaults to "image_0".
-        state_obs_key (str, optional): The key to use for the state observation. Defaults to "state".
+        image_obs_keys (str, List[str], optional): List of image observation keys to be decoded. Mapped to "image_XXX".
+        depth_obs_keys (str, List[str], optional): List of depth observation keys to be decoded. Mapped to "depth_XXX".
+        state_obs_keys (str, List[str], optional): List of low-dim observation keys to be decoded.
+          Get concatenated and mapped to "proprio".
         **kwargs: Additional keyword arguments to pass to `apply_common_transforms`.
     """
     builder = tfds.builder(name, data_dir=data_dir)
@@ -225,21 +228,37 @@ def make_dataset(
 
     dataset = dl.DLataset.from_rlds(builder, split=split)
 
-    if not isinstance(image_obs_keys, Sequence):
-        image_obs_keys = [image_obs_keys]
+    image_obs_keys = (
+        [image_obs_keys] if not isinstance(image_obs_keys, Sequence) else image_obs_keys
+    )
+    depth_obs_keys = (
+        [depth_obs_keys] if not isinstance(depth_obs_keys, Sequence) else depth_obs_keys
+    )
+    state_obs_keys = (
+        [state_obs_keys] if not isinstance(state_obs_keys, Sequence) else state_obs_keys
+    )
 
     def restructure(traj):
         # apply any dataset-specific transforms
         if name in RLDS_TRAJECTORY_MAP_TRANSFORMS:
             traj = RLDS_TRAJECTORY_MAP_TRANSFORMS[name](traj)
 
-        # restructure RLDS dataset to match BridgeData format.
-        # extracts images (based on image_obs_keys list) and some sort of proprio (based on state_obs_key)
+        # extracts RGB images, depth images and proprio based on provided keys
         # TODO(karl): avoid two naming structures here --> always use RLDS default keys
-        traj["observations"] = {key: traj["observation"][key] for key in image_obs_keys}
-        traj["observations"]["proprio"] = tf.cast(
-            traj["observation"][state_obs_key], tf.float32
-        )
+        traj["observations"] = []
+        for i, key in enumerate(image_obs_keys):
+            traj["observations"][f"image_{i}"] = traj["observation"][key]
+        for i, key in enumerate(depth_obs_keys):
+            traj["observations"][f"depth_{i}"] = traj["observation"][key]
+        if state_obs_keys:
+            traj["observations"]["proprio"] = tf.concat(
+                [
+                    tf.cast(traj["observation"][key], tf.float32)
+                    for key in state_obs_keys
+                ],
+                axis=-1,
+            )
+
         traj["language"] = traj.pop("language_instruction")
         traj["actions"] = tf.cast(traj.pop("action"), tf.float32)
         traj["terminals"] = traj.pop("is_terminal")
@@ -247,7 +266,6 @@ def make_dataset(
             traj.pop("is_last"), tf.math.logical_not(traj["terminals"])
         )
         del traj["observation"]
-
         return traj
 
     dataset = dataset.map(restructure)
