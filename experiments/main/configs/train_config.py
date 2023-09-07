@@ -1,6 +1,7 @@
+from copy import deepcopy
+
 from ml_collections import ConfigDict
 from ml_collections.config_dict import placeholder
-from copy import deepcopy
 
 
 def update_config(config, **kwargs):
@@ -31,7 +32,7 @@ def get_config(config_string):
         log_interval=100,
         eval_interval=5000,
         save_interval=5000,
-        save_dir="/mnt2/homer/jaxrl_log",
+        save_dir="",
         resume_path=placeholder(str),
         seed=42,
         text_processor="muse_embedding",
@@ -44,6 +45,10 @@ def get_config(config_string):
     normalization_type = "normal"
 
     base_data_config = dict(
+        name="bridge_dataset",
+        data_dir="/nfs/kun2/datasets/tfds",
+        image_obs_keys=["image_0"],
+        state_obs_keys=["state"],
         obs_horizon=1,
         augment_kwargs=dict(
             random_resized_crop=dict(scale=[0.8, 1.0], ratio=[0.9, 1.1]),
@@ -146,7 +151,10 @@ def get_config(config_string):
                 model=update_config(
                     base_model_config,
                     observation_tokenizer_kwargs={
-                        "obs-film-language-tokenizer": {"num_tokens": 64}
+                        "obs-film-language-tokenizer": {
+                            "num_tokens": 64,
+                            **base_encoder_kwargs,
+                        }
                     },
                     task_tokenizer_kwargs={},
                 ),
@@ -168,39 +176,32 @@ def get_config(config_string):
                 **base_config,
             )
         ),
-        "transformer_bc_clip_text": ConfigDict(
-            dict(
-                agent="transformer_bc",
-                model=update_config(
-                    base_model_config,
-                    observation_tokenizer_kwargs={"obs-tokenizer": {"num_tokens": 64}},
-                    task_tokenizer_kwargs={"clip-text-tokenizer": {"num_tokens": 64}},
-                ),
-                optimizer=base_optimizer_config,
-                dataset_kwargs=base_data_config,
-                **update_config(
-                    base_config,
-                    text_processor="clip_processor",
-                    pretrained_weights=["clip"],
-                ),
-            )
-        ),
-        "transformer_bc_clip_vit_and_text": ConfigDict(
+        "transformer_bc_distilbert": ConfigDict(
             dict(
                 agent="transformer_bc",
                 model=update_config(
                     base_model_config,
                     observation_tokenizer_kwargs={
-                        "clip-obs-tokenizer": {"num_tokens": 50}
+                        "obs-tokenizer": {"num_tokens": 64, **base_encoder_kwargs}
                     },
-                    task_tokenizer_kwargs={"clip-text-tokenizer": {"num_tokens": 64}},
+                    task_tokenizer_kwargs={
+                        "language-tokenizer": {
+                            "num_tokens": 64,
+                            "projection_dim": 512,
+                            "encoder": "distilbert-base-uncased",
+                        }
+                    },
                 ),
                 optimizer=base_optimizer_config,
-                dataset_kwargs=update_config(base_data_config, image_processor="clip"),
+                dataset_kwargs=base_data_config,
                 **update_config(
                     base_config,
-                    text_processor="clip_processor",
-                    pretrained_weights=["clip"],
+                    text_processor="hf_tokenizer",
+                    text_processor_kwargs=dict(
+                        tokenizer_name="distilbert-base-uncased",
+                        encode_with_model=False,
+                    ),
+                    pretrained_weights=["distilbert"],
                 ),
             )
         ),
