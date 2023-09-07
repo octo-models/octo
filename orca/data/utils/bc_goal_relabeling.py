@@ -20,7 +20,7 @@ def uniform(traj):
     # sometimes there are floating-point errors that cause an out-of-bounds
     goal_idxs = tf.minimum(goal_idxs, traj_len - 1)
 
-    traj["goals"] = tf.nest.map_structure(
+    traj["tasks"] = tf.nest.map_structure(
         lambda x: tf.gather(x, goal_idxs),
         traj["observations"],
     )
