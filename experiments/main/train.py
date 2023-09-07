@@ -106,12 +106,12 @@ def main(_):
 
     def process_text(batch):
         if text_processor is None:
-            batch.pop("language")
+            batch.pop("language_instruction")
         else:
-            batch["tasks"]["language"] = text_processor.encode(
-                [s.decode("utf-8") for s in batch["language"]]
+            batch["tasks"]["language_instruction"] = text_processor.encode(
+                [s.decode("utf-8") for s in batch["language_instruction"]]
             )
-            batch.pop("language")
+            batch.pop("language_instruction")
         return batch
 
     train_data = (
@@ -132,15 +132,15 @@ def main(_):
     val_data_iter = map(shard_fn, map(process_text, val_data.iterator()))
 
     example_batch = next(train_data_iter)
-    logging.info(f"Batch size: {example_batch['observations']['image'].shape[0]}")
+    logging.info(f"Batch size: {example_batch['action'].shape[0]}")
     logging.info(f"Number of devices: {num_devices}")
     logging.info(
-        f"Batch size per device: {example_batch['observations']['image'].shape[0] // num_devices}"
+        f"Batch size per device: {example_batch['action'].shape[0] // num_devices}"
     )
 
     model_def = create_model_def(
-        action_dim=example_batch["actions"].shape[-1],
-        time_sequence_length=example_batch["observations"]["image"].shape[1],
+        action_dim=example_batch["action"].shape[-1],
+        time_sequence_length=example_batch["observation"]["image_0"].shape[1],
         **FLAGS.config.model.to_dict(),
     )
 
@@ -163,9 +163,9 @@ def main(_):
         model_def,
         tx,
         init_args=(
-            example_batch["observations"],
+            example_batch["observation"],
             example_batch["tasks"],
-            example_batch["actions"],
+            example_batch["action"],
         ),
         pretrained_loaders=pretrained_loaders,
     )
@@ -183,9 +183,9 @@ def main(_):
     def loss_fn(params, state, batch, rng, train=True):
         info = state.apply_fn(
             {"params": params},
-            batch["observations"],
+            batch["observation"],
             batch["tasks"],
-            batch["actions"],
+            batch["action"],
             train=train,
             rngs={"dropout": rng},
         )

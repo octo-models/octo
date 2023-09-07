@@ -2,7 +2,7 @@ import hashlib
 import json
 import logging
 from functools import partial
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Sequence, Union
 
 import dlimp as dl
 import numpy as np
@@ -34,8 +34,8 @@ def get_action_proprio_stats(
         actions = []
         proprios = []
         for episode in tqdm.tqdm(dataset.take(1000)):
-            actions.append(episode["actions"].numpy())
-            proprios.append(episode["observations"]["proprio"].numpy())
+            actions.append(episode["action"].numpy())
+            proprios.append(episode["observation"]["proprio"].numpy())
         actions = np.concatenate(actions)
         proprios = np.concatenate(proprios)
         metadata = {
@@ -67,8 +67,8 @@ def get_action_proprio_stats(
 def _normalize_action_and_proprio(traj, metadata, normalization_type):
     # maps keys of `metadata` to corresponding keys in `traj`
     keys_to_normalize = {
-        "action": "actions",
-        "proprio": "observations/proprio",
+        "action": "action",
+        "proprio": "observation/proprio",
     }
     if normalization_type == "normal":
         # normalize to mean 0, std 1
@@ -103,26 +103,26 @@ def _normalize_action_and_proprio(traj, metadata, normalization_type):
 def _chunk_act_obs(traj, act_horizon, obs_horizon):
     """Chunks actions and observations into the given horizons.
 
-    The "actions" and "observations" keys are each given a new axis (at index 1) of size `act_horizon` and
+    The "action" and "observation" keys are each given a new axis (at index 1) of size `act_horizon` and
     `obs_horizon`, respectively. The actions are chunked into the future while the observations are chunked into the
     past.
     """
-    traj_len = tf.shape(traj["actions"])[0]
+    traj_len = tf.shape(traj["action"])[0]
     if act_horizon is not None:
         chunk_indices = tf.broadcast_to(
             tf.range(act_horizon), [traj_len, act_horizon]
         ) + tf.broadcast_to(tf.range(traj_len)[:, None], [traj_len, act_horizon])
         # pads by repeating the last action
         chunk_indices = tf.minimum(chunk_indices, traj_len - 1)
-        traj["actions"] = tf.gather(traj["actions"], chunk_indices)
+        traj["action"] = tf.gather(traj["action"], chunk_indices)
     if obs_horizon is not None:
         chunk_indices = tf.broadcast_to(
             tf.range(-obs_horizon + 1, 1), [traj_len, obs_horizon]
         ) + tf.broadcast_to(tf.range(traj_len)[:, None], [traj_len, obs_horizon])
         # pads by repeating the first observation
         chunk_indices = tf.maximum(chunk_indices, 0)
-        traj["observations"] = tf.nest.map_structure(
-            lambda x: tf.gather(x, chunk_indices), traj["observations"]
+        traj["observation"] = tf.nest.map_structure(
+            lambda x: tf.gather(x, chunk_indices), traj["observation"]
         )
     return traj
 
@@ -159,7 +159,9 @@ def apply_common_transforms(
             proprio, or both. Can be "normal" (mean 0, std 1) or "bounds" (normalized to [-1, 1]).
     """
     if skip_unlabeled:
-        dataset = dataset.filter(lambda x: tf.math.reduce_any(x["language"] != ""))
+        dataset = dataset.filter(
+            lambda x: tf.math.reduce_any(x["language_instruction"] != "")
+        )
 
     if action_proprio_metadata is not None:
         dataset = dataset.map(
@@ -203,8 +205,9 @@ def make_dataset(
     name: str,
     data_dir: str,
     train: bool,
-    image_obs_key: str = "image",
-    state_obs_key: str = "state",
+    image_obs_keys: Union[str, List[str]] = [],
+    depth_obs_keys: Union[str, List[str]] = [],
+    state_obs_keys: Union[str, List[str]] = [],
     **kwargs,
 ) -> tf.data.Dataset:
     """Creates a dataset from the RLDS format.
@@ -213,9 +216,21 @@ def make_dataset(
         name (str): The name of the RLDS dataset (usually "name" or "name:version").
         data_dir (str): The path to the data directory.
         train (bool): Whether to use the training or validation set.
-        image_obs_key (str, optional): The key to use for the image observation. Defaults to "image".
-        state_obs_key (str, optional): The key to use for the state observation. Defaults to "state".
+        image_obs_keys (str, List[str], optional): List of image observation keys to be decoded. Mapped to "image_XXX".
+        depth_obs_keys (str, List[str], optional): List of depth observation keys to be decoded. Mapped to "depth_XXX".
+        state_obs_keys (str, List[str], optional): List of low-dim observation keys to be decoded.
+          Get concatenated and mapped to "proprio".
         **kwargs: Additional keyword arguments to pass to `apply_common_transforms`.
+    Returns:
+        Dataset of trajectories where each step has the following fields:
+        - observation:
+            - image_[0...N]        # RGB image observations
+            - depth_[0...N]        # depth image observations
+            - proprio              # concatenated low-dim observations
+        - action                   # action vector
+        - language_instruction     # language instruction string
+        - is_last                  # boolean indicator, 1 on last step
+        - is_terminal              # boolean indicator, 1 on last step *if not timeout*
     """
     builder = tfds.builder(name, data_dir=data_dir)
     if "val" not in builder.info.splits:
@@ -225,24 +240,39 @@ def make_dataset(
 
     dataset = dl.DLataset.from_rlds(builder, split=split)
 
+    image_obs_keys = (
+        [image_obs_keys] if not isinstance(image_obs_keys, Sequence) else image_obs_keys
+    )
+    depth_obs_keys = (
+        [depth_obs_keys] if not isinstance(depth_obs_keys, Sequence) else depth_obs_keys
+    )
+    state_obs_keys = (
+        [state_obs_keys] if not isinstance(state_obs_keys, Sequence) else state_obs_keys
+    )
+
     def restructure(traj):
         # apply any dataset-specific transforms
         if name in RLDS_TRAJECTORY_MAP_TRANSFORMS:
             traj = RLDS_TRAJECTORY_MAP_TRANSFORMS[name](traj)
 
-        # restructure RLDS dataset to match BridgeData format. extracts only 2 keys from the "observation" sub-dict: one
-        # image (based on image_obs_key) and some sort of proprio (based on state_obs_key)
-        traj["observations"] = {
-            "image": traj["observation"][image_obs_key],
-            "proprio": tf.cast(traj["observation"][state_obs_key], tf.float32),
-        }
-        del traj["observation"]
-        traj["language"] = traj.pop("language_instruction")
-        traj["actions"] = tf.cast(traj.pop("action"), tf.float32)
-        traj["terminals"] = traj.pop("is_terminal")
-        traj["truncates"] = tf.math.logical_and(
-            traj.pop("is_last"), tf.math.logical_not(traj["terminals"])
-        )
+        # extracts RGB images, depth images and proprio based on provided keys
+        orig_obs = traj.pop("observation")
+        traj["observation"] = {}
+        for i, key in enumerate(image_obs_keys):
+            traj["observation"][f"image_{i}"] = orig_obs[key]
+        for i, key in enumerate(depth_obs_keys):
+            traj["observation"][f"depth_{i}"] = orig_obs[key]
+        if state_obs_keys:
+            traj["observation"]["proprio"] = tf.concat(
+                [tf.cast(orig_obs[key], tf.float32) for key in state_obs_keys],
+                axis=-1,
+            )
+        traj["action"] = tf.cast(traj["action"], tf.float32)
+
+        # check that all other keys are present
+        for key in ["action", "language_instruction", "is_last", "is_terminal"]:
+            if key not in traj:
+                raise ValueError(f"Key {key} is missing from trajectory: {traj}")
 
         return traj
 
