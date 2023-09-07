@@ -98,24 +98,37 @@ class ImageTokenizer(nn.Module):
 
 
 class LanguageTokenizer(nn.Module):
-    encoder: str = None
-    encoder_kwargs: dict = None
     num_tokens: int = 1
+    encoder: str = None
+    projection_dim: int = None
 
-    @nn.compact
+    def setup(self):
+        self.projection = nn.Dense(self.projection_dim, use_bias=False)
+
+        if self.encoder is not None:
+            from transformers import AutoConfig, FlaxAutoModel
+
+            config = AutoConfig.from_pretrained(self.encoder)
+            self.hf_model = FlaxAutoModel.from_config(config).module
+
     def __call__(
         self,
         observations,
         tasks=None,
         train: bool = True,
     ):
-        # TODO (andre) will need an actual encoder if we want token-level embeddings
-
-        # add a time dimension to language
-        if tasks["language_instruction"].ndim == 2:
-            tokens = tasks["language_instruction"][:, None, :]
+        if self.encoder is not None:
+            tokens = self.hf_model(**tasks["language_instruction"]).last_hidden_state
+            tokens = jax.lax.stop_gradient(tokens)
         else:
-            tokens = tasks["language_instruction"]
+            # add a time dimension to language
+            if tasks["language_instruction"].ndim == 2:
+                tokens = tasks["language_instruction"][:, None, :]
+            else:
+                tokens = tasks["language_instruction"]
+
+        if self.projection_dim is not None:
+            tokens = self.projection(tokens)
 
         return tokens
 

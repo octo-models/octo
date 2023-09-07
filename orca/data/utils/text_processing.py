@@ -1,6 +1,7 @@
 from typing import Optional
 
 import jax.numpy as jnp
+import numpy as np
 import tensorflow as tf
 from flax.core import FrozenDict
 
@@ -26,20 +27,26 @@ class HFTokenizer(TextProcessor):
             "truncation": True,
             "return_tensors": "np",
         },
+        encode_with_model: bool = False,
     ):
-        from transformers import AutoTokenizer  # lazy import
+        from transformers import AutoTokenizer, FlaxAutoModel  # lazy import
 
         self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
         self.tokenizer_kwargs = tokenizer_kwargs
+        self.encode_with_model = encode_with_model
+        if self.encode_with_model:
+            self.model = FlaxAutoModel.from_pretrained(tokenizer_name)
 
     def encode(self, strings):
         # this creates another nested layer with "input_ids", "attention_mask", etc.
-        return FrozenDict(
-            self.tokenizer(
-                strings,
-                **self.tokenizer_kwargs,
-            )
+        inputs = self.tokenizer(
+            strings,
+            **self.tokenizer_kwargs,
         )
+        if self.encode_with_model:
+            return np.array(self.model(**inputs).last_hidden_state)
+        else:
+            return FrozenDict(inputs)
 
 
 class MuseEmbedding(TextProcessor):
