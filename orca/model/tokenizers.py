@@ -50,7 +50,11 @@ class ImageTokenizer(nn.Module):
     ):
         def assemble_image_obs(obs):
             return jnp.concatenate(
-                [obs[key] for key in obs if ("image_" in key or "depth_" in key)],
+                [
+                    obs[key]
+                    for key in sorted(obs)
+                    if ("image_" in key or "depth_" in key)
+                ],
                 axis=-1,
             )
 
