@@ -1,8 +1,8 @@
 from typing import Optional
 
 import jax.numpy as jnp
-import tensorflow as tf
 import numpy as np
+import tensorflow as tf
 from flax.core import FrozenDict
 
 MULTI_MODULE = "https://tfhub.dev/google/universal-sentence-encoder-multilingual/3"
@@ -47,7 +47,6 @@ class HFTokenizer(TextProcessor):
             return np.array(self.model(**inputs).last_hidden_state)
         else:
             return FrozenDict(inputs)
-
 
 
 class MuseEmbedding(TextProcessor):

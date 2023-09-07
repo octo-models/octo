@@ -98,9 +98,10 @@ class LanguageTokenizer(nn.Module):
 
     def setup(self):
         self.projection = nn.Dense(self.projection_dim, use_bias=False)
-        
+
         if self.encoder is not None:
             from transformers import AutoConfig, FlaxAutoModel
+
             config = AutoConfig.from_pretrained(self.encoder)
             self.hf_model = FlaxAutoModel.from_config(config).module
 
@@ -110,9 +111,8 @@ class LanguageTokenizer(nn.Module):
         tasks=None,
         train: bool = True,
     ):
-
         if self.encoder is not None:
-            tokens = self.hf_model(**tasks["language"]).last_hidden_state   
+            tokens = self.hf_model(**tasks["language"]).last_hidden_state
             tokens = jax.lax.stop_gradient(tokens)
         else:
             # add a time dimension to language
