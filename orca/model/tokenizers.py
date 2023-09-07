@@ -46,11 +46,11 @@ class ImageTokenizer(nn.Module):
     def __call__(
         self,
         observations,
-        goals=None,
+        tasks=None,
         train: bool = True,
     ):
         # observations["image"] is (batch, obs_horizon, height, width, channel)
-        # goals["image"] is (batch, height, width, channel)
+        # tasks["image"] is (batch, height, width, channel)
         b, t, h, w, c = observations["image"].shape
         if self.conditioning_type == "none":
             # late-fusion architecture, image encoder doesn't see task and obs together
@@ -61,19 +61,19 @@ class ImageTokenizer(nn.Module):
         elif self.conditioning_type == "goal_image":
             # early-fusion goal-image only architecture, concatenate obs and goal image channel-wise
             image = jnp.concatenate(
-                [observations["image"][:, -1], goals["image"]], axis=-1
+                [observations["image"][:, -1], tasks["image"]], axis=-1
             )
             image_tokens = encoders[self.encoder](**self.encoder_kwargs)(image)
             image_tokens = jnp.reshape(image_tokens, (b, -1, image_tokens.shape[-1]))
         elif self.conditioning_type == "goal_image_no_obs":
-            image = goals["image"]
+            image = tasks["image"]
             image_tokens = encoders[self.encoder](**self.encoder_kwargs)(image)
             image_tokens = jnp.reshape(image_tokens, (b, -1, image_tokens.shape[-1]))
         elif self.conditioning_type == "film_language":
             # encode task and pass into encoder with FiLM
             image = observations["image"]
             image = jnp.reshape(image, (b * t, h, w, c))
-            lang = goals["language"]
+            lang = tasks["language"]
             lang = lang[:, None, :].repeat(t, axis=1)
             lang = jnp.reshape(lang, (b * t, -1))
             image_tokens = encoders[self.encoder](**self.encoder_kwargs)(
@@ -92,24 +92,37 @@ class ImageTokenizer(nn.Module):
 
 
 class LanguageTokenizer(nn.Module):
-    encoder: str = None
-    encoder_kwargs: dict = None
     num_tokens: int = 1
+    encoder: str = None
+    projection_dim: int = None
 
-    @nn.compact
+    def setup(self):
+        self.projection = nn.Dense(self.projection_dim, use_bias=False)
+
+        if self.encoder is not None:
+            from transformers import AutoConfig, FlaxAutoModel
+
+            config = AutoConfig.from_pretrained(self.encoder)
+            self.hf_model = FlaxAutoModel.from_config(config).module
+
     def __call__(
         self,
         observations,
-        goals=None,
+        tasks=None,
         train: bool = True,
     ):
-        # TODO (andre) will need an actual encoder if we want token-level embeddings
-
-        # add a time dimension to language
-        if goals["language"].ndim == 2:
-            tokens = goals["language"][:, None, :]
+        if self.encoder is not None:
+            tokens = self.hf_model(**tasks["language"]).last_hidden_state
+            tokens = jax.lax.stop_gradient(tokens)
         else:
-            tokens = goals["language"]
+            # add a time dimension to language
+            if tasks["language"].ndim == 2:
+                tokens = tasks["language"][:, None, :]
+            else:
+                tokens = tasks["language"]
+
+        if self.projection_dim is not None:
+            tokens = self.projection(tokens)
 
         return tokens
 
