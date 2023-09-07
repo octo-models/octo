@@ -100,30 +100,24 @@ def _normalize_action_and_proprio(traj, metadata, normalization_type):
     raise ValueError(f"Unknown normalization type {normalization_type}")
 
 
-def _chunk_act_obs(traj, act_horizon, obs_horizon):
-    """Chunks actions and observations into the given horizons.
+def _chunk_act_obs(traj, horizon):
+    """Chunks actions and observations into the given horizon.
 
-    The "action" and "observation" keys are each given a new axis (at index 1) of size `act_horizon` and
-    `obs_horizon`, respectively. The actions are chunked into the future while the observations are chunked into the
-    past.
+    The "action" and "observation" keys are each given a new axis (at index 1) of size `horizon`.
+    Both actions and observations are chunked into the past.
     """
     traj_len = tf.shape(traj["action"])[0]
-    if act_horizon is not None:
-        chunk_indices = tf.broadcast_to(
-            tf.range(act_horizon), [traj_len, act_horizon]
-        ) + tf.broadcast_to(tf.range(traj_len)[:, None], [traj_len, act_horizon])
-        # pads by repeating the last action
-        chunk_indices = tf.minimum(chunk_indices, traj_len - 1)
-        traj["action"] = tf.gather(traj["action"], chunk_indices)
-    if obs_horizon is not None:
-        chunk_indices = tf.broadcast_to(
-            tf.range(-obs_horizon + 1, 1), [traj_len, obs_horizon]
-        ) + tf.broadcast_to(tf.range(traj_len)[:, None], [traj_len, obs_horizon])
-        # pads by repeating the first observation
-        chunk_indices = tf.maximum(chunk_indices, 0)
-        traj["observation"] = tf.nest.map_structure(
-            lambda x: tf.gather(x, chunk_indices), traj["observation"]
-        )
+    chunk_indices = tf.broadcast_to(
+        tf.range(-horizon + 1, 1), [traj_len, horizon]
+    ) + tf.broadcast_to(tf.range(traj_len)[:, None], [traj_len, horizon])
+    # pads by repeating the first timestep
+    chunk_indices = tf.maximum(chunk_indices, 0)
+    traj["observation"] = tf.nest.map_structure(
+        lambda x: tf.gather(x, chunk_indices), traj["observation"]
+    )
+    traj["action"] = tf.nest.map_structure(
+        lambda x: tf.gather(x, chunk_indices), traj["action"]
+    )
     return traj
 
 
@@ -134,8 +128,7 @@ def apply_common_transforms(
     goal_relabeling_strategy: Optional[str] = None,
     goal_relabeling_kwargs: dict = {},
     augment_kwargs: dict = {},
-    act_horizon: Optional[int] = None,
-    obs_horizon: Optional[int] = None,
+    horizon: int = 1,
     skip_unlabeled: bool = False,
     action_proprio_metadata: Optional[dict] = None,
     action_proprio_normalization_type: Optional[str] = None,
@@ -150,8 +143,7 @@ def apply_common_transforms(
         goal_relabeling_kwargs (dict, optional): Additional keyword arguments to pass to the goal relabeling function.
         augment_kwargs (dict, optional): Keyword arguments to pass to the augmentation function. See
             `dlimp.augmentations.augment_image` for documentation.
-        act_horizon (Optional[int], optional): The future horizon to chunk actions, or None for no chunking.
-        obs_horizon (Optional[int], optional): The past horizon to chunk observations, or None for no chunking.
+        horizon (int, optional): The past horizon to chunk actions and observations
         skip_unlabeled (bool, optional): Whether to skip trajectories with no language labels.
         action_proprio_metadata (Optional[dict], optional): A dictionary containing metadata about the action and
             proprio statistics. If None, no normalization is performed.
@@ -193,10 +185,8 @@ def apply_common_transforms(
             )
         )
 
-    # possibly chunks actions and observations
-    dataset = dataset.map(
-        partial(_chunk_act_obs, act_horizon=act_horizon, obs_horizon=obs_horizon)
-    )
+    # chunks actions and observations
+    dataset = dataset.map(partial(_chunk_act_obs, horizon=horizon))
 
     return dataset
 
