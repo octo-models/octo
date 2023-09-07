@@ -1,7 +1,10 @@
-from orca.model.clip import clip_weights_loader
-from transformers import FlaxAutoModel
 import functools as ft
+
 from flax.core.frozen_dict import freeze
+from transformers import FlaxAutoModel
+
+from orca.model.clip import clip_weights_loader
+
 
 def hf_weights_loader(hf_model, params):
     model = FlaxAutoModel.from_pretrained(hf_model)
@@ -18,15 +21,16 @@ def hf_weights_loader(hf_model, params):
                 return
             if isinstance(params[k], type(params)):
                 find_and_replace(params[k], key, replacement)
-    
+
     params = params.unfreeze()
     find_and_replace(params, "hf_model", model_variables)
     assert replaced, "Failed to load weights"
     return freeze(params)
 
+
 # index for weight loaders
 # these are called to replace parameters after they are initialized from scratch
 weights_loaders = {
     "clip": clip_weights_loader,
-    "distilbert": ft.partial(hf_weights_loader, "distilbert-base-uncased"),  
+    "distilbert": ft.partial(hf_weights_loader, "distilbert-base-uncased"),
 }

@@ -1,6 +1,8 @@
+from copy import deepcopy
+
 from ml_collections import ConfigDict
 from ml_collections.config_dict import placeholder
-from copy import deepcopy
+
 
 def update_config(config, **kwargs):
     new_config = deepcopy(config)
@@ -135,7 +137,10 @@ def get_config(config_string):
                 model=update_config(
                     base_model_config,
                     observation_tokenizer_kwargs={
-                        "obs-film-language-tokenizer": {"num_tokens": 64, **base_encoder_kwargs}
+                        "obs-film-language-tokenizer": {
+                            "num_tokens": 64,
+                            **base_encoder_kwargs,
+                        }
                     },
                     task_tokenizer_kwargs={},
                 ),
@@ -166,7 +171,11 @@ def get_config(config_string):
                         "obs-tokenizer": {"num_tokens": 64, **base_encoder_kwargs}
                     },
                     task_tokenizer_kwargs={
-                        "language-tokenizer": {"num_tokens": 64, "projection_dim": 512, "encoder":"distilbert-base-uncased"}
+                        "language-tokenizer": {
+                            "num_tokens": 64,
+                            "projection_dim": 512,
+                            "encoder": "distilbert-base-uncased",
+                        }
                     },
                 ),
                 optimizer=base_optimizer_config,
@@ -176,8 +185,8 @@ def get_config(config_string):
                     text_processor="hf_tokenizer",
                     text_processor_kwargs=dict(
                         tokenizer_name="distilbert-base-uncased",
-			encode_with_model=False,
-                    ), 
+                        encode_with_model=False,
+                    ),
                     pretrained_weights=["distilbert"],
                 ),
             )
