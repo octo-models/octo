@@ -2,11 +2,8 @@ import tensorflow as tf
 import dlimp as dl
 from orca.data.dataset import apply_common_transforms
 
-def make_sim_dataset(
-    data_path: str,
-    train: bool,
-    **kwargs,
-) -> tf.data.Dataset:
+
+def make_sim_dataset(data_path: str, train: bool, **kwargs) -> tf.data.Dataset:
     """Creates a dataset from the BridgeData format.
 
     Args:
@@ -27,13 +24,7 @@ def make_sim_dataset(
         traj.pop("observations")
         traj["action"] = tf.cast(traj["actions"], tf.float32)
         traj.pop("actions")
-        keep_keys = [
-            "observation",
-            "action",
-            "is_terminal",
-            "is_last",
-            "_traj_index",
-        ]
+        keep_keys = ["observation", "action", "is_terminal", "is_last", "_traj_index"]
         traj = {k: v for k, v in traj.items() if k in keep_keys}
         return traj
 

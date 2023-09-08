@@ -39,11 +39,7 @@ def make_mujoco_gc_env(
 ):
     env = mujoco_manipulation.load(env_name)
     env = wrap_mujoco_gc_env(
-        env,
-        max_episode_steps,
-        action_proprio_metadata,
-        normalization_type,
-        goals,
+        env, max_episode_steps, action_proprio_metadata, normalization_type, goals
     )
 
     if save_video:

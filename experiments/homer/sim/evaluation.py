@@ -73,7 +73,8 @@ def evaluate_gc(
         # using zeros for now since not attending to prev actions
         if history_length > 1:
             act_history = deque(
-                [np.zeros(action_shape)] * (history_length - 1), maxlen=history_length - 1
+                [np.zeros(action_shape)] * (history_length - 1),
+                maxlen=history_length - 1,
             )
         while not done:
             # stack along time dimension
