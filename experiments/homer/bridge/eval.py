@@ -37,7 +37,7 @@ flags.DEFINE_bool("blocking", False, "Use the blocking controller")
 flags.DEFINE_spaceseplist("goal_eep", None, "Goal position")
 flags.DEFINE_spaceseplist("initial_eep", None, "Initial position")
 flags.DEFINE_integer("obs_horizon", None, "Observation history length")
-flags.DEFINE_integer("act_exec_horizon", 1, "Action sequence length")
+flags.DEFINE_integer("action_exec_horizon", 1, "Action sequence length")
 flags.DEFINE_integer("act_pred_horizon", None, "Action sequence length")
 flags.DEFINE_integer("im_size", 128, "Image size")
 flags.DEFINE_bool("deterministic", True, "Whether to sample action deterministically")
@@ -296,7 +296,7 @@ def main(_):
                     )
                     if len(actions.shape) == 1:
                         actions = actions[None]
-                    for i in range(FLAGS.act_exec_horizon):
+                    for i in range(FLAGS.action_exec_horizon):
                         action = actions[i]
                         action = unnormalize_action(action, action_mean, action_std)
                         action += np.random.normal(0, FIXED_STD)

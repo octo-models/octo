@@ -129,12 +129,26 @@ class TransformerPolicy(nn.Module):
         self,
         observations,
         tasks,
-        actions,
+        actions=None,
         train: bool = False,
         argmax: bool = False,
         rng: PRNGKey = None,
         temperature: float = 1.0,
     ):
+        if actions is None:
+            actions = jnp.zeros(
+                (
+                    observations["image_0"].shape[0],
+                    self.time_sequence_length,
+                    self.tokens_per_action,
+                )
+            )
+        else:
+            # action history is (batch, time_sequence_length - 1, tokens_per_action)
+            assert actions.shape[1] == self.time_sequence_length - 1
+            # pad with a zero action (i.e the current action which will be masked) to form a full sequence
+            actions = jnp.pad(actions, ((0, 0), (0, 1), (0, 0)))
+
         output = self.transformer_call(
             observations,
             tasks,
@@ -143,7 +157,7 @@ class TransformerPolicy(nn.Module):
             train=train,
         )
 
-        # use the last action as the predicted action
+        # use the actions in the prediction window
         action_logits = output[:, -self.action_pred_horizon :, -self.action_dim :]
         action_logits = self.vocab_proj(action_logits)
 
