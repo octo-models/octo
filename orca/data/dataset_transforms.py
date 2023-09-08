@@ -45,10 +45,10 @@ def r2_d2_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
 
 def fmb_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
     # every input feature is batched, ie has leading batch dimension
-    trajectory["observations"]["state"] = tf.concat(
+    trajectory["observation"]["state"] = tf.concat(
         (
-            trajectory["observations"]["state"],
-            trajectory["observations"]["gripper_state"][..., None],
+            trajectory["observation"]["state"],
+            trajectory["observation"]["gripper_state"][..., None],
         ),
         axis=-1,
     )
