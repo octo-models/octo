@@ -129,7 +129,7 @@ class VideoRecorder(gym.Wrapper):
             if terminated or truncated:
                 if self.goal_conditioned:
                     frames = [
-                        np.concatenate([self.env.current_goal["image"], frame], axis=0)
+                        np.concatenate([self.env.current_goal["image_0"], frame], axis=0)
                         for frame in self.frames
                     ]
                 else:

@@ -12,7 +12,7 @@ export CUDA_VISIBLE_DEVICES=1
 
 NAME="bridge_goal_relabel_actions_obs_hist_1"
 
-CMD="python experiments/homer/train_rlds.py \
+CMD="python experiments/main/train_rlds.py \
     --config experiments/homer/configs/train_config.py:transformer_bc_bridge \
     --name $NAME"
 

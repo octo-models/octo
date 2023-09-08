@@ -82,7 +82,8 @@ def get_config(config_string):
             num_heads=8,
             dropout_rate=0.1,
             normalization_type=normalization_type,
-            action_pred_horizon=1
+            action_pred_horizon=1,
+            attend_prev_actions=False
         )
     )
 

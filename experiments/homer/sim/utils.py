@@ -5,7 +5,6 @@ import numpy as np
 
 import mujoco_manipulation
 import tensorflow as tf
-from .wrappers.chunking import ActionChunkingWrapper, ObsHistoryWrapper
 from .wrappers.dmcgym import DMCGYM
 from .wrappers.mujoco import GCMujocoWrapper
 from .wrappers.norm import UnnormalizeActionProprio
@@ -20,16 +19,10 @@ def wrap_mujoco_gc_env(
     action_proprio_metadata: dict,
     normalization_type: str,
     goal_sampler: Union[np.ndarray, Callable],
-    obs_horizon: int,
-    act_exec_horizon: int,
 ):
     env = DMCGYM(env)
     env = GCMujocoWrapper(env, goal_sampler)
     env = UnnormalizeActionProprio(env, action_proprio_metadata, normalization_type)
-    if obs_horizon is not None:
-        env = ObsHistoryWrapper(env, obs_horizon)
-    if act_exec_horizon is not None:
-        env = ActionChunkingWrapper(env, act_exec_horizon)
     env = gym.wrappers.TimeLimit(env, max_episode_steps=max_episode_steps)
     return env
 
@@ -43,8 +36,6 @@ def make_mujoco_gc_env(
     save_video_dir: str,
     save_video_prefix: str,
     goals: Union[np.ndarray, Callable],
-    obs_horizon: int,
-    act_exec_horizon: int,
 ):
     env = mujoco_manipulation.load(env_name)
     env = wrap_mujoco_gc_env(
@@ -53,8 +44,6 @@ def make_mujoco_gc_env(
         action_proprio_metadata,
         normalization_type,
         goals,
-        obs_horizon,
-        act_exec_horizon,
     )
 
     if save_video:
