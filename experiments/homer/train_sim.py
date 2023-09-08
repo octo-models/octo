@@ -63,13 +63,9 @@ def main(_):
     tf.config.set_visible_devices([], "GPU")
 
     # set up wandb and logging
-    name = format_name_with_config(
-        FLAGS.name,
-        FLAGS.config.to_dict(),
-    )
+    name = format_name_with_config(FLAGS.name, FLAGS.config.to_dict())
     wandb_id = "{name}_{time}".format(
-        name=name,
-        time=datetime.datetime.now().strftime("%Y%m%d_%H%M%S"),
+        name=name, time=datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     )
     wandb.init(
         config=FLAGS.config.to_dict(),
@@ -98,13 +94,15 @@ def main(_):
 
     # load action metadata
     with tf.io.gfile.GFile(
-        tf.io.gfile.join(FLAGS.config.dataset_kwargs.data_path, "train/metadata.npy"), "rb"
+        tf.io.gfile.join(FLAGS.config.dataset_kwargs.data_path, "train/metadata.npy"),
+        "rb",
     ) as f:
         action_proprio_metadata = np.load(f, allow_pickle=True).item()
 
     # load eval goals
     with tf.io.gfile.GFile(
-        tf.io.gfile.join(FLAGS.config.dataset_kwargs.data_path, "val/eval_goals.npy"), "rb"
+        tf.io.gfile.join(FLAGS.config.dataset_kwargs.data_path, "val/eval_goals.npy"),
+        "rb",
     ) as f:
         eval_goals = np.load(f, allow_pickle=True).item()
 
@@ -222,7 +220,15 @@ def main(_):
         return info
 
     @partial(jax.jit, static_argnames="argmax")
-    def sample_actions(observations, goals, state, rng, past_actions=None, argmax=False, temperature=1.0):
+    def sample_actions(
+        observations,
+        goals,
+        state,
+        rng,
+        past_actions=None,
+        argmax=False,
+        temperature=1.0,
+    ):
         # add batch dim
         observations = jax.tree_map(lambda x: x[None], observations)
         goals = jax.tree_map(lambda x: x[None], goals)

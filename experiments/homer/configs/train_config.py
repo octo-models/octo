@@ -2,6 +2,7 @@ from ml_collections import ConfigDict
 from ml_collections.config_dict import placeholder
 from copy import deepcopy
 
+
 def update_config(config, **kwargs):
     new_config = deepcopy(config)
     for key, value in kwargs.items():
@@ -17,9 +18,7 @@ def update_config(config, **kwargs):
 
 def get_config(config_string):
     base_wandb_config = dict(
-        project="orca",
-        group=placeholder(str),
-        entity=placeholder(str)
+        project="orca", group=placeholder(str), entity=placeholder(str)
     )
 
     base_config = dict(
@@ -59,7 +58,7 @@ def get_config(config_string):
         pretrained_weights=[],
         wandb=base_wandb_config,
         shuffle_buffer_size=25000,
-        action_exec_horizon=2
+        action_exec_horizon=2,
     )
 
     # params that need to be specified multiple places
@@ -111,9 +110,7 @@ def get_config(config_string):
     )
 
     base_optimizer_config = dict(
-        learning_rate=3e-4,
-        warmup_steps=2000,
-        decay_steps=int(2e6),
+        learning_rate=3e-4, warmup_steps=2000, decay_steps=int(2e6)
     )
 
     base_model_config = dict(
@@ -125,7 +122,7 @@ def get_config(config_string):
             dropout_rate=0.1,
             normalization_type=normalization_type,
             action_pred_horizon=4,
-            attend_prev_actions=False
+            attend_prev_actions=False,
         )
     )
 
@@ -193,16 +190,10 @@ def get_config(config_string):
                 model=update_config(
                     base_model_config,
                     observation_tokenizer_kwargs={
-                        "obs-tokenizer": {
-                            "num_tokens": 60,
-                            **base_encoder_kwargs
-                        }
+                        "obs-tokenizer": {"num_tokens": 60, **base_encoder_kwargs}
                     },
                     task_tokenizer_kwargs={
-                        "goal-obs-tokenizer": {
-                            "num_tokens": 60,
-                            **base_encoder_kwargs
-                        }
+                        "goal-obs-tokenizer": {"num_tokens": 60, **base_encoder_kwargs}
                     },
                 ),
                 optimizer=base_optimizer_config,
@@ -210,7 +201,11 @@ def get_config(config_string):
                     base_data_config,
                     name="r2_d2_pen",
                     data_dir="/nfs/kun2/datasets/r2d2/tfds",
-                    image_obs_keys=["exterior_image_1_left", "exterior_image_2_left", "wrist_image_left"],
+                    image_obs_keys=[
+                        "exterior_image_1_left",
+                        "exterior_image_2_left",
+                        "wrist_image_left",
+                    ],
                     state_obs_keys=["joint_position"],
                 ),
                 **base_config,
