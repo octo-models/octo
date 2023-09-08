@@ -211,9 +211,13 @@ class TransformerPolicy(nn.Module):
         # add mask for task tokens, doesn't need to be causal
         full_mask = jnp.pad(
             full_mask,
-            ((0, 0), (self.tokens_per_task, 0)),
-            constant_values=1,
+            ((self.tokens_per_task, 0), (0, 0)),
+            constant_values=0,
         )
+        task_mask = jnp.ones(
+            (self.total_tokens + self.tokens_per_task, self.tokens_per_task)
+        )
+        full_mask = jnp.concatenate([task_mask, full_mask], axis=1)
 
         return full_mask
 
