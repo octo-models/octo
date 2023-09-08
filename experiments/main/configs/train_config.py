@@ -25,8 +25,8 @@ def get_config(config_string):
     )
 
     base_config = dict(
-        batch_size=256,
-        shuffle_buffer_size=25000,
+        batch_size=4,
+        shuffle_buffer_size=1000,
         num_val_batches=8,
         num_steps=int(2e6),
         log_interval=100,
@@ -45,14 +45,10 @@ def get_config(config_string):
     normalization_type = "normal"
 
     base_data_config = dict(
-        # name="r2_d2_pen",
-        # data_dir="/nfs/kun2/datasets/r2d2/tfds",
-        # image_obs_key="exterior_image_1_left",
-        # state_obs_key="joint_position",
         name="bridge_dataset",
-        data_dir="",
-        image_obs_key="image_0",
-        state_obs_key="state",
+        data_dir="/nfs/kun2/datasets/tfds",
+        image_obs_keys=["image_0"],
+        state_obs_keys=["state"],
         obs_horizon=1,
         augment_kwargs=dict(
             random_resized_crop=dict(scale=[0.8, 1.0], ratio=[0.9, 1.1]),
@@ -110,7 +106,13 @@ def get_config(config_string):
                     },
                 ),
                 optimizer=base_optimizer_config,
-                dataset_kwargs=base_data_config,
+                dataset_kwargs=update_config(
+                    base_data_config,
+                    name="bridge_dataset",
+                    data_dir="/nfs/kun2/datasets/tfds",
+                    image_obs_keys=["image_0"],
+                    state_obs_keys=["state"],
+                ),
                 **base_config,
             )
         ),
@@ -120,14 +122,26 @@ def get_config(config_string):
                 model=update_config(
                     base_model_config,
                     observation_tokenizer_kwargs={
-                        "obs-tokenizer": {"num_tokens": 60, **base_encoder_kwargs}
+                        "obs-tokenizer": {
+                            "num_tokens": 60,
+                            **base_encoder_kwargs
+                        }
                     },
                     task_tokenizer_kwargs={
-                        "goal-obs-tokenizer": {"num_tokens": 60, **base_encoder_kwargs}
+                        "goal-obs-tokenizer": {
+                            "num_tokens": 60,
+                            **base_encoder_kwargs
+                        }
                     },
                 ),
                 optimizer=base_optimizer_config,
-                dataset_kwargs=base_data_config,
+                dataset_kwargs=update_config(
+                    base_data_config,
+                    name="r2_d2_pen",
+                    data_dir="/nfs/kun2/datasets/r2d2/tfds",
+                    image_obs_keys=["exterior_image_1_left", "exterior_image_2_left", "wrist_image_left"],
+                    state_obs_keys=["joint_position"],
+                ),
                 **base_config,
             )
         ),

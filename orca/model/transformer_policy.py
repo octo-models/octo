@@ -204,7 +204,7 @@ class TransformerPolicy(nn.Module):
         # TODO we don't currently attend to actions so just use zeros here
         action_tokens = jnp.zeros(
             (
-                *observations["image"].shape[:2],
+                *observations["image_0"].shape[:2],
                 self.tokens_per_action,
                 self.token_embedding_size,
             )

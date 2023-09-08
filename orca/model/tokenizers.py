@@ -1,5 +1,4 @@
 import functools as ft
-from typing import Callable, Optional, Sequence
 
 import flax.linen as nn
 import jax
@@ -49,31 +48,38 @@ class ImageTokenizer(nn.Module):
         tasks=None,
         train: bool = True,
     ):
-        # observations["image"] is (batch, obs_horizon, height, width, channel)
-        # tasks["image"] is (batch, height, width, channel)
-        b, t, h, w, c = observations["image"].shape
+        def assemble_image_obs(obs):
+            return jnp.concatenate(
+                [
+                    obs[key]
+                    for key in sorted(obs)
+                    if ("image_" in key or "depth_" in key)
+                ],
+                axis=-1,
+            )
+
+        # observations["image_XXX"] is (batch, obs_horizon, height, width, channel)
+        # tasks["image_XXX"] is (batch, height, width, channel)
+        image = assemble_image_obs(observations)
+        b, t, h, w, c = image.shape
         if self.conditioning_type == "none":
             # late-fusion architecture, image encoder doesn't see task and obs together
-            image = observations["image"]
             image = jnp.reshape(image, (b * t, h, w, c))
             image_tokens = encoders[self.encoder](**self.encoder_kwargs)(image)
             image_tokens = jnp.reshape(image_tokens, (b, t, -1, image_tokens.shape[-1]))
         elif self.conditioning_type == "goal_image":
             # early-fusion goal-image only architecture, concatenate obs and goal image channel-wise
-            image = jnp.concatenate(
-                [observations["image"][:, -1], tasks["image"]], axis=-1
-            )
+            image = jnp.concatenate([image[:, -1], assemble_image_obs(tasks)], axis=-1)
             image_tokens = encoders[self.encoder](**self.encoder_kwargs)(image)
             image_tokens = jnp.reshape(image_tokens, (b, -1, image_tokens.shape[-1]))
         elif self.conditioning_type == "goal_image_no_obs":
-            image = tasks["image"]
+            image = assemble_image_obs(tasks)
             image_tokens = encoders[self.encoder](**self.encoder_kwargs)(image)
             image_tokens = jnp.reshape(image_tokens, (b, -1, image_tokens.shape[-1]))
         elif self.conditioning_type == "film_language":
             # encode task and pass into encoder with FiLM
-            image = observations["image"]
             image = jnp.reshape(image, (b * t, h, w, c))
-            lang = tasks["language"]
+            lang = tasks["language_instruction"]
             lang = lang[:, None, :].repeat(t, axis=1)
             lang = jnp.reshape(lang, (b * t, -1))
             image_tokens = encoders[self.encoder](**self.encoder_kwargs)(
@@ -112,14 +118,14 @@ class LanguageTokenizer(nn.Module):
         train: bool = True,
     ):
         if self.encoder is not None:
-            tokens = self.hf_model(**tasks["language"]).last_hidden_state
+            tokens = self.hf_model(**tasks["language_instruction"]).last_hidden_state
             tokens = jax.lax.stop_gradient(tokens)
         else:
             # add a time dimension to language
-            if tasks["language"].ndim == 2:
-                tokens = tasks["language"][:, None, :]
+            if tasks["language_instruction"].ndim == 2:
+                tokens = tasks["language_instruction"][:, None, :]
             else:
-                tokens = tasks["language"]
+                tokens = tasks["language_instruction"]
 
         if self.projection_dim is not None:
             tokens = self.projection(tokens)

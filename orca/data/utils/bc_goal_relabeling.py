@@ -9,7 +9,7 @@ def uniform(traj):
     """
     Relabels with a true uniform distribution over future states.
     """
-    traj_len = tf.shape(tf.nest.flatten(traj["observations"])[0])[0]
+    traj_len = tf.shape(tf.nest.flatten(traj["observation"])[0])[0]
 
     # select a random future index for each transition i in the range [i + 1, traj_len)
     rand = tf.random.uniform([traj_len])
@@ -22,7 +22,7 @@ def uniform(traj):
 
     traj["tasks"] = tf.nest.map_structure(
         lambda x: tf.gather(x, goal_idxs),
-        traj["observations"],
+        traj["observation"],
     )
 
     return traj
