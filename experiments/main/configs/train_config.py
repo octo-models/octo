@@ -49,7 +49,7 @@ def get_config(config_string):
         data_dir="/nfs/kun2/datasets/tfds",
         image_obs_keys=["image_0"],
         state_obs_keys=["state"],
-        horizon=1,
+        horizon=2,
         augment_kwargs=dict(
             random_resized_crop=dict(scale=[0.8, 1.0], ratio=[0.9, 1.1]),
             random_brightness=[0.2],
@@ -82,8 +82,8 @@ def get_config(config_string):
             num_heads=8,
             dropout_rate=0.1,
             normalization_type=normalization_type,
-            action_pred_horizon=1,
-            attend_prev_actions=False
+            pred_horizon=1,
+            cond_prev_actions=False
         )
     )
 

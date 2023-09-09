@@ -117,6 +117,10 @@ def main(_):
         save_video_prefix="eval",
         goals=eval_goals,
     )
+    history_length = (
+        FLAGS.config.dataset_kwargs.horizon
+        - FLAGS.config.model.policy_kwargs.pred_horizon
+    )
 
     # load datasets
     logging.info(f"Loading data from {FLAGS.config.dataset_kwargs.data_path}")
@@ -154,7 +158,7 @@ def main(_):
 
     model_def = create_model_def(
         action_dim=example_batch["action"].shape[-1],
-        time_sequence_length=example_batch["observation"]["image_0"].shape[1],
+        horizon=example_batch["observation"]["image_0"].shape[1],
         **FLAGS.config.model.to_dict(),
     )
 
@@ -264,14 +268,14 @@ def main(_):
         timer.tock("train")
 
         if (i + 1) % FLAGS.config.eval_interval == 0:
-            # logging.info("Validation...")
-            # timer.tick("val")
-            # metrics = []
-            # for _, batch in zip(range(FLAGS.config.num_val_batches), val_data_iter):
-            #     metrics.append(eval_step(train_state, batch))
-            # metrics = jax.tree_map(lambda *xs: np.mean(xs), *metrics)
-            # wandb_log({"validation": metrics}, step=i)
-            # timer.tock("val")
+            logging.info("Validation...")
+            timer.tick("val")
+            metrics = []
+            for _, batch in zip(range(FLAGS.config.num_val_batches), val_data_iter):
+                metrics.append(eval_step(train_state, batch))
+            metrics = jax.tree_map(lambda *xs: np.mean(xs), *metrics)
+            wandb_log({"validation": metrics}, step=i)
+            timer.tock("val")
 
             rng, policy_key = jax.random.split(rng)
             policy_fn = supply_rng(
@@ -292,7 +296,7 @@ def main(_):
             eval_info = evaluate_gc(
                 policy_fn,
                 eval_env,
-                history_length=FLAGS.config.dataset_kwargs.horizon,
+                history_length=history_length,
                 action_exec_horizon=FLAGS.config.action_exec_horizon,
                 num_episodes=FLAGS.config.eval_episodes,
             )

@@ -42,12 +42,12 @@ def make_bridge_dataset(
     ).map(dl.transforms.unflatten_dict)
 
     def restructure(traj):
-        # traj["observations"] = traj.pop("obs")
+        traj["observations"] = traj.pop("obs")
         traj["observations"] = {
             "image": traj["observations"]["images0"],  # always take images0 for now
             "proprio": tf.cast(traj["observations"]["state"], tf.float32),
         }
-        # traj["language"] = traj.pop("lang")
+        traj["language"] = traj.pop("lang")
         traj["actions"] = tf.cast(traj["actions"], tf.float32)
         traj["actions"] = tf.concat(
             [

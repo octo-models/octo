@@ -128,7 +128,7 @@ def apply_common_transforms(
     goal_relabeling_strategy: Optional[str] = None,
     goal_relabeling_kwargs: dict = {},
     augment_kwargs: dict = {},
-    horizon: int = 1,
+    horizon: int = 2,
     skip_unlabeled: bool = False,
     action_proprio_metadata: Optional[dict] = None,
     action_proprio_normalization_type: Optional[str] = None,
@@ -186,6 +186,7 @@ def apply_common_transforms(
         )
 
     # chunks actions and observations
+    assert horizon >= 2, "Horizon must be at least 2"
     dataset = dataset.map(partial(_chunk_act_obs, horizon=horizon))
 
     return dataset

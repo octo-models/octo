@@ -121,7 +121,9 @@ def load_tf_dataset(data_path):
     return dataset
 
 
-def load_recorded_video(video_path: str,):
+def load_recorded_video(
+    video_path: str,
+):
     with tf.io.gfile.GFile(video_path, "rb") as f:
         video = np.array(imageio.mimread(f, "MP4")).transpose((0, 3, 1, 2))
         assert video.shape[1] == 3, "Numpy array should be (T, C, H, W)"
