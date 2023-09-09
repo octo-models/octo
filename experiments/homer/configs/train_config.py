@@ -39,10 +39,10 @@ def get_config(config_string):
     )
 
     base_sim_config = dict(
-        batch_size=4,
+        batch_size=256,
         num_steps=int(2e6),
-        log_interval=100,
-        eval_interval=1,
+        log_interval=1000,
+        eval_interval=5000,
         save_interval=int(2e6),
         save_dir="/mnt2/homer/jaxrl_log",
         resume_path=None,
