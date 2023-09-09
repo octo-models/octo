@@ -90,6 +90,8 @@ def evaluate_gc(
             for i in range(action_exec_horizon):
                 next_obs, _, terminated, truncated, info = env.step(action[i])
                 obs_history.append(next_obs)
+                if terminated or truncated:
+                    break
 
             goal = info["goal"]
             done = terminated or truncated

@@ -44,7 +44,7 @@ def get_config(config_string):
         log_interval=1000,
         eval_interval=5000,
         save_interval=int(2e6),
-        save_dir="/mnt2/homer/jaxrl_log",
+        save_dir="gs://rail-tpus-homer-v4/log",
         resume_path=None,
         seed=42,
         env_name="franka_shoe_pick_and_place",
@@ -58,7 +58,7 @@ def get_config(config_string):
         pretrained_weights=[],
         wandb=base_wandb_config,
         shuffle_buffer_size=25000,
-        action_exec_horizon=2,
+        action_exec_horizon=1,
     )
 
     # params that need to be specified multiple places
@@ -69,7 +69,7 @@ def get_config(config_string):
         data_dir="/nfs/kun2/datasets/tfds",
         image_obs_keys=["image_0"],
         state_obs_keys=["state"],
-        horizon=1,
+        horizon=2,
         augment_kwargs=dict(
             random_resized_crop=dict(scale=[0.8, 1.0], ratio=[0.9, 1.1]),
             random_brightness=[0.2],
@@ -89,8 +89,8 @@ def get_config(config_string):
     )
 
     base_sim_data_config = dict(
-        data_path="/mnt2/homer/datasets/mujoco_sim/franka_shoe_pick_and_place_2K_20230709-201001",
-        horizon=8,
+        data_path="gs://rail-tpus-homer-v4/sim_data/franka_shoe_pick_and_place_2K_20230709-201001",
+        horizon=2,
         augment_kwargs=dict(
             random_resized_crop=dict(scale=[0.8, 1.0], ratio=[0.9, 1.1]),
             random_brightness=[0.2],
@@ -121,8 +121,8 @@ def get_config(config_string):
             num_heads=8,
             dropout_rate=0.1,
             normalization_type=normalization_type,
-            action_pred_horizon=4,
-            attend_prev_actions=False,
+            pred_horizon=1,
+            cond_prev_actions=False,
         )
     )
 
