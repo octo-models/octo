@@ -102,6 +102,18 @@ class TransformerPolicy(nn.Module):
         attention_mask,
         train: bool = False,
     ):
+        if actions is None:
+            assert not self.attend_prev_actions
+            actions = jnp.zeros(
+                (
+                    observations["image_0"].shape[0],
+                    self.time_sequence_length,
+                    self.action_dim,
+                )
+            )
+        else:
+            actions = self.zero_target_actions(actions)
+
         task_tokens, obs_tokens, action_tokens = self.get_tokens(
             observations, tasks, actions, train=train
         )
@@ -135,20 +147,6 @@ class TransformerPolicy(nn.Module):
         rng: PRNGKey = None,
         temperature: float = 1.0,
     ):
-        if actions is None:
-            actions = jnp.zeros(
-                (
-                    observations["image_0"].shape[0],
-                    self.time_sequence_length,
-                    self.tokens_per_action,
-                )
-            )
-        else:
-            # action history is (batch, time_sequence_length - 1, tokens_per_action)
-            assert actions.shape[1] == self.time_sequence_length - 1
-            # pad with a zero action (i.e the current action which will be masked) to form a full sequence
-            actions = jnp.pad(actions, ((0, 0), (0, 1), (0, 0)))
-
         output = self.transformer_call(
             observations,
             tasks,
@@ -266,3 +264,26 @@ class TransformerPolicy(nn.Module):
         tokens = jnp.reshape(tokens, (tokens.shape[0], -1, tokens.shape[-1]))
         tokens = jnp.concatenate([task_tokens, tokens], axis=1)
         return tokens
+
+    def zero_target_actions(self, actions):
+        """
+        Set the actions that will be predicted to zero.
+
+        During training, actions has shape (batch, time_sequence_length, action_dim)
+        and this function replaces the actions to be predicted with zero.
+
+        During evaluation, actions has shape (batch, time_sequence_length-action_pred_horizon, action_dim)
+        because we do not know the future actions. This function adds zero actions to form a full sequence.
+
+        While the attention mask also masks the actions to be predicted, we still need to zero
+        them here because of the residual connection in the attention block.
+        """
+        return jnp.concatenate(
+            [
+                actions[:, : self.time_sequence_length - self.action_pred_horizon],
+                jnp.zeros(
+                    (actions.shape[0], self.action_pred_horizon, actions.shape[2])
+                ),
+            ],
+            axis=1,
+        )
