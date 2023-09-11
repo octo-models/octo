@@ -221,6 +221,8 @@ def main(_):
             method="predict_action",
             rngs={"dropout": state.rng},
         )
+
+        # viz expects (batch_size, n_samples, action_dim)
         if argmax:
             actions = actions[:, None]
         else:
