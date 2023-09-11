@@ -72,7 +72,7 @@ def run_policy_on_trajectory(
 
 @dataclass
 class Visualizer:
-    dataset_kwargs: dict
+    dataset_kwargs: dict  # TODO: maybe replace with a dataset object
     metric_keys: dict = None
     sub_conditions: dict = None
     task_definition: str = None
@@ -280,7 +280,7 @@ def plot_trajectory_actions(
 ):
     """Creates a 3D plotly figure of the trajectory and predicted actions."""
     pred_actions, actions, proprio = unnorm_pred_actions, unnorm_actions, unnorm_proprio
-    pred_actions = actions[:, None]
+
     fig = go.Figure()
     fig.add_trace(
         go.Scatter3d(
@@ -298,20 +298,30 @@ def plot_trajectory_actions(
 
     last_plotted = 0
     for i in range(len(actions) - 1):
-        if i == 0 or np.linalg.norm(proprio[i] - proprio[last_plotted]) > 0.04:
+        visible = np.linalg.norm((proprio[i] - proprio[last_plotted])[:3]) > 0.05
+        visible = visible or (i == 0)
+        if visible:
             last_plotted = i
-            for action in pred_actions[i]:
-                ns = proprio[i] + action  # TODO: is this always true?
 
-                fig.add_trace(
-                    go.Scatter3d(
-                        x=(proprio[i, 0], ns[0]),
-                        y=(proprio[i, 1], ns[1]),
-                        z=(proprio[i, 2], ns[2]),
-                        marker=dict(size=1, opacity=0),
-                        line=dict(color="rgba(0, 0, 255, 0.2)"),
-                    )
-                )
+        xs = []
+        ys = []
+        zs = []
+        for action in pred_actions[i]:
+            ns = proprio[i] + action
+            xs.extend((proprio[i, 0], ns[0]))
+            ys.extend((proprio[i, 1], ns[1]))
+            zs.extend((proprio[i, 2], ns[2]))
+        fig.add_trace(
+            go.Scatter3d(
+                x=xs,
+                y=ys,
+                z=zs,
+                visible="legendonly" if not visible else True,
+                name="timestep {}".format(i),
+                marker=dict(size=1, opacity=0),
+                line=dict(color="rgba(0, 0, 255, 0.1)"),
+            )
+        )
     fig.update_layout(
         scene=dict(
             annotations=[
@@ -400,8 +410,8 @@ def _gripper_correct(unnorm_actions, unnorm_pred_actions, **kwargs):
 
 def _xyz_angle(unnorm_actions, unnorm_pred_actions, **kwargs):
     def angle_between(v1, v2):
-        v1_u = v1 / jnp.linalg.norm(v1)
-        v2_u = v2 / jnp.linalg.norm(v2)
+        v1_u = v1 / (1e-6 + jnp.linalg.norm(v1))
+        v2_u = v2 / (1e-6 + jnp.linalg.norm(v2))
         return jnp.arccos(jnp.clip(jnp.dot(v1_u, v2_u), -1.0, 1.0))
 
     return jax.vmap(angle_between)(unnorm_actions[:, :3], unnorm_pred_actions[:, :3])

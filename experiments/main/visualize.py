@@ -57,7 +57,7 @@ config_dir = os.path.join(os.path.dirname(__file__), "configs")
 config_flags.DEFINE_config_file(
     "config",
     os.path.join(config_dir, "train_config.py:transformer_bc_bridge"),
-    "File path to the training hyperparameter configuration.",
+    "File path used to get the dataset kwargs.",
     lock_config=False,
 )
 
@@ -83,7 +83,7 @@ def dummy_main(_):
     images = visualizer.visualize_for_wandb(policy_fn, n_trajs=1)
     info = visualizer.raw_evaluations(policy_fn, max_trajs=100)
     bridge_metrics = visualizer.metrics_for_wandb(info)
-    wandb.init(name="dummy", project="orca", mode="offline")
+    wandb.init(name="dummy", group="orca", project="test")
     wandb.log(images)
     wandb.log(bridge_metrics)
 
