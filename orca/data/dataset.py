@@ -101,10 +101,10 @@ def _normalize_action_and_proprio(traj, metadata, normalization_type):
 
 
 def _chunk_act_obs(traj, horizon):
-    """Chunks actions and observations into the given horizon.
+    """
+    Chunks actions and observations into the given horizon.
 
     The "action" and "observation" keys are each given a new axis (at index 1) of size `horizon`.
-    Both actions and observations are chunked into the past.
     """
     traj_len = tf.shape(traj["action"])[0]
     chunk_indices = tf.broadcast_to(
@@ -143,7 +143,7 @@ def apply_common_transforms(
         goal_relabeling_kwargs (dict, optional): Additional keyword arguments to pass to the goal relabeling function.
         augment_kwargs (dict, optional): Keyword arguments to pass to the augmentation function. See
             `dlimp.augmentations.augment_image` for documentation.
-        horizon (int, optional): The past horizon to chunk actions and observations
+        horizon (int, optional): The length of the snippets that trajectories are chunked into.
         skip_unlabeled (bool, optional): Whether to skip trajectories with no language labels.
         action_proprio_metadata (Optional[dict], optional): A dictionary containing metadata about the action and
             proprio statistics. If None, no normalization is performed.
@@ -186,7 +186,9 @@ def apply_common_transforms(
         )
 
     # chunks actions and observations
-    assert horizon >= 2, "Horizon must be at least 2"
+    assert (
+        horizon >= 2
+    ), "Horizon must be at least 2 to provide a timestep for conditioning and a timestep for prediction."
     dataset = dataset.map(partial(_chunk_act_obs, horizon=horizon))
 
     return dataset
