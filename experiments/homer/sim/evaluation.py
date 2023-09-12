@@ -1,4 +1,4 @@
-from collections import defaultdict
+from collections import defaultdict, deque
 from typing import Dict
 
 import gym
@@ -45,107 +45,60 @@ def add_to(dict_of_lists, single_dict):
         dict_of_lists[k].append(v)
 
 
-def evaluate(policy_fn, env: gym.Env, num_episodes: int) -> Dict[str, float]:
-    stats = defaultdict(list)
-    for _ in range(num_episodes):
-        observation, info = env.reset()
-        add_to(stats, flatten(info))
-        done = False
-        while not done:
-            action = policy_fn(observation)
-            observation, _, terminated, truncated, info = env.step(action)
-            done = terminated or truncated
-            add_to(stats, flatten(info))
-        add_to(stats, flatten(info, parent_key="final"))
-
-    for k, v in stats.items():
-        stats[k] = np.mean(v)
-    return stats
-
-
-def evaluate_with_trajectories(
-    policy_fn, env: gym.Env, num_episodes: int
-) -> Dict[str, float]:
-    trajectories = []
-    stats = defaultdict(list)
-
-    for _ in range(num_episodes):
-        trajectory = defaultdict(list)
-        observation, info = env.reset()
-        add_to(stats, flatten(info))
-        done = False
-        while not done:
-            action = policy_fn(observation)
-            next_observation, r, terminated, truncated, info = env.step(action)
-            done = terminated or truncated
-            transition = dict(
-                observation=observation,
-                next_observation=next_observation,
-                action=action,
-                reward=r,
-                done=done,
-                info=info,
-            )
-            add_to(trajectory, transition)
-            add_to(stats, flatten(info))
-            observation = next_observation
-        add_to(stats, flatten(info, parent_key="final"))
-        trajectories.append(trajectory)
-
-    for k, v in stats.items():
-        stats[k] = np.mean(v)
-    return stats, trajectories
+def stack_obs(obs):
+    dict_list = {k: [dic[k] for dic in obs] for k in obs[0]}
+    return jax.tree_map(
+        lambda x: np.stack(x), dict_list, is_leaf=lambda x: type(x) == list
+    )
 
 
 def evaluate_gc(
-    policy_fn, env: gym.Env, num_episodes: int, return_trajectories: bool = False
+    policy_fn,
+    env: gym.Env,
+    history_length: int,
+    action_exec_horizon: int,
+    num_episodes: int,
 ) -> Dict[str, float]:
     stats = defaultdict(list)
-
-    if return_trajectories:
-        trajectories = []
+    action_shape = env.action_space.shape
 
     for _ in range(num_episodes):
-        if return_trajectories:
-            trajectory = defaultdict(list)
-
-        observation, info = env.reset()
+        obs, info = env.reset()
         goal = info["goal"]
         add_to(stats, flatten(filter_info(info)))
         done = False
 
+        obs_history = deque([obs] * history_length, maxlen=history_length)
+        # TODO (homer): unclear what to use as action history for the first timestep
+        # using zeros for now since not attending to prev actions
+        if history_length > 1:
+            act_history = deque(
+                [np.zeros(action_shape)] * (history_length - 1),
+                maxlen=history_length - 1,
+            )
         while not done:
-            action = policy_fn(observation, goal)
-            next_observation, r, terminated, truncated, info = env.step(action)
+            # stack along time dimension
+            obs = stack_obs(obs_history)
+            if history_length > 1:
+                past_actions = np.stack(act_history)
+                action = policy_fn(obs, goal, past_actions=past_actions)
+                act_history.extend([action[i] for i in range(len(action))])
+            else:
+                action = policy_fn(obs, goal)
+            assert len(action) >= action_exec_horizon
+
+            for i in range(action_exec_horizon):
+                next_obs, _, terminated, truncated, info = env.step(action[i])
+                obs_history.append(next_obs)
+                if terminated or truncated:
+                    break
+
             goal = info["goal"]
             done = terminated or truncated
-            transition = dict(
-                observation=observation,
-                next_observation=next_observation,
-                goal=goal,
-                action=action,
-                reward=r,
-                done=done,
-                info=info,
-            )
-
             add_to(stats, flatten(filter_info(info)))
 
-            if return_trajectories:
-                add_to(trajectory, transition)
-
-            observation = next_observation
-
         add_to(stats, flatten(filter_info(info), parent_key="final"))
-        if return_trajectories:
-            trajectory["steps_remaining"] = list(
-                np.arange(len(trajectory["action"]))[::-1]
-            )
-            trajectories.append(trajectory)
 
     stats = {k: np.mean(v) for k, v in stats.items() if not isinstance(v[0], str)}
 
-    if return_trajectories:
-        return stats, trajectories
-    else:
-        return stats
+    return stats

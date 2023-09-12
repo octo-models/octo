@@ -1,5 +1,4 @@
 import datetime
-import json
 import os
 from functools import partial
 
@@ -15,10 +14,8 @@ from flax.training import checkpoints
 from flax.traverse_util import flatten_dict
 from ml_collections import config_flags
 
-from orca.data.bridge.bridge_dataset import BridgeDataset, glob_to_path_list
-from orca.data.utils.text_processing import text_processors
 from orca.model import create_model_def
-from orca.model.tokenizers import weights_loaders
+from orca.model.weights import weights_loaders
 from orca.train_utils import (
     Timer,
     create_train_state,
@@ -26,8 +23,10 @@ from orca.train_utils import (
     initialize_compilation_cache,
     shard_batch,
 )
+
 from sim.evaluation import evaluate_gc, supply_rng
 from sim.utils import make_mujoco_gc_env, load_recorded_video
+from sim.dataset import make_sim_dataset
 
 try:
     from jax_smi import initialise_tracking  # type: ignore
@@ -49,19 +48,16 @@ config_flags.DEFINE_config_file(
     lock_config=False,
 )
 
-config_flags.DEFINE_config_file(
-    "bridgedata_config",
-    os.path.join(config_dir, "data_config.py:all"),
-    "File path to the bridgedata configuration.",
-    lock_config=False,
-)
-
 
 def main(_):
     initialize_compilation_cache()
     devices = jax.local_devices()
     num_devices = len(devices)
     assert FLAGS.config.batch_size % num_devices == 0
+
+    # we shard the leading dimension (batch dimension) accross all devices evenly
+    sharding = jax.sharding.PositionalSharding(devices)
+    shard_fn = partial(shard_batch, sharding=sharding)
 
     # prevent tensorflow from using GPUs
     tf.config.set_visible_devices([], "GPU")
@@ -98,74 +94,71 @@ def main(_):
 
     # load action metadata
     with tf.io.gfile.GFile(
-        tf.io.gfile.join(FLAGS.config.data_path, "train/metadata.npy"), "rb"
+        tf.io.gfile.join(FLAGS.config.dataset_kwargs.data_path, "train/metadata.npy"),
+        "rb",
     ) as f:
         action_proprio_metadata = np.load(f, allow_pickle=True).item()
 
     # load eval goals
     with tf.io.gfile.GFile(
-        tf.io.gfile.join(FLAGS.config.data_path, "val/eval_goals.npy"), "rb"
+        tf.io.gfile.join(FLAGS.config.dataset_kwargs.data_path, "val/eval_goals.npy"),
+        "rb",
     ) as f:
         eval_goals = np.load(f, allow_pickle=True).item()
-
-    obs_horizon = FLAGS.config.get("obs_horizon")
-    act_exec_horizon = FLAGS.config.get("act_exec_horizon")
-    normalization_type = FLAGS.config.get("normalization_type", "normal")
 
     # create sim environment
     eval_env = make_mujoco_gc_env(
         env_name=FLAGS.config.env_name,
         max_episode_steps=FLAGS.config.max_episode_steps,
         action_proprio_metadata=action_proprio_metadata,
-        normalization_type=normalization_type,
+        normalization_type=FLAGS.config.dataset_kwargs.action_proprio_normalization_type,
         save_video=FLAGS.config.save_video,
         save_video_dir=tf.io.gfile.join(save_dir, "videos"),
         save_video_prefix="eval",
         goals=eval_goals,
-        obs_horizon=obs_horizon,
-        act_exec_horizon=act_exec_horizon,
+    )
+    history_length = (
+        FLAGS.config.dataset_kwargs.horizon
+        - FLAGS.config.model.policy_kwargs.pred_horizon
     )
 
     # load datasets
-    logging.info(f"Loading data from {FLAGS.config.data_path}")
-    train_paths = tf.io.gfile.glob(f"{FLAGS.config.data_path}/train/*.tfrecord")
-    val_paths = tf.io.gfile.glob(f"{FLAGS.config.data_path}/val/*.tfrecord")
-    train_data = BridgeDataset(
-        train_paths,
-        FLAGS.config.seed,
-        batch_size=FLAGS.config.batch_size,
-        train=True,
-        action_proprio_metadata=action_proprio_metadata,
-        relabel_actions=False,
-        obs_horizon=obs_horizon,
-        **FLAGS.config.dataset_kwargs,
+    logging.info(f"Loading data from {FLAGS.config.dataset_kwargs.data_path}")
+    train_data = (
+        make_sim_dataset(
+            **FLAGS.config.dataset_kwargs,
+            action_proprio_metadata=action_proprio_metadata,
+            train=True,
+        )
+        .unbatch()
+        .shuffle(FLAGS.config.shuffle_buffer_size)
+        .repeat()
+        .batch(FLAGS.config.batch_size)
     )
-    val_data = BridgeDataset(
-        val_paths,
-        FLAGS.config.seed,
-        batch_size=FLAGS.config.batch_size,
-        action_proprio_metadata=action_proprio_metadata,
-        relabel_actions=False,
-        train=False,
-        obs_horizon=obs_horizon,
-        **FLAGS.config.dataset_kwargs,
+    val_data = (
+        make_sim_dataset(
+            **FLAGS.config.dataset_kwargs,
+            action_proprio_metadata=action_proprio_metadata,
+            train=False,
+        )
+        .unbatch()
+        .shuffle(FLAGS.config.shuffle_buffer_size)
+        .repeat()
+        .batch(FLAGS.config.batch_size)
     )
-    train_data_iter = train_data.get_iterator()
+    train_data_iter = map(shard_fn, train_data.iterator())
+    val_data_iter = map(shard_fn, val_data.iterator())
 
     example_batch = next(train_data_iter)
-    logging.info(f"Batch size: {example_batch['observations']['image'].shape[0]}")
+    logging.info(f"Batch size: {example_batch['action'].shape[0]}")
     logging.info(f"Number of devices: {num_devices}")
     logging.info(
-        f"Batch size per device: {example_batch['observations']['image'].shape[0] // num_devices}"
+        f"Batch size per device: {example_batch['action'].shape[0] // num_devices}"
     )
 
-    # we shard the leading dimension (batch dimension) accross all devices evenly
-    sharding = jax.sharding.PositionalSharding(devices)
-    example_batch = shard_batch(example_batch, sharding)
-
     model_def = create_model_def(
-        action_dim=example_batch["actions"].shape[-1],
-        time_sequence_length=example_batch["observations"]["image"].shape[1],
+        action_dim=example_batch["action"].shape[-1],
+        horizon=example_batch["observation"]["image_0"].shape[1],
         **FLAGS.config.model.to_dict(),
     )
 
@@ -188,9 +181,9 @@ def main(_):
         model_def,
         tx,
         init_args=(
-            example_batch["observations"],
-            example_batch["goals"],
-            example_batch["actions"],
+            example_batch["observation"],
+            example_batch["tasks"],
+            example_batch["action"],
         ),
         pretrained_loaders=pretrained_loaders,
     )
@@ -208,9 +201,9 @@ def main(_):
     def loss_fn(params, state, batch, rng, train=True):
         info = state.apply_fn(
             {"params": params},
-            batch["observations"],
-            batch["goals"],
-            batch["actions"],
+            batch["observation"],
+            batch["tasks"],
+            batch["action"],
             train=train,
             rngs={"dropout": rng},
         )
@@ -231,19 +224,32 @@ def main(_):
         return info
 
     @partial(jax.jit, static_argnames="argmax")
-    def sample_actions(observations, goals, state, rng, argmax=False, temperature=1.0):
+    def sample_actions(
+        observations,
+        goals,
+        state,
+        rng,
+        past_actions=None,
+        argmax=False,
+        temperature=1.0,
+    ):
+        # add batch dim
         observations = jax.tree_map(lambda x: x[None], observations)
         goals = jax.tree_map(lambda x: x[None], goals)
+        if past_actions is not None:
+            past_actions = past_actions[None]
         actions = state.apply_fn(
             {"params": state.params},
             observations,
             goals,
+            actions=past_actions,
             train=False,
             argmax=argmax,
             rng=rng,
             temperature=temperature,
             method="predict_action",
         )
+        # remove batch dim
         return actions[0]
 
     def wandb_log(info, step):
@@ -254,7 +260,7 @@ def main(_):
         timer.tick("total")
 
         timer.tick("dataset")
-        batch = shard_batch(next(train_data_iter), sharding)
+        batch = next(train_data_iter)
         timer.tock("dataset")
 
         timer.tick("train")
@@ -265,12 +271,8 @@ def main(_):
             logging.info("Validation...")
             timer.tick("val")
             metrics = []
-            j = 0
-            for batch in val_data.get_iterator():
+            for _, batch in zip(range(FLAGS.config.num_val_batches), val_data_iter):
                 metrics.append(eval_step(train_state, batch))
-                j += 1
-                if j >= FLAGS.config.num_val_batches:
-                    break
             metrics = jax.tree_map(lambda *xs: np.mean(xs), *metrics)
             wandb_log({"validation": metrics}, step=i)
             timer.tock("val")
@@ -294,8 +296,9 @@ def main(_):
             eval_info = evaluate_gc(
                 policy_fn,
                 eval_env,
+                history_length=history_length,
+                action_exec_horizon=FLAGS.config.action_exec_horizon,
                 num_episodes=FLAGS.config.eval_episodes,
-                return_trajectories=False,
             )
             wandb_log({f"evaluation": eval_info}, step=i)
             if FLAGS.config.save_video:
