@@ -25,14 +25,14 @@ def get_config(config_string):
     )
 
     base_config = dict(
-        batch_size=4,
+        batch_size=256,
         shuffle_buffer_size=1000,
         num_val_batches=8,
         num_steps=int(2e6),
         log_interval=100,
         eval_interval=5000,
         save_interval=5000,
-        save_dir="",
+        save_dir=placeholder(str),
         resume_path=placeholder(str),
         seed=42,
         text_processor="muse_embedding",
@@ -49,7 +49,7 @@ def get_config(config_string):
         data_dir="/nfs/kun2/datasets/tfds",
         image_obs_keys=["image_0"],
         state_obs_keys=["state"],
-        obs_horizon=1,
+        horizon=2,
         augment_kwargs=dict(
             random_resized_crop=dict(scale=[0.8, 1.0], ratio=[0.9, 1.1]),
             random_brightness=[0.2],
@@ -82,6 +82,8 @@ def get_config(config_string):
             num_heads=8,
             dropout_rate=0.1,
             normalization_type=normalization_type,
+            pred_horizon=1,
+            cond_prev_actions=False
         )
     )
 

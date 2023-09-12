@@ -143,7 +143,7 @@ def main(_):
 
     model_def = create_model_def(
         action_dim=example_batch["action"].shape[-1],
-        time_sequence_length=example_batch["observation"]["image_0"].shape[1],
+        horizon=example_batch["observation"]["image_0"].shape[1],
         **FLAGS.config.model.to_dict(),
     )
 

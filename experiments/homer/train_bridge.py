@@ -69,13 +69,9 @@ def main(_):
     tf.config.set_visible_devices([], "GPU")
 
     # set up wandb and logging
-    name = format_name_with_config(
-        FLAGS.name,
-        FLAGS.config.to_dict(),
-    )
+    name = format_name_with_config(FLAGS.name, FLAGS.config.to_dict())
     wandb_id = "{name}_{time}".format(
-        name=name,
-        time=datetime.datetime.now().strftime("%Y%m%d_%H%M%S"),
+        name=name, time=datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     )
     wandb.init(
         config=FLAGS.config.to_dict(),
@@ -146,7 +142,7 @@ def main(_):
 
     model_def = create_model_def(
         action_dim=example_batch["actions"].shape[-1],
-        time_sequence_length=example_batch["observations"]["image"].shape[1],
+        horizon=example_batch["observations"]["image"].shape[1],
         **FLAGS.config.model.to_dict(),
     )
 

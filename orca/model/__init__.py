@@ -8,7 +8,7 @@ def create_model_def(
     observation_tokenizer_kwargs,
     task_tokenizer_kwargs,
     action_dim,
-    time_sequence_length,
+    horizon,
     policy_kwargs,
     **kwargs,
 ):
@@ -24,7 +24,7 @@ def create_model_def(
         observation_tokenizers=observation_tokenizer_defs,
         task_tokenizers=task_tokenizer_defs,
         action_dim=action_dim,
-        time_sequence_length=time_sequence_length,
+        horizon=horizon,
         **policy_kwargs,
     )
     return model_def
