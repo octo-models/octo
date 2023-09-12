@@ -36,13 +36,11 @@ from orca.train_utils import (
 
 FLAGS = flags.FLAGS
 flags.DEFINE_bool("dummy", False, "Dummy visualization run.")
+flags.DEFINE_string("checkpoint", None, "Checkpoint to visualize.")
 flags.DEFINE_string(
-    "checkpoint_path", None, "Checkpoint to visualize. (but not implemented yet)"
-)
-flags.DEFINE_string(
-    "checkpoints_path",
+    "checkpoints",
     None,
-    "Path to directory of checkpoints to visualize. (but not implemented yet)",
+    "Path to directory of checkpoints to visualize. ",
 )
 flags.DEFINE_integer(
     "eval_every", None, "If not None, skip any steps not divisible by eval_every."
@@ -109,12 +107,17 @@ def main(_):
 
     visualizer = Visualizer(FLAGS.config.dataset_kwargs, text_processor=text_processor)
 
+    assert (FLAGS.checkpoint is None) ^ (
+        FLAGS.checkpoints is None
+    ), "Must pass in exactly one of checkpoint or checkpoints"
+
     if FLAGS.checkpoints_path:
         list_of_checkpoints = checkpoints._all_checkpoints(FLAGS.checkpoints_path)
         config_path = tf.io.gfile.join(FLAGS.checkpoints_path, "config.json")
     else:
         list_of_checkpoints = [FLAGS.checkpoint_path]
         config_path = tf.io.gfile.join(FLAGS.checkpoint_path, "..", "config.json")
+
     logging.info(list_of_checkpoints)
     logging.info(f"Loading config from {config_path}")
     with tf.io.gfile.GFile(config_path, "r") as config_file:

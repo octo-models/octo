@@ -398,8 +398,16 @@ def plot_trajectory_overview_mpl(
 #############################################
 
 
+def _get_gripper(actions):
+    return actions[:, -1]  # Hard-coded
+
+
+def _get_xyz(actions):
+    return actions[:, :3]  # Hard-coded
+
+
 def _gripper_closed(actions):
-    return actions[:, -1] > 0.5
+    return _get_gripper(actions) > 0.5  # Hard-coded
 
 
 def _gripper_correct(unnorm_actions, unnorm_pred_actions, **kwargs):
@@ -414,10 +422,13 @@ def _xyz_angle(unnorm_actions, unnorm_pred_actions, **kwargs):
         v2_u = v2 / (1e-6 + jnp.linalg.norm(v2))
         return jnp.arccos(jnp.clip(jnp.dot(v1_u, v2_u), -1.0, 1.0))
 
-    return jax.vmap(angle_between)(unnorm_actions[:, :3], unnorm_pred_actions[:, :3])
+    return jax.vmap(angle_between)(
+        _get_xyz(unnorm_actions), _get_xyz(unnorm_pred_actions)
+    )
 
 
 def _mse(actions, pred_actions, dims=None, **kwargs):
+    # Note: this is the MSE of the normalized actions (not the unnormalized actions)
     delta = actions - pred_actions
     if dims is not None:
         delta = delta[:, dims]
@@ -443,9 +454,9 @@ def _xyz_info(**kwargs):
 def _mse_info(**kwargs):
     return {
         "mse": _mse(**kwargs),
-        "mse_xyz": _mse(dims=[0, 1, 2], **kwargs),
-        "mse_gripper": _mse(dims=[6], **kwargs),
-        "mse_xyzrotation": _mse(dims=[3, 4, 5], **kwargs),
+        "mse_xyz": _mse(dims=[0, 1, 2], **kwargs),  # hard-coded
+        "mse_gripper": _mse(dims=[6], **kwargs),  # hard-coded
+        "mse_xyzrotation": _mse(dims=[3, 4, 5], **kwargs),  # hard-coded
     }
 
 
@@ -458,19 +469,19 @@ def _gripper_info(**kwargs):
     gripping = jnp.logical_or(
         jnp.logical_and(
             _gripper_closed(actions), jnp.logical_not(_gripper_closed(past_actions))
-        ),
+        ),  # Gripper was open in the past, but is closed now
         jnp.logical_and(
             _gripper_closed(future_actions), jnp.logical_not(_gripper_closed(actions))
-        ),
+        ),  # Gripper is open now, but will be closed in the future
     )
 
     releasing = jnp.logical_or(
         jnp.logical_and(
             _gripper_closed(past_actions), jnp.logical_not(_gripper_closed(actions))
-        ),
+        ),  # Gripper was closed in the past, but is open now
         jnp.logical_and(
             _gripper_closed(actions), jnp.logical_not(_gripper_closed(future_actions))
-        ),
+        ),  # Gripper is closed now, but will be open in the future
     )
 
     gripper_changing = jnp.logical_or(gripping, releasing)
@@ -490,5 +501,5 @@ def _condition_info(**kwargs):
     return {
         "<10_to_end": distance < 10,
         ">20_to_end": distance > 20,
-        "moving": _moving(**kwargs, magnitude=0.01),  # Moved at least 1cm
+        "moving": _moving(**kwargs, magnitude=0.01),  # Moved at least 1cm (hard-coded)
     }
