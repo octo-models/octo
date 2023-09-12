@@ -91,7 +91,7 @@ class Encoder1DBlock(nn.Module):
     attention_dropout_rate: float = 0.1
 
     @nn.compact
-    def __call__(self, inputs, attention_mask, *, deterministic):
+    def __call__(self, inputs, *, deterministic):
         """Applies Encoder1DBlock module.
 
         Args:
@@ -112,7 +112,7 @@ class Encoder1DBlock(nn.Module):
             deterministic=deterministic,
             dropout_rate=self.attention_dropout_rate,
             num_heads=self.num_heads,
-        )(x, x, attention_mask)
+        )(x, x)
         x = nn.Dropout(rate=self.dropout_rate)(x, deterministic=deterministic)
         x = x + inputs
 
@@ -144,7 +144,7 @@ class Transformer(nn.Module):
     add_position_embedding: bool = True
 
     @nn.compact
-    def __call__(self, x, attention_mask, *, train):
+    def __call__(self, x, *, train):
         """Applies Transformer model on the inputs.
 
         Args:
@@ -171,7 +171,7 @@ class Transformer(nn.Module):
                 attention_dropout_rate=self.attention_dropout_rate,
                 name=f"encoderblock_{lyr}",
                 num_heads=self.num_heads,
-            )(x, attention_mask, deterministic=not train)
+            )(x, deterministic=not train)
         encoded = nn.LayerNorm(name="encoder_norm")(x)
 
         return encoded

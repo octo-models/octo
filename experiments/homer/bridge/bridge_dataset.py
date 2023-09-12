@@ -4,6 +4,7 @@ import dlimp as dl
 from orca.data.utils.bridge_utils import binarize_gripper_actions
 from orca.data.dataset import apply_common_transforms
 
+
 def relabel_actions_bridge(traj: Dict[str, Any]) -> Dict[str, Any]:
     """Relabels the actions in to use the reached proprio instead. Discards the last timestep of the
     trajectory (since we don't have a next state to compute the action.)
@@ -19,17 +20,14 @@ def relabel_actions_bridge(traj: Dict[str, Any]) -> Dict[str, Any]:
 
     # recombine to get full actions
     traj_truncated["actions"] = tf.concat(
-        [movement_actions, traj["actions"][:-1, -1:]],
-        axis=1,
+        [movement_actions, traj["actions"][:-1, -1:]], axis=1
     )
 
     return traj_truncated
 
+
 def make_bridge_dataset(
-    data_path: str,
-    train: bool,
-    relabel_actions: bool = True,
-    **kwargs,
+    data_path: str, train: bool, relabel_actions: bool = True, **kwargs
 ) -> tf.data.Dataset:
     """Creates a dataset from the BridgeData format.
 
@@ -44,12 +42,12 @@ def make_bridge_dataset(
     ).map(dl.transforms.unflatten_dict)
 
     def restructure(traj):
-        # traj["observations"] = traj.pop("obs")
+        traj["observations"] = traj.pop("obs")
         traj["observations"] = {
             "image": traj["observations"]["images0"],  # always take images0 for now
             "proprio": tf.cast(traj["observations"]["state"], tf.float32),
         }
-        # traj["language"] = traj.pop("lang")
+        traj["language"] = traj.pop("lang")
         traj["actions"] = tf.cast(traj["actions"], tf.float32)
         traj["actions"] = tf.concat(
             [
