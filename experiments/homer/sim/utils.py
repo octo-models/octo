@@ -5,7 +5,6 @@ import numpy as np
 
 import mujoco_manipulation
 import tensorflow as tf
-from .wrappers.chunking import ActionChunkingWrapper, ObsHistoryWrapper
 from .wrappers.dmcgym import DMCGYM
 from .wrappers.mujoco import GCMujocoWrapper
 from .wrappers.norm import UnnormalizeActionProprio
@@ -20,16 +19,10 @@ def wrap_mujoco_gc_env(
     action_proprio_metadata: dict,
     normalization_type: str,
     goal_sampler: Union[np.ndarray, Callable],
-    obs_horizon: int,
-    act_exec_horizon: int,
 ):
     env = DMCGYM(env)
     env = GCMujocoWrapper(env, goal_sampler)
     env = UnnormalizeActionProprio(env, action_proprio_metadata, normalization_type)
-    if obs_horizon is not None:
-        env = ObsHistoryWrapper(env, obs_horizon)
-    if act_exec_horizon is not None:
-        env = ActionChunkingWrapper(env, act_exec_horizon)
     env = gym.wrappers.TimeLimit(env, max_episode_steps=max_episode_steps)
     return env
 
@@ -43,18 +36,10 @@ def make_mujoco_gc_env(
     save_video_dir: str,
     save_video_prefix: str,
     goals: Union[np.ndarray, Callable],
-    obs_horizon: int,
-    act_exec_horizon: int,
 ):
     env = mujoco_manipulation.load(env_name)
     env = wrap_mujoco_gc_env(
-        env,
-        max_episode_steps,
-        action_proprio_metadata,
-        normalization_type,
-        goals,
-        obs_horizon,
-        act_exec_horizon,
+        env, max_episode_steps, action_proprio_metadata, normalization_type, goals
     )
 
     if save_video:
@@ -136,7 +121,9 @@ def load_tf_dataset(data_path):
     return dataset
 
 
-def load_recorded_video(video_path: str,):
+def load_recorded_video(
+    video_path: str,
+):
     with tf.io.gfile.GFile(video_path, "rb") as f:
         video = np.array(imageio.mimread(f, "MP4")).transpose((0, 3, 1, 2))
         assert video.shape[1] == 3, "Numpy array should be (T, C, H, W)"
