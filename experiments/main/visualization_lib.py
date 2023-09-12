@@ -157,7 +157,7 @@ class Visualizer:
                 text_processor=self.text_processor,
             )
             info = add_unnormalized_info(info, self.action_proprio_stats)
-            info = add_metrics(info)
+            info = add_manipulation_metrics(info)
 
             plotly_fig = plot_trajectory_actions(**info)
             visualizations[f"traj_{n}"] = plotly_fig
@@ -207,7 +207,7 @@ class Visualizer:
                 text_processor=self.text_processor,
             )
             info = add_unnormalized_info(info, self.action_proprio_stats)
-            info = add_metrics(info)
+            info = add_manipulation_metrics(info)
             all_traj_info.append(info)
         return all_traj_info
 
@@ -252,8 +252,19 @@ def add_unnormalized_info(
     return info
 
 
-def add_metrics(info):
-    """Adds metrics to the info dictionary from `run_policy_on_trajectory`"""
+def add_manipulation_metrics(info):
+    """Adds metrics to the info dictionary from `run_policy_on_trajectory`
+
+    Assumes the following structure of the actions:
+        actions[:, :3] = xyz
+        actions[:, 3:6] = xyz rotation
+        actions[:, 6] = gripper
+
+    Also assumes that unnormalized actions correspond to deltas (measured in meters) from the previous timestep.
+    Also assumes that the gripper is closed when the gripper value is > 0.5
+
+    (Note: these are all defaults in the Bridge dataset)
+    """
     multiple_sample_info = {k: v for k, v in info.items() if v.ndim == 3}
     single_sample_info = {k: v for k, v in info.items() if v.ndim != 3}
 
