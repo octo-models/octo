@@ -140,7 +140,7 @@ def main(_):
 
     model_def = create_model_def(
         action_dim=example_batch["action"].shape[-1],
-        time_sequence_length=example_batch["observation"]["image_0"].shape[1],
+        horizon=example_batch["observation"]["image_0"].shape[1],
         **old_config.model.to_dict(),
     )
 
@@ -183,6 +183,9 @@ def main(_):
             method="predict_action",
             rngs={"dropout": state.rng},
         )
+        actions = actions[..., 0, :]
+
+        # viz expects (batch_size, n_samples, action_dim)
         if argmax:
             actions = actions[:, None]
         else:
@@ -213,7 +216,7 @@ def main(_):
             sharding=sharding,
         )
         for mode in FLAGS.modes:
-            images = visualizer.visualize_for_wandb(policy_fn, n_trajs=3)
+            images = visualizer.visualize_for_wandb(policy_fn, max_trajs=3)
             wandb_log({mode: images}, step=step)
 
             info = visualizer.raw_evaluations(policy_fn, max_trajs=100)

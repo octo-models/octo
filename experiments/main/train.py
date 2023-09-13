@@ -221,6 +221,7 @@ def main(_):
             method="predict_action",
             rngs={"dropout": state.rng},
         )
+        actions = actions[..., 0, :]
 
         # viz expects (batch_size, n_samples, action_dim)
         if argmax:
@@ -264,7 +265,9 @@ def main(_):
                 policy_fn, max_trajs=100, task_definition="image"
             )
             metrics = visualizer.metrics_for_wandb(raw_infos)
-            images = visualizer.visualize_for_wandb(policy_fn, task_definition="image")
+            images = visualizer.visualize_for_wandb(
+                policy_fn, task_definition="image", max_trajs=8
+            )
             wandb_log({"offline_metrics": metrics, "visualizations": images}, step=i)
 
         if (i + 1) % FLAGS.config.save_interval == 0 and save_dir is not None:
