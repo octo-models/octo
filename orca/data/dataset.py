@@ -198,6 +198,7 @@ def make_dataset(
     name: str,
     data_dir: str,
     train: bool,
+    shuffle: bool = True,
     image_obs_keys: Union[str, List[str]] = [],
     depth_obs_keys: Union[str, List[str]] = [],
     state_obs_keys: Union[str, List[str]] = [],
@@ -209,6 +210,7 @@ def make_dataset(
         name (str): The name of the RLDS dataset (usually "name" or "name:version").
         data_dir (str): The path to the data directory.
         train (bool): Whether to use the training or validation set.
+        shuffle (bool, optional): Whether to shuffle the order of tfrecords.
         image_obs_keys (str, List[str], optional): List of image observation keys to be decoded. Mapped to "image_XXX".
         depth_obs_keys (str, List[str], optional): List of depth observation keys to be decoded. Mapped to "depth_XXX".
         state_obs_keys (str, List[str], optional): List of low-dim observation keys to be decoded.
@@ -231,7 +233,7 @@ def make_dataset(
     else:
         split = "train" if train else "val"
 
-    dataset = dl.DLataset.from_rlds(builder, split=split)
+    dataset = dl.DLataset.from_rlds(builder, split=split, shuffle=shuffle)
 
     image_obs_keys = (
         [image_obs_keys] if not isinstance(image_obs_keys, Sequence) else image_obs_keys

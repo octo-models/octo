@@ -65,7 +65,7 @@ def run_policy_on_trajectory(
     return {
         "n": np.array(len_traj),
         "pred_actions": actions,
-        "actions": traj["action"],
+        "actions": traj["action"][:, 0, :],
         "proprio": traj["observation"]["proprio"][:, 0],
     }
 
@@ -77,16 +77,17 @@ class Visualizer:
     sub_conditions: dict = None
     task_definition: str = None
     cache_trajs: bool = True  # Use the same trajectories for metrics every time
-    cache_viz_trajectories: bool = False  # Use same trajs for `visualize` every time
+    cache_viz_trajectories: bool = True  # Use same trajs for `visualize` every time
     text_processor: object = None
 
     def __post_init__(self):
-        self.dataset = make_dataset(**self.dataset_kwargs, train=False)
+        self.dataset = make_dataset(**self.dataset_kwargs, train=False, shuffle=False)
         builder = tfds.builder(
             self.dataset_kwargs["name"], data_dir=self.dataset_kwargs["data_dir"]
         )
         self.action_proprio_stats = get_action_proprio_stats(builder, None)
         self.trajs, self.viz_trajs = [], []
+        self.visualized_trajs = False
 
     def metrics_for_wandb(
         self,
@@ -135,21 +136,28 @@ class Visualizer:
     def visualize_for_wandb(
         self,
         policy_fn,
-        n_trajs=1,
+        max_trajs=1,
         task_definition=None,
+        add_images=None,
     ):
-        """Returns a dictionary of visualizations to log to wandb."""
+        """Returns a dictionary of visualizations to log to wandb.
+        Args:
+            policy_fn: See `raw_evaluations`
+            max_trajs: The maximum number of trajectories to visualize.
+            task_definition: See `raw_evaluations`
+            add_images: Whether to add images of the trajectory to the visualization. If None, will add images if `cache_viz_trajectories` is False
+        """
 
         task_definition = task_definition or self.task_definition or "image"
         iterator = self.get_maybe_cached_iterator(
             self.dataset,
-            n_trajs,
+            max_trajs,
             self.viz_trajs,
             self.cache_viz_trajectories,
         )
         visualizations = {}
 
-        for n, traj in tqdm.tqdm(enumerate(iterator), total=n_trajs):
+        for n, traj in tqdm.tqdm(enumerate(iterator), total=max_trajs):
             info = run_policy_on_trajectory(
                 policy_fn,
                 traj,
@@ -164,14 +172,19 @@ class Visualizer:
 
             mpl_fig = plot_trajectory_overview_mpl(traj, **info)
             visualizations[f"traj_{n}_mpl"] = mpl_fig
+            if (
+                add_images
+                or not self.cache_viz_trajectories
+                or not self.visualized_trajs
+            ):
+                for key in filter(lambda key: "image" in key, traj["observation"]):
+                    images = traj["observation"][key][:, 0]
 
-            for key in filter(lambda key: "image" in key, traj["observation"]):
-                images = traj["observation"][key][:, 0]
-
-                observation_slice = np.concatenate(
-                    images[np.linspace(0, len(images) - 1, 5).astype(int)], 1
-                )
-                visualizations[f"traj_{n}_{key}"] = wandb.Image(observation_slice)
+                    observation_slice = np.concatenate(
+                        images[np.linspace(0, len(images) - 1, 5).astype(int)], 1
+                    )
+                    visualizations[f"traj_{n}_{key}"] = wandb.Image(observation_slice)
+                self.visualized_trajs = True
         return visualizations
 
     def raw_evaluations(
