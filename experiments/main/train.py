@@ -14,6 +14,7 @@ from absl import app, flags, logging
 from flax.training import checkpoints
 from flax.traverse_util import flatten_dict
 from ml_collections import config_flags
+from visualization_lib import Visualizer
 
 from orca.data.dataset import make_dataset
 from orca.data.utils.text_processing import text_processors
@@ -21,6 +22,7 @@ from orca.model import create_model_def
 from orca.model.weights import weights_loaders
 from orca.train_utils import (
     Timer,
+    batched_apply,
     create_train_state,
     format_name_with_config,
     initialize_compilation_cache,
@@ -130,6 +132,7 @@ def main(_):
     )
     train_data_iter = map(shard_fn, map(process_text, train_data.iterator()))
     val_data_iter = map(shard_fn, map(process_text, val_data.iterator()))
+    visualizer = Visualizer(FLAGS.config.dataset_kwargs, text_processor=text_processor)
 
     example_batch = next(train_data_iter)
     logging.info(f"Batch size: {example_batch['action'].shape[0]}")
@@ -205,6 +208,28 @@ def main(_):
         loss, info = loss_fn(state.params, state, batch, state.rng, train=False)
         return info
 
+    @partial(jax.jit, static_argnames=("argmax", "n"))
+    def get_policy_sampled_actions(state, observations, tasks, *, argmax=False, n=1):
+        actions = state.apply_fn(
+            {"params": state.params},
+            observations,
+            tasks,
+            train=False,
+            argmax=argmax,
+            sample_shape=(n,),
+            rng=state.rng,
+            method="predict_action",
+            rngs={"dropout": state.rng},
+        )
+        actions = actions[..., 0, :]
+
+        # viz expects (batch_size, n_samples, action_dim)
+        if argmax:
+            actions = actions[:, None]
+        else:
+            actions = jnp.moveaxis(actions, 0, 1)
+        return actions
+
     def wandb_log(info, step):
         wandb.log(flatten_dict(info, sep="/"), step=step)
 
@@ -229,6 +254,21 @@ def main(_):
             metrics = jax.tree_map(lambda *xs: np.mean(xs), *metrics)
             wandb_log({"validation": metrics}, step=i)
             timer.tock("val")
+
+            timer.tick("visualize")
+            policy_fn = batched_apply(
+                partial(get_policy_sampled_actions, train_state, argmax=False, n=8),
+                FLAGS.config.batch_size,
+                sharding=sharding,
+            )
+            raw_infos = visualizer.raw_evaluations(
+                policy_fn, max_trajs=100, task_definition="image"
+            )
+            metrics = visualizer.metrics_for_wandb(raw_infos)
+            images = visualizer.visualize_for_wandb(
+                policy_fn, task_definition="image", max_trajs=8
+            )
+            wandb_log({"offline_metrics": metrics, "visualizations": images}, step=i)
 
         if (i + 1) % FLAGS.config.save_interval == 0 and save_dir is not None:
             logging.info("Saving checkpoint...")
