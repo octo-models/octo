@@ -1,4 +1,5 @@
 # adapted from https://github.com/google-research/robotics_transformer/blob/master/transformer_network.py
+import distrax
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
@@ -147,6 +148,7 @@ class TransformerPolicy(nn.Module):
         actions=None,
         train: bool = False,
         argmax: bool = False,
+        sample_shape: tuple = (),
         rng: PRNGKey = None,
         temperature: float = 1.0,
     ):
@@ -208,9 +210,10 @@ class TransformerPolicy(nn.Module):
         if argmax:
             action_tokens = jnp.argmax(action_logits, axis=-1).astype(jnp.int32)
         else:
-            action_tokens = jax.random.categorical(
-                rng, action_logits / temperature, axis=-1
-            ).astype(jnp.int32)
+            dist = distrax.Categorical(logits=action_logits / temperature)
+            action_tokens = dist.sample(seed=rng, sample_shape=sample_shape).astype(
+                jnp.int32
+            )
         return self.action_tokenizer(action_tokens, mode="detokenize")
 
     def get_tokens(self, observations, tasks, actions, train: bool = False):
