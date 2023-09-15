@@ -16,7 +16,7 @@ from flax.traverse_util import flatten_dict
 from ml_collections import config_flags
 from visualization_lib import Visualizer
 
-from orca.data.dataset import make_dataset
+from orca.data.dataset import make_dataset, make_interleaved_dataset
 from orca.data.utils.text_processing import text_processors
 from orca.model import create_model_def
 from orca.model.weights import weights_loaders
@@ -117,22 +117,29 @@ def main(_):
         return batch
 
     train_data = (
-        make_dataset(**FLAGS.config.dataset_kwargs, train=True)
+        make_interleaved_dataset(
+            FLAGS.config.dataset_kwargs['common_kwargs'],
+            FLAGS.config.dataset_kwargs['data_kwargs_list'],
+            train=True,
+            sample_weights=FLAGS.config.dataset_kwargs['sample_weights']
+        )
+        .repeat()
+        .batch(FLAGS.config.batch_size)
+    )
+    val_datas = [
+        make_dataset(dataset_kwargs.update(**FLAGS.config.dataset_kwargs['common_kwargs']), train=False)
         .unbatch()
         .shuffle(FLAGS.config.shuffle_buffer_size)
         .repeat()
         .batch(FLAGS.config.batch_size)
-    )
-    val_data = (
-        make_dataset(**FLAGS.config.dataset_kwargs, train=False)
-        .unbatch()
-        .shuffle(FLAGS.config.shuffle_buffer_size)
-        .repeat()
-        .batch(FLAGS.config.batch_size)
-    )
+                for dataset_kwargs in FLAGS.config.dataset_kwargs['data_kwargs_list']]
     train_data_iter = map(shard_fn, map(process_text, train_data.iterator()))
-    val_data_iter = map(shard_fn, map(process_text, val_data.iterator()))
-    visualizer = Visualizer(FLAGS.config.dataset_kwargs, text_processor=text_processor)
+    val_data_iters = [
+        map(shard_fn, map(process_text, val_data.iterator())) for val_data in val_datas]
+    visualizers = [
+        Visualizer(dataset_kwargs.update(**FLAGS.config.dataset_kwargs['common_kwargs']),
+                                         text_processor=text_processor)
+        for dataset_kwargs in FLAGS.config.dataset_kwargs['data_kwargs_list']]
 
     example_batch = next(train_data_iter)
     logging.info(f"Batch size: {example_batch['action'].shape[0]}")
@@ -248,27 +255,32 @@ def main(_):
         if (i + 1) % FLAGS.config.eval_interval == 0:
             logging.info("Evaluating...")
             timer.tick("val")
-            metrics = []
-            for _, batch in zip(range(FLAGS.config.num_val_batches), val_data_iter):
-                metrics.append(eval_step(train_state, batch))
-            metrics = jax.tree_map(lambda *xs: np.mean(xs), *metrics)
-            wandb_log({"validation": metrics}, step=i)
+            for data_kwargs, val_data_iter in zip(FLAGS.config.dataset_kwargs['data_kwargs_list'], val_data_iters):
+                metrics = []
+                for _, batch in zip(range(FLAGS.config.num_val_batches), val_data_iter):
+                    metrics.append(eval_step(train_state, batch))
+                metrics = jax.tree_map(lambda *xs: np.mean(xs), *metrics)
+                wandb_log({f"validation_{data_kwargs['name']}": metrics}, step=i)
             timer.tock("val")
 
+            logging.info("Visualizing...")
             timer.tick("visualize")
             policy_fn = batched_apply(
                 partial(get_policy_sampled_actions, train_state, argmax=False, n=8),
                 FLAGS.config.batch_size,
                 sharding=sharding,
             )
-            raw_infos = visualizer.raw_evaluations(
-                policy_fn, max_trajs=100, task_definition="image"
-            )
-            metrics = visualizer.metrics_for_wandb(raw_infos)
-            images = visualizer.visualize_for_wandb(
-                policy_fn, task_definition="image", max_trajs=8
-            )
-            wandb_log({"offline_metrics": metrics, "visualizations": images}, step=i)
+            for data_kwargs, visualizer in zip(FLAGS.config.dataset_kwargs['data_kwargs_list'], visualizers):
+                raw_infos = visualizer.raw_evaluations(
+                    policy_fn, max_trajs=100, task_definition="image"
+                )
+                metrics = visualizer.metrics_for_wandb(raw_infos)
+                images = visualizer.visualize_for_wandb(
+                    policy_fn, task_definition="image", max_trajs=8
+                )
+                wandb_log({f"offline_metrics_{data_kwargs['name']}": metrics,
+                           f"visualizations_{data_kwargs['name']}": images}, step=i)
+            timer.tock("visualize")
 
         if (i + 1) % FLAGS.config.save_interval == 0 and save_dir is not None:
             logging.info("Saving checkpoint...")
