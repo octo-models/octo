@@ -3,6 +3,7 @@ import distrax
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
+import numpy as np
 
 from orca.model.tokenizers import ActionTokenizer
 from orca.model.transformer import Transformer
@@ -10,23 +11,19 @@ from orca.typing import PRNGKey, Sequence
 
 
 class TransformerPolicy(nn.Module):
-    """
-    Transformer that models chunks of trajectories.
-    """
-
     observation_tokenizers: Sequence[nn.Module]
     task_tokenizers: Sequence[nn.Module]
     vocab_size: int = 256
     token_embedding_size: int = 512
+    horizon: int = 2
+    pred_horizon: int = 1
+    action_dim: int = 7
+    normalization_type: str = "bounds"
     num_layers: int = 4
     mlp_dim: int = 1024
     num_heads: int = 8
     dropout_rate: float = 0.1
-    horizon: int = 2
-    pred_horizon: int = 1
-    action_dim: int = 7
-    cond_prev_actions: bool = False
-    normalization_type: str = "bounds"
+    attention_dropout_rate: float = 0.1
 
     def setup(self):
         self.transformer = Transformer(
@@ -34,6 +31,7 @@ class TransformerPolicy(nn.Module):
             mlp_dim=self.mlp_dim,
             num_heads=self.num_heads,
             dropout_rate=self.dropout_rate,
+            attention_dropout_rate=self.attention_dropout_rate,
         )
 
         self.action_tokenizer = ActionTokenizer(
@@ -42,10 +40,11 @@ class TransformerPolicy(nn.Module):
             normalization_type=self.normalization_type,
         )
 
-        self.tokens_per_action = self.action_dim
+        self.tokens_per_action = self.action_dim * self.pred_horizon
         self.tokens_per_obs = sum(tok.num_tokens for tok in self.observation_tokenizers)
         self.tokens_per_task = sum(tok.num_tokens for tok in self.task_tokenizers)
         self.tokens_per_time_step = self.tokens_per_obs + self.tokens_per_action
+        self.total_tokens = self.tokens_per_time_step * self.horizon
         self.vocab_proj = nn.Dense(self.vocab_size)
         self.obs_proj = [
             nn.Dense(self.token_embedding_size)
@@ -57,6 +56,8 @@ class TransformerPolicy(nn.Module):
         ]
         self.action_embed = nn.Embed(self.vocab_size, self.token_embedding_size)
 
+        self.attention_mask = self.generate_masks()
+
     def __call__(
         self,
         observations,
@@ -64,36 +65,19 @@ class TransformerPolicy(nn.Module):
         actions,
         train: bool = False,
     ):
-        """
-        Performs a forward pass of the network and computes the loss.
-
-        Args:
-            observations: A dictionary containing observation data for a horizon-length
-                chunk of a trajectory. Each entry has shape (batch, horizon, *).
-            tasks: A dictionary containing task data for this chunk.
-                Each entry has shape (batch, *).
-            actions: The actions in this chunk with shape (batch, horizon, action_dim).
-            train: Whether this is a training call.
-        Returns:
-            The loss, mean squared error, and accuracy for the forward pass.
-        """
-
         # output is (batch, horizon, tokens_per_time_step, token_embedding_size)
-        # where each timestep is [obs, action]
         output = self.transformer_call(
             observations,
             tasks,
-            actions,
+            # actions,
+            attention_mask=self.attention_mask,
             train=train,
         )
 
-        # get the logits for the predicted actions by taking the timesteps in the prediction
-        # window and taking the tokens in the timestep corresponding to the action
-        action_embedding = output[:, -self.pred_horizon :, -self.tokens_per_action :]
+        # get the logits for the actions by taking the output at each timestep
+        # corresponding to the action and projecting it to the vocab size
+        action_embedding = output[:, :, -self.tokens_per_action :]
         action_logits = self.vocab_proj(action_embedding)
-
-        # only use the ground truth actions in prediction window for supervision
-        actions = actions[:, -self.pred_horizon :]
 
         action_logprob = jax.nn.log_softmax(action_logits, axis=-1)
 
@@ -114,19 +98,20 @@ class TransformerPolicy(nn.Module):
         self,
         observations,
         tasks,
-        actions,
+        # actions,
+        attention_mask,
         train: bool = False,
     ):
+        # task_tokens, obs_tokens, action_tokens = self.get_tokens(
+        #     observations, tasks, actions, train=train
+        # )
         task_tokens, obs_tokens, action_tokens = self.get_tokens(
-            observations, tasks, actions, train=train
+            observations, tasks, train=train
         )
-        # input_tokens has shape (batch, tokens_per_task + horizon * tokens_per_time_step, token_embedding_size)
-        # and consists of task tokens followed by obs and action tokens for all timesteps in the chunk.
-        # The sequence looks like: [task, obs_0, action_0, obs_1, action_1, ..., obs_n, action_n].
         input_tokens = self.assemble_input_tokens(
             task_tokens, obs_tokens, action_tokens
         )
-        output = self.transformer(input_tokens, train=train)
+        output = self.transformer(input_tokens, attention_mask, train=train)
         # remove output corresponding to task
         output = output[:, self.tokens_per_task :]
 
@@ -145,66 +130,47 @@ class TransformerPolicy(nn.Module):
         self,
         observations,
         tasks,
-        actions=None,
+        # actions=None,
         train: bool = False,
         argmax: bool = False,
         sample_shape: tuple = (),
         rng: PRNGKey = None,
         temperature: float = 1.0,
     ):
-        """
-        Predicts actions at evaluation time. The observations and actions in the prediction window
-        of the chunk are not known.
-
-        Args:
-            observations: A dictionary containing observation data for the conditioning window
-                of the chunk. Each entry has shape (batch, horizon-pred_horizon, *).
-            tasks: A dictionary containing task data for this chunk.
-                Each entry has shape (batch, *).
-            actions: The actions in the conditioning window of the chunk with shape
-                (batch, horizon-pred_horizon-1, action_dim).
-            train: Whether this is a training call.
-            argmax: Whether to randomly sample action distribution or take the mode.
-            rng: A random key for sampling the action distribution.
-            temperature: The temperature to use when sampling the action distribution.
-        Returns:
-            The predicted actions given the provided observation/action history and task.
-        """
-
-        if actions is None:
-            assert not self.cond_prev_actions
-            actions = jnp.zeros(
-                (
-                    observations["image_0"].shape[0],
-                    self.horizon,
-                    self.action_dim,
-                )
-            )
-        else:
-            # actions is (batch, horizon-pred_horizon-1, action_dim)
-            # because we don't know future actions or the current action.
-            # Pad with zeros to full sequence length.
-            assert actions.shape[1] == self.horizon - self.pred_horizon - 1
-            actions = jnp.concatenate(
-                [
-                    actions,
-                    jnp.zeros(
-                        (actions.shape[0], self.pred_horizon + 1, actions.shape[2])
-                    ),
-                ],
-                axis=1,
-            )
+        # if actions is None:
+        #     actions = jnp.zeros(
+        #         (
+        #             observations["image_0"].shape[0],
+        #             self.horizon,
+        #             self.action_dim,
+        #         )
+        #     )
+        # else:
+        #     # actions is (batch, horizon-pred_horizon-1, action_dim)
+        #     # because we don't know future actions or the current action.
+        #     # Pad with zeros to full sequence length.
+        #     assert actions.shape[1] == self.horizon - self.pred_horizon - 1
+        #     actions = jnp.concatenate(
+        #         [
+        #             actions,
+        #             jnp.zeros(
+        #                 (actions.shape[0], self.pred_horizon + 1, actions.shape[2])
+        #             ),
+        #         ],
+        #         axis=1,
+        #     )
 
         output = self.transformer_call(
             observations,
             tasks,
-            actions,
+            # actions,
+            attention_mask=self.attention_mask,
             train=train,
         )
 
-        # get the logits for the predicted actions by taking the timesteps in the prediction
-        # window and taking the tokens in the timestep corresponding to the action
-        action_logits = output[:, -self.pred_horizon :, -self.tokens_per_action :]
+        # get the logits for the actions by taking the output at each timestep
+        # corresponding to the action and projecting it to the vocab size
+        action_logits = output[:, :, -self.tokens_per_action :]
         action_logits = self.vocab_proj(action_logits)
 
         if argmax:
@@ -215,6 +181,43 @@ class TransformerPolicy(nn.Module):
                 jnp.int32
             )
         return self.action_tokenizer(action_tokens, mode="detokenize")
+
+    def generate_masks(self):
+        """
+        Generate attention mask for transformer call.
+        """
+
+        # mask for obs-action sequence
+        sequence_mask = np.zeros((self.total_tokens, self.total_tokens), dtype=int)
+        for i in range(self.total_tokens):
+            for j in range(self.total_tokens):
+                # get the index in the time sequence given the token index
+                index_i = int(i / self.tokens_per_time_step)
+                index_j = int(j / self.tokens_per_time_step)
+                # determine whether this token represents an action or observation
+                is_action_j = j % self.tokens_per_time_step >= self.tokens_per_obs
+
+                mask = 1
+                # don't attend to future timesteps
+                if index_j > index_i:
+                    mask = 0
+                # don't attend to actions
+                if is_action_j:
+                    mask = 0
+                sequence_mask[i, j] = mask
+
+        # add mask for task tokens
+        full_mask = jnp.pad(
+            sequence_mask,
+            ((self.tokens_per_task, 0), (0, 0)),
+            constant_values=0,
+        )
+        task_mask = jnp.ones(
+            (self.total_tokens + self.tokens_per_task, self.tokens_per_task)
+        )
+        full_mask = jnp.concatenate([task_mask, full_mask], axis=1)
+
+        return full_mask
 
     def get_tokens(self, observations, tasks, actions, train: bool = False):
         """
@@ -245,26 +248,25 @@ class TransformerPolicy(nn.Module):
             )
 
         # (batch, horizon, tokens_per_action, token_embedding_size)
-        action_tokens = self.action_tokenizer(actions, mode="tokenize")
-        action_tokens = self.action_embed(action_tokens)
+        # action_tokens = self.action_tokenizer(actions, mode="tokenize")
+        # action_tokens = self.action_embed(action_tokens)
+        action_tokens = jnp.zeros(
+            (
+                obs_tokens.shape[0],
+                self.horizon,
+                self.tokens_per_action,
+                self.token_embedding_size,
+            )
+        )
 
         return task_tokens, obs_tokens, action_tokens
 
     def assemble_input_tokens(self, task_tokens, obs_tokens, action_tokens):
         """
-        Mask tokens to be predicted or tokens that should not be conditioned on.
         Concatenate obs and action tokens.
         Fold horizon dim into token sequence dim.
         Prepend task tokens.
         """
-
-        # Mask actions if not conditioning on action history
-        if not self.cond_prev_actions:
-            action_tokens = jnp.zeros(action_tokens.shape)
-
-        # Mask the prediction window
-        obs_tokens = self.mask_targets(obs_tokens)
-        action_tokens = self.mask_targets(action_tokens)
 
         # (batch, horizon, tokens_per_time_step, token_embedding_size)
         tokens = jnp.concatenate([obs_tokens, action_tokens], axis=2)
@@ -275,21 +277,3 @@ class TransformerPolicy(nn.Module):
         # (batch, tokens_per_task + horizon * tokens_per_time_step, token_embedding_size)
         tokens = jnp.concatenate([task_tokens, tokens], axis=1)
         return tokens
-
-    def mask_targets(self, tokens):
-        """
-        During training, tokens has shape:
-        (batch, horizon, tokens_per_time_step, token_embedding_size)
-        and this function masks the tokens in the prediction window.
-
-        During evaluation, tokens has shape:
-        (batch, horizon-pred_horizon, tokens_per_time_step, token_embedding_size)
-        because we do not have the future tokens. This function adds mask tokens to make a full sequence.
-        """
-        return jnp.concatenate(
-            [
-                tokens[:, : self.horizon - self.pred_horizon],
-                jnp.zeros((tokens.shape[0], self.pred_horizon, *tokens.shape[2:])),
-            ],
-            axis=1,
-        )
