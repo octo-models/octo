@@ -1,4 +1,5 @@
 import hashlib
+import inspect
 import json
 import logging
 from functools import partial
@@ -16,11 +17,15 @@ from orca.data.utils import bc_goal_relabeling
 
 
 def get_action_proprio_stats(
-    builder: DatasetBuilder, dataset: tf.data.Dataset, proprio_keys: List[str]
+    builder: DatasetBuilder,
+    dataset: tf.data.Dataset,
+    proprio_keys: List[str],
+    transform_fcn: Any,
 ) -> Dict[str, Dict[str, List[float]]]:
-    # get statistics file path --> embed unique hash that catches if dataset info changed
+    # get statistics file path --> embed unique hash that catches if dataset info / keys / transform changed
+    transform_str = inspect.getsource(transform_fcn) if transform_fcn else ""
     data_info_hash = hashlib.sha256(
-        (str(builder.info) + str(proprio_keys)).encode("utf-8")
+        (str(builder.info) + str(proprio_keys) + str(transform_str)).encode("utf-8")
     ).hexdigest()
     path = tf.io.gfile.join(
         builder.info.data_dir, f"action_proprio_stats_{data_info_hash}.json"
@@ -275,7 +280,14 @@ def make_dataset(
 
     dataset = dataset.map(restructure)
 
-    action_proprio_metadata = get_action_proprio_stats(builder, dataset, state_obs_keys)
+    action_proprio_metadata = get_action_proprio_stats(
+        builder,
+        dataset,
+        state_obs_keys,
+        RLDS_TRAJECTORY_MAP_TRANSFORMS[name]
+        if name in RLDS_TRAJECTORY_MAP_TRANSFORMS
+        else None,
+    )
 
     dataset = apply_common_transforms(
         dataset, train=train, action_proprio_metadata=action_proprio_metadata, **kwargs
