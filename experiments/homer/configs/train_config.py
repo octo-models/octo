@@ -122,7 +122,6 @@ def get_config(config_string):
             dropout_rate=0.1,
             normalization_type=normalization_type,
             pred_horizon=1,
-            cond_prev_actions=False,
         )
     )
 

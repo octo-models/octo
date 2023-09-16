@@ -55,12 +55,11 @@ def stack_obs(obs):
 def evaluate_gc(
     policy_fn,
     env: gym.Env,
-    history_length: int,
+    horizon: int,
     action_exec_horizon: int,
     num_episodes: int,
 ) -> Dict[str, float]:
     stats = defaultdict(list)
-    action_shape = env.action_space.shape
 
     for _ in range(num_episodes):
         obs, info = env.reset()
@@ -68,23 +67,17 @@ def evaluate_gc(
         add_to(stats, flatten(filter_info(info)))
         done = False
 
-        obs_history = deque([obs] * history_length, maxlen=history_length)
-        # TODO (homer): unclear what to use as action history for the first timestep
-        # using zeros for now since not attending to prev actions
-        if history_length > 1:
-            act_history = deque(
-                [np.zeros(action_shape)] * (history_length - 1),
-                maxlen=history_length - 1,
-            )
+        obs_history = deque([obs] * horizon, maxlen=horizon)
+        pad_mask = np.zeros((horizon,))
+        i = horizon - 1
         while not done:
             # stack along time dimension
             obs = stack_obs(obs_history)
-            if history_length > 1:
-                past_actions = np.stack(act_history)
-                action = policy_fn(obs, goal, past_actions=past_actions)
-                act_history.extend([action[i] for i in range(len(action))])
-            else:
-                action = policy_fn(obs, goal)
+            if i >= 0:
+                pad_mask[i] = 1
+                i -= 1
+            obs["pad_mask"] = pad_mask
+            action = policy_fn(obs, goal)
             assert len(action) >= action_exec_horizon
 
             for i in range(action_exec_horizon):

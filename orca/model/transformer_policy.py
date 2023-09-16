@@ -15,7 +15,7 @@ class TransformerPolicy(nn.Module):
     task_tokenizers: Sequence[nn.Module]
     vocab_size: int = 256
     token_embedding_size: int = 512
-    horizon: int = 2
+    horizon: int = 1
     pred_horizon: int = 1
     action_dim: int = 7
     normalization_type: str = "bounds"
@@ -44,7 +44,9 @@ class TransformerPolicy(nn.Module):
         self.tokens_per_obs = sum(tok.num_tokens for tok in self.observation_tokenizers)
         self.tokens_per_task = sum(tok.num_tokens for tok in self.task_tokenizers)
         self.tokens_per_time_step = self.tokens_per_obs + self.tokens_per_action
-        self.total_tokens = self.tokens_per_time_step * self.horizon
+        self.total_tokens = (
+            self.tokens_per_task + self.tokens_per_time_step * self.horizon
+        )
         self.vocab_proj = nn.Dense(self.vocab_size)
         self.obs_proj = [
             nn.Dense(self.token_embedding_size)
@@ -54,9 +56,8 @@ class TransformerPolicy(nn.Module):
             nn.Dense(self.token_embedding_size)
             for _ in range(len(self.task_tokenizers))
         ]
-        self.action_embed = nn.Embed(self.vocab_size, self.token_embedding_size)
 
-        self.attention_mask = self.generate_masks()
+        self.default_attention_mask = self.generate_default_attention_mask()
 
     def __call__(
         self,
@@ -69,13 +70,11 @@ class TransformerPolicy(nn.Module):
         output = self.transformer_call(
             observations,
             tasks,
-            # actions,
-            attention_mask=self.attention_mask,
             train=train,
         )
 
-        # get the logits for the actions by taking the output at each timestep
-        # corresponding to the action and projecting it to the vocab size
+        # get the logits for all the actions by taking the action tokens
+        # of each timestep and projecting them to the vocab size
         action_embedding = output[:, :, -self.tokens_per_action :]
         action_logits = self.vocab_proj(action_embedding)
 
@@ -84,13 +83,16 @@ class TransformerPolicy(nn.Module):
         action_labels = self.action_tokenizer(actions, mode="tokenize")
         action_labels_one_hot = jax.nn.one_hot(action_labels, self.vocab_size)
 
-        action_loss = -jnp.sum(action_logprob * action_labels_one_hot, axis=-1).mean()
+        action_loss = -jnp.sum(action_logprob * action_labels_one_hot, axis=-1)
+        action_loss = (action_loss * observations["pad_mask"][:, :, None]).mean()
 
         action_pred = jnp.argmax(action_logits, axis=-1)
-        accuracy = (action_pred == action_labels).mean()
+        accuracy = action_pred == action_labels
+        accuracy = (accuracy * observations["pad_mask"][:, :, None]).mean()
 
         action_values = self.action_tokenizer(action_pred, mode="detokenize")
-        action_mse = jnp.square(actions - action_values).sum(axis=-1).mean()
+        action_mse = jnp.square(actions - action_values).sum(axis=-1)
+        action_mse = (action_mse * observations["pad_mask"]).mean()
 
         return {"loss": action_loss, "mse": action_mse, "accuracy": accuracy}
 
@@ -98,13 +100,12 @@ class TransformerPolicy(nn.Module):
         self,
         observations,
         tasks,
-        # actions,
-        attention_mask,
         train: bool = False,
     ):
-        # task_tokens, obs_tokens, action_tokens = self.get_tokens(
-        #     observations, tasks, actions, train=train
-        # )
+        attention_mask = jnp.logical_and(
+            self.default_attention_mask,
+            self.generate_pad_attention_mask(observations["pad_mask"]),
+        )
         task_tokens, obs_tokens, action_tokens = self.get_tokens(
             observations, tasks, train=train
         )
@@ -130,47 +131,21 @@ class TransformerPolicy(nn.Module):
         self,
         observations,
         tasks,
-        # actions=None,
         train: bool = False,
         argmax: bool = False,
         sample_shape: tuple = (),
         rng: PRNGKey = None,
         temperature: float = 1.0,
     ):
-        # if actions is None:
-        #     actions = jnp.zeros(
-        #         (
-        #             observations["image_0"].shape[0],
-        #             self.horizon,
-        #             self.action_dim,
-        #         )
-        #     )
-        # else:
-        #     # actions is (batch, horizon-pred_horizon-1, action_dim)
-        #     # because we don't know future actions or the current action.
-        #     # Pad with zeros to full sequence length.
-        #     assert actions.shape[1] == self.horizon - self.pred_horizon - 1
-        #     actions = jnp.concatenate(
-        #         [
-        #             actions,
-        #             jnp.zeros(
-        #                 (actions.shape[0], self.pred_horizon + 1, actions.shape[2])
-        #             ),
-        #         ],
-        #         axis=1,
-        #     )
-
         output = self.transformer_call(
             observations,
             tasks,
-            # actions,
-            attention_mask=self.attention_mask,
             train=train,
         )
 
-        # get the logits for the actions by taking the output at each timestep
-        # corresponding to the action and projecting it to the vocab size
-        action_logits = output[:, :, -self.tokens_per_action :]
+        # get the logits for current action by taking the action tokens of
+        # the last timestep and projecting them to the vocab size
+        action_logits = output[:, -1, -self.tokens_per_action :]
         action_logits = self.vocab_proj(action_logits)
 
         if argmax:
@@ -182,15 +157,16 @@ class TransformerPolicy(nn.Module):
             )
         return self.action_tokenizer(action_tokens, mode="detokenize")
 
-    def generate_masks(self):
+    def generate_default_attention_mask(self):
         """
-        Generate attention mask for transformer call.
+        Generate default attention mask for transformer call.
         """
 
+        attention_mask = np.zeros((self.total_tokens, self.total_tokens), dtype=int)
+
         # mask for obs-action sequence
-        sequence_mask = np.zeros((self.total_tokens, self.total_tokens), dtype=int)
-        for i in range(self.total_tokens):
-            for j in range(self.total_tokens):
+        for i in range(self.tokens_per_time_step * self.horizon):
+            for j in range(self.tokens_per_time_step * self.horizon):
                 # get the index in the time sequence given the token index
                 index_i = int(i / self.tokens_per_time_step)
                 index_j = int(j / self.tokens_per_time_step)
@@ -204,22 +180,31 @@ class TransformerPolicy(nn.Module):
                 # don't attend to actions
                 if is_action_j:
                     mask = 0
-                sequence_mask[i, j] = mask
+                attention_mask[
+                    self.tokens_per_task + i, self.tokens_per_task + j
+                ] = mask
 
         # add mask for task tokens
-        full_mask = jnp.pad(
-            sequence_mask,
-            ((self.tokens_per_task, 0), (0, 0)),
-            constant_values=0,
-        )
-        task_mask = jnp.ones(
-            (self.total_tokens + self.tokens_per_task, self.tokens_per_task)
-        )
-        full_mask = jnp.concatenate([task_mask, full_mask], axis=1)
+        attention_mask[:, : self.tokens_per_task] = 1
 
+        return attention_mask
+
+    def generate_pad_attention_mask(self, pad_mask):
+        sequence_mask = jnp.repeat(pad_mask, self.tokens_per_time_step, axis=1)
+        task_mask = jnp.ones((pad_mask.shape[0], self.tokens_per_task), dtype=int)
+        full_mask = jnp.concatenate([task_mask, sequence_mask], axis=1)
+        full_mask = jnp.broadcast_to(
+            full_mask[:, None, None, :],
+            (
+                full_mask.shape[0],
+                self.num_heads,
+                self.total_tokens,
+                self.total_tokens,
+            ),
+        )
         return full_mask
 
-    def get_tokens(self, observations, tasks, actions, train: bool = False):
+    def get_tokens(self, observations, tasks, train: bool = False):
         """
         Tokenize observation/action history and task (either goal image or language).
         """
@@ -247,13 +232,11 @@ class TransformerPolicy(nn.Module):
                 (obs_tokens.shape[0], self.tokens_per_task, self.token_embedding_size)
             )
 
+        # we don't attend to past actions so set action tokens to zero
         # (batch, horizon, tokens_per_action, token_embedding_size)
-        # action_tokens = self.action_tokenizer(actions, mode="tokenize")
-        # action_tokens = self.action_embed(action_tokens)
         action_tokens = jnp.zeros(
             (
-                obs_tokens.shape[0],
-                self.horizon,
+                *obs_tokens.shape[:2],
                 self.tokens_per_action,
                 self.token_embedding_size,
             )
@@ -261,7 +244,12 @@ class TransformerPolicy(nn.Module):
 
         return task_tokens, obs_tokens, action_tokens
 
-    def assemble_input_tokens(self, task_tokens, obs_tokens, action_tokens):
+    def assemble_input_tokens(
+        self,
+        task_tokens,
+        obs_tokens,
+        action_tokens,
+    ):
         """
         Concatenate obs and action tokens.
         Fold horizon dim into token sequence dim.

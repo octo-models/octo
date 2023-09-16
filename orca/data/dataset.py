@@ -110,14 +110,13 @@ def _chunk_act_obs(traj, horizon):
     chunk_indices = tf.broadcast_to(
         tf.range(-horizon + 1, 1), [traj_len, horizon]
     ) + tf.broadcast_to(tf.range(traj_len)[:, None], [traj_len, horizon])
-    # pads by repeating the first timestep
-    chunk_indices = tf.maximum(chunk_indices, 0)
-    traj["observation"] = tf.nest.map_structure(
-        lambda x: tf.gather(x, chunk_indices), traj["observation"]
-    )
-    traj["action"] = tf.nest.map_structure(
-        lambda x: tf.gather(x, chunk_indices), traj["action"]
-    )
+    floored_chunk_indices = tf.maximum(chunk_indices, 0)
+    for key in ["observation", "action"]:
+        traj[key] = tf.nest.map_structure(
+            lambda x: tf.gather(x, floored_chunk_indices), traj[key]
+        )
+    # out of bounds indices will be masked in transformer
+    traj["observation"]["pad_mask"] = chunk_indices >= 0
     return traj
 
 
@@ -186,9 +185,6 @@ def apply_common_transforms(
         )
 
     # chunks actions and observations
-    assert (
-        horizon >= 2
-    ), "Horizon must be at least 2 to provide a timestep for conditioning and a timestep for prediction."
     dataset = dataset.map(partial(_chunk_act_obs, horizon=horizon))
 
     return dataset
