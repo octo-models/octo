@@ -117,10 +117,6 @@ def main(_):
         save_video_prefix="eval",
         goals=eval_goals,
     )
-    history_length = (
-        FLAGS.config.dataset_kwargs.horizon
-        - FLAGS.config.model.policy_kwargs.pred_horizon
-    )
 
     # load datasets
     logging.info(f"Loading data from {FLAGS.config.dataset_kwargs.data_path}")
@@ -229,20 +225,16 @@ def main(_):
         goals,
         state,
         rng,
-        past_actions=None,
         argmax=False,
         temperature=1.0,
     ):
         # add batch dim
         observations = jax.tree_map(lambda x: x[None], observations)
         goals = jax.tree_map(lambda x: x[None], goals)
-        if past_actions is not None:
-            past_actions = past_actions[None]
         actions = state.apply_fn(
             {"params": state.params},
             observations,
             goals,
-            actions=past_actions,
             train=False,
             argmax=argmax,
             rng=rng,
@@ -296,7 +288,7 @@ def main(_):
             eval_info = evaluate_gc(
                 policy_fn,
                 eval_env,
-                history_length=history_length,
+                horizon=FLAGS.config.dataset_kwargs.horizon,
                 action_exec_horizon=FLAGS.config.action_exec_horizon,
                 num_episodes=FLAGS.config.eval_episodes,
             )
