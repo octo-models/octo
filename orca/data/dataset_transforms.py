@@ -26,8 +26,8 @@ def r2_d2_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
     # every input feature is batched, ie has leading batch dimension
     trajectory["action"] = tf.concat(
         (
-            trajectory["action_dict"]["cartesian_velocity"],  # scaled version of delta ee actions
-            trajectory["action_dict"]["gripper_velocity"],    # setting cartesian_velocity causes robot to use gripper_velocity actions
+            trajectory["action_dict"]["cartesian_velocity"],
+            trajectory["action_dict"]["gripper_velocity"],
         ),
         axis=-1,
     )
