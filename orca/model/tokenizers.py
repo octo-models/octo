@@ -3,6 +3,7 @@ import functools as ft
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
+from einops import repeat
 from jax.scipy.stats import norm
 
 from orca.model.clip import CLIPTextTokenizer, CLIPVisionTokenizer
@@ -58,7 +59,7 @@ class ImageTokenizer(nn.Module):
                 axis=-1,
             )
 
-        # observations["image_XXX"] is (batch, obs_horizon, height, width, channel)
+        # observations["image_XXX"] is (batch, horizon, height, width, channel)
         # tasks["image_XXX"] is (batch, height, width, channel)
         image = assemble_image_obs(observations)
         b, t, h, w, c = image.shape
@@ -67,11 +68,15 @@ class ImageTokenizer(nn.Module):
             image = jnp.reshape(image, (b * t, h, w, c))
             image_tokens = encoders[self.encoder](**self.encoder_kwargs)(image)
             image_tokens = jnp.reshape(image_tokens, (b, t, -1, image_tokens.shape[-1]))
-        elif self.conditioning_type == "goal_image":
+        elif self.conditioning_type == "goal_image_obs":
             # early-fusion goal-image only architecture, concatenate obs and goal image channel-wise
-            image = jnp.concatenate([image[:, -1], assemble_image_obs(tasks)], axis=-1)
+            # repeat goals so that there's a goal for each obs in horizon
+            tasks_repeated = repeat(
+                assemble_image_obs(tasks), "B H W C -> (B repeat) H W C", repeat=t
+            )
+            image = jnp.concatenate([image, tasks_repeated], axis=-1)
             image_tokens = encoders[self.encoder](**self.encoder_kwargs)(image)
-            image_tokens = jnp.reshape(image_tokens, (b, -1, image_tokens.shape[-1]))
+            image_tokens = jnp.reshape(image_tokens, (b, t, -1, image_tokens.shape[-1]))
         elif self.conditioning_type == "goal_image_no_obs":
             image = assemble_image_obs(tasks)
             image_tokens = encoders[self.encoder](**self.encoder_kwargs)(image)
@@ -177,7 +182,7 @@ tokenizers = {
     ),
     "goal-obs-tokenizer": ft.partial(
         ImageTokenizer,
-        conditioning_type="goal_image",
+        conditioning_type="goal_image_obs",
     ),
     "obs-film-language-tokenizer": ft.partial(
         ImageTokenizer,
@@ -190,7 +195,7 @@ tokenizers = {
     ),
     "clip-goal-tokenizer": ft.partial(
         CLIPVisionTokenizer,
-        conditioning_type="goal_image",
+        conditioning_type="goal_image_obs",
     ),
     "clip-text-tokenizer": CLIPTextTokenizer,
     # TODO (andre) other possible tokenizers:
