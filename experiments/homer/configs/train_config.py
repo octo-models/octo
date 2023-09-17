@@ -58,18 +58,19 @@ def get_config(config_string):
         pretrained_weights=[],
         wandb=base_wandb_config,
         shuffle_buffer_size=25000,
-        action_exec_horizon=1,
+        action_exec_horizon=2,
     )
 
     # params that need to be specified multiple places
     normalization_type = "normal"
+    pred_horizon=4
 
     base_data_config = dict(
         name="bridge_dataset",
         data_dir="/nfs/kun2/datasets/tfds",
         image_obs_keys=["image_0"],
         state_obs_keys=["state"],
-        horizon=2,
+        horizon=4,
         augment_kwargs=dict(
             random_resized_crop=dict(scale=[0.8, 1.0], ratio=[0.9, 1.1]),
             random_brightness=[0.2],
@@ -107,6 +108,7 @@ def get_config(config_string):
         ),
         goal_relabeling_strategy="uniform",
         action_proprio_normalization_type=normalization_type,
+        pred_horizon=pred_horizon,
     )
 
     base_optimizer_config = dict(
@@ -121,7 +123,7 @@ def get_config(config_string):
             num_heads=8,
             dropout_rate=0.1,
             normalization_type=normalization_type,
-            pred_horizon=1,
+            pred_horizon=pred_horizon,
         )
     )
 
