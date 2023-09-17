@@ -3,7 +3,6 @@ import functools as ft
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
-from einops import repeat
 from jax.scipy.stats import norm
 
 from orca.model.clip import CLIPTextTokenizer, CLIPVisionTokenizer
@@ -71,10 +70,11 @@ class ImageTokenizer(nn.Module):
         elif self.conditioning_type == "goal_image_obs":
             # early-fusion goal-image only architecture, concatenate obs and goal image channel-wise
             # repeat goals so that there's a goal for each obs in horizon
-            tasks_repeated = repeat(
-                assemble_image_obs(tasks), "B H W C -> (B repeat) H W C", repeat=t
+            tasks_repeated = jnp.broadcast_to(
+                assemble_image_obs(tasks)[:, None], (b, t, h, w, c)
             )
             image = jnp.concatenate([image, tasks_repeated], axis=-1)
+            image = jnp.reshape(image, (b * t, h, w, c * 2))
             image_tokens = encoders[self.encoder](**self.encoder_kwargs)(image)
             image_tokens = jnp.reshape(image_tokens, (b, t, -1, image_tokens.shape[-1]))
         elif self.conditioning_type == "goal_image_no_obs":
