@@ -10,9 +10,9 @@ TPU23="export TPU_VISIBLE_DEVICES=2,3 TPU_CHIPS_PER_HOST_BOUNDS=1,2,1 TPU_HOST_B
 
 export CUDA_VISIBLE_DEVICES=1
 
-NAME="bridge_goal_relabel_actions_obs_hist_1"
+NAME="test"
 
-CMD="python experiments/main/train_rlds.py \
+CMD="python experiments/main/train.py \
     --config experiments/homer/configs/train_config.py:transformer_bc_bridge \
     --name $NAME"
 

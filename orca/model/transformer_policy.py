@@ -11,6 +11,46 @@ from orca.typing import PRNGKey, Sequence
 
 
 class TransformerPolicy(nn.Module):
+    """
+    This transformer models a sequence of observations and actions (of length `horizon`),
+    prefixed by a task (either a goal image or language instruction). The observations,
+    actions, and task are tokenized and then assembled into a token sequence.
+
+    With no action chunking (`pred_horizon=1`) the token sequence looks like:
+
+    [task, o_0, a_0, o_1, a_1, ..., o_n, a_n]
+
+    With action chunking (`pred_horizon>1`), the actions in the chunk are packed between
+    the observations. For example, if `pred_horizon=3`, the sequence looks like:
+
+    [task, o_0, a_0, a_1, a_2, o_1, a_1, a_2, a_3, o_2, ..., o_n, a_n]
+
+    In both cases, a causal mask ensures that each token can only attend to past tokens.
+
+    At test time, we predict actions non-autoregressively (i.e we predict all the tokens
+    of all the actions in a chunk in one forward pass). We do this by using mask/padding tokens
+    in the input sequence in place of the action tokens. Thus, all the action tokens are masked
+    at training time as well. Note: even though the attention mask ensures we don't attend to the
+    actions, we still need to mask them because of the residual connection in the attention block.
+
+    Parameters:
+        observations_tokenizers: List of flax modules for tokenizing the observations. The output
+            of each tokenizer is concatenated to form the observation tokens.
+        task_tokenizers: List of flax modules for tokenizing the task. The output of each tokenizer
+            is concatenated to form the task token prefix.
+        vocab_size: Number of bins for each action dimension.
+        token_embedding_size: Size of the tokens.
+        horizon: Length of the observation-action sequence that the transformer processes.
+        pred_horizon: Number of actions to predict at once (the "action chunk").
+        action_dim: Dimension of the actions.
+        normalization_type: The type of normalization used on the actions. Either "normal" for
+            normalization to unit Gaussian or "bounds" for normalization to [-1, 1].
+        num_layers: Number of layers in transformer.
+        mlp_dim: MLP dim of transformer.
+        num_heads: Number of heads in transformer.
+        dropout_rate: Dropout rate for transformer
+        attention_dropout_rate: Dropout in self-attention."""
+
     observation_tokenizers: Sequence[nn.Module]
     task_tokenizers: Sequence[nn.Module]
     vocab_size: int = 256
@@ -66,6 +106,20 @@ class TransformerPolicy(nn.Module):
         actions,
         train: bool = False,
     ):
+        """
+        Performs a forward pass of the network and computes the loss.
+
+        Args:
+            observations: A dictionary containing observation data for a horizon-length trajectory.
+                Each entry has shape (batch, horizon, *).
+            tasks: A dictionary containing task data for this trajectory.
+                Each entry has shape (batch, *).
+            actions: The actions in this trajectory with shape (batch, horizon, pred_horizon, action_dim).
+            train: Whether this is a training call.
+        Returns:
+            The loss, mean squared error, and accuracy for the forward pass.
+        """
+
         # output is (batch, horizon, tokens_per_time_step, token_embedding_size)
         output = self.transformer_call(
             observations,
@@ -73,9 +127,11 @@ class TransformerPolicy(nn.Module):
             train=train,
         )
 
-        # get the logits for all the actions by taking the action tokens
-        # of each timestep and projecting them to the vocab size
+        # get the logits for all the actions by taking the action tokens of each timestep,
+        # unfolding the pred_horizon dim, and projecting to the vocab size
+        # (batch, horizon, tokens_per_action, token_embedding_size)
         action_embedding = output[:, :, -self.tokens_per_action :]
+        # (batch, horizon, pred_horizon, action_dim, token_embedding_size)
         action_embedding = jnp.reshape(
             action_embedding,
             (
@@ -85,6 +141,7 @@ class TransformerPolicy(nn.Module):
                 self.token_embedding_size,
             ),
         )
+        # (batch, horizon, pred_horizon, action_dim, vocab_size)
         action_logits = self.vocab_proj(action_embedding)
 
         action_logprob = jax.nn.log_softmax(action_logits, axis=-1)
@@ -111,6 +168,8 @@ class TransformerPolicy(nn.Module):
         tasks,
         train: bool = False,
     ):
+        # combine the default attention mask and a padding mask specifc to this batch
+        # attention_mask is broadcast to (batch, num_heads, total_tokens, total_tokens)
         attention_mask = jnp.logical_and(
             self.default_attention_mask,
             self.generate_pad_attention_mask(observations["pad_mask"]),
@@ -146,15 +205,34 @@ class TransformerPolicy(nn.Module):
         rng: PRNGKey = None,
         temperature: float = 1.0,
     ):
+        """
+        Predicts actions at test time.
+
+        Args:
+            observations: A dictionary containing observation data for the conditioning window
+                of the chunk. Each entry has shape (batch, horizon-pred_horizon, *).
+            tasks: A dictionary containing task data for this chunk.
+                Each entry has shape (batch, *).
+            train: Whether this is a training call.
+            argmax: Whether to randomly sample action distribution or take the mode.
+            sample_shape: The shape of samples drawn from the action distribution for visualization.
+            rng: A random key for sampling the action distribution.
+            temperature: The temperature to use when sampling the action distribution.
+        Returns:
+            The predicted actions given the provided observation/action history and task.
+        """
+
         output = self.transformer_call(
             observations,
             tasks,
             train=train,
         )
 
-        # get the logits for current action by taking the action tokens of
-        # the last timestep and projecting them to the vocab size
+        # get the logits for the last action by taking the action tokens of the last timestep,
+        # unfolding the pred_horizon dim, and projecting to the vocab size
+        # (batch, tokens_per_action, token_embedding_size)
         action_embedding = output[:, -1, -self.tokens_per_action :]
+        # (batch, pred_horizon, action_dim, token_embedding_size)
         action_embedding = jnp.reshape(
             action_embedding,
             (
@@ -164,6 +242,7 @@ class TransformerPolicy(nn.Module):
                 self.token_embedding_size,
             ),
         )
+        # (batch, pred_horizon, action_dim, vocab_size)
         action_logits = self.vocab_proj(action_embedding)
 
         if argmax:
@@ -208,6 +287,13 @@ class TransformerPolicy(nn.Module):
         return attention_mask
 
     def generate_pad_attention_mask(self, pad_mask):
+        """
+        Generate attention mask that ignores padding. `pad_mask` has shape (batch, horizon) and
+        records which time steps are padding. We first expand the mask to shape (batch, horizon * tokens_per_time_step)
+        and then prepend a mask for the task prefix to get shape (batch, total_tokens).
+        We broadcast to (batch, num_heads, total_tokens, total_tokens).
+        """
+
         sequence_mask = jnp.repeat(pad_mask, self.tokens_per_time_step, axis=1)
         task_mask = jnp.ones((pad_mask.shape[0], self.tokens_per_task), dtype=int)
         full_mask = jnp.concatenate([task_mask, sequence_mask], axis=1)

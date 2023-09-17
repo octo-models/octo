@@ -32,7 +32,7 @@ def get_config(config_string):
         save_dir=placeholder(str),
         resume_path=placeholder(str),
         seed=42,
-        text_processor="muse_embedding",
+        text_processor=None,
         text_processor_kwargs=dict(),
         pretrained_weights=[],
         wandb=base_wandb_config,
@@ -44,7 +44,7 @@ def get_config(config_string):
         log_interval=1000,
         eval_interval=5000,
         save_interval=int(2e6),
-        save_dir="gs://rail-tpus-homer-v4/log",
+        save_dir="/mnt2/homer/jaxrl_log",
         resume_path=None,
         seed=42,
         env_name="franka_shoe_pick_and_place",
@@ -58,12 +58,12 @@ def get_config(config_string):
         pretrained_weights=[],
         wandb=base_wandb_config,
         shuffle_buffer_size=25000,
-        action_exec_horizon=2,
+        action_exec_horizon=1,
     )
 
     # params that need to be specified multiple places
     normalization_type = "normal"
-    pred_horizon=4
+    pred_horizon = 1
 
     base_data_config = dict(
         name="bridge_dataset",
@@ -87,11 +87,12 @@ def get_config(config_string):
         ),
         goal_relabeling_strategy="uniform",
         action_proprio_normalization_type=normalization_type,
+        pred_horizon=pred_horizon,
     )
 
     base_sim_data_config = dict(
-        data_path="gs://rail-tpus-homer-v4/sim_data/franka_shoe_pick_and_place_2K_20230709-201001",
-        horizon=2,
+        data_path="/mnt2/homer/datasets/mujoco_sim/franka_shoe_pick_and_place_2K_20230709-201001",
+        horizon=4,
         augment_kwargs=dict(
             random_resized_crop=dict(scale=[0.8, 1.0], ratio=[0.9, 1.1]),
             random_brightness=[0.2],
@@ -148,10 +149,10 @@ def get_config(config_string):
                 model=update_config(
                     base_model_config,
                     observation_tokenizer_kwargs={
-                        "obs-tokenizer": {"num_tokens": 16, **base_sim_encoder_kwargs}
+                        "goal-obs-tokenizer": {"num_tokens": 16, **base_sim_encoder_kwargs}
                     },
                     task_tokenizer_kwargs={
-                        "goal-obs-tokenizer": {
+                        "obs-tokenizer": {
                             "num_tokens": 16,
                             **base_sim_encoder_kwargs,
                         }
@@ -168,10 +169,10 @@ def get_config(config_string):
                 model=update_config(
                     base_model_config,
                     observation_tokenizer_kwargs={
-                        "obs-tokenizer": {"num_tokens": 64, **base_encoder_kwargs}
+                        "goal-obs-tokenizer": {"num_tokens": 64, **base_encoder_kwargs}
                     },
                     task_tokenizer_kwargs={
-                        "goal-obs-tokenizer": {"num_tokens": 64, **base_encoder_kwargs}
+                        "obs-tokenizer": {"num_tokens": 64, **base_encoder_kwargs}
                     },
                 ),
                 optimizer=base_optimizer_config,
@@ -191,10 +192,10 @@ def get_config(config_string):
                 model=update_config(
                     base_model_config,
                     observation_tokenizer_kwargs={
-                        "obs-tokenizer": {"num_tokens": 60, **base_encoder_kwargs}
+                        "goal-obs-tokenizer": {"num_tokens": 60, **base_encoder_kwargs}
                     },
                     task_tokenizer_kwargs={
-                        "goal-obs-tokenizer": {"num_tokens": 60, **base_encoder_kwargs}
+                        "obs-tokenizer": {"num_tokens": 60, **base_encoder_kwargs}
                     },
                 ),
                 optimizer=base_optimizer_config,
