@@ -68,14 +68,12 @@ def evaluate_gc(
         done = False
 
         obs_history = deque([obs] * horizon, maxlen=horizon)
-        pad_mask = np.zeros((horizon,))
-        i = horizon - 1
+        pad_mask = np.zeros((horizon,), dtype=int)
+        pad_mask[horizon-1] = 1
+        pad_idx = horizon - 2
         while not done:
             # stack along time dimension
             obs = stack_obs(obs_history)
-            if i >= 0:
-                pad_mask[i] = 1
-                i -= 1
             obs["pad_mask"] = pad_mask
             action = policy_fn(obs, goal)
             assert len(action) >= action_exec_horizon
@@ -83,6 +81,9 @@ def evaluate_gc(
             for i in range(action_exec_horizon):
                 next_obs, _, terminated, truncated, info = env.step(action[i])
                 obs_history.append(next_obs)
+                if pad_idx >= 0:
+                    pad_mask[pad_idx] = 1
+                    pad_idx -= 1
                 if terminated or truncated:
                     break
 
