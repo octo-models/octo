@@ -116,8 +116,16 @@ def main(_):
             batch.pop("language_instruction")
         return batch
 
+    train_data = make_dataset(**FLAGS.config.dataset_kwargs, train=True)
+    action_proprio_metadata = train_data.action_proprio_metadata
+    if save_dir is not None:
+        with tf.io.gfile.GFile(
+            os.path.join(save_dir, "action_proprio_metadata.json"), "w"
+        ) as f:
+            json.dump(action_proprio_metadata, f)
+
     train_data = (
-        make_dataset(**FLAGS.config.dataset_kwargs, train=True)
+        (train_data)
         .unbatch()
         .shuffle(FLAGS.config.shuffle_buffer_size)
         .repeat()
