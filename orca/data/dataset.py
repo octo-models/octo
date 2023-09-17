@@ -3,7 +3,7 @@ import inspect
 import json
 import logging
 from functools import partial
-from typing import Dict, List, Optional, Sequence, Union
+from typing import Any, Dict, List, Optional, Sequence, Union
 
 import dlimp as dl
 import numpy as np
@@ -209,6 +209,7 @@ def make_dataset(
     image_obs_keys: Union[str, List[str]] = [],
     depth_obs_keys: Union[str, List[str]] = [],
     state_obs_keys: Union[str, List[str]] = [],
+    action_proprio_metadata: Optional[dict] = None,
     **kwargs,
 ) -> tf.data.Dataset:
     """Creates a dataset from the RLDS format.
@@ -279,18 +280,17 @@ def make_dataset(
         return traj
 
     dataset = dataset.map(restructure)
-
-    action_proprio_metadata = get_action_proprio_stats(
-        builder,
-        dataset,
-        state_obs_keys,
-        RLDS_TRAJECTORY_MAP_TRANSFORMS[name]
-        if name in RLDS_TRAJECTORY_MAP_TRANSFORMS
-        else None,
-    )
+    if action_proprio_metadata is None:
+        action_proprio_metadata = get_action_proprio_stats(
+            builder,
+            dataset,
+            state_obs_keys,
+            RLDS_TRAJECTORY_MAP_TRANSFORMS.get(name, None),
+        )
 
     dataset = apply_common_transforms(
         dataset, train=train, action_proprio_metadata=action_proprio_metadata, **kwargs
     )
+    dataset.action_proprio_metadata = action_proprio_metadata
 
     return dataset
