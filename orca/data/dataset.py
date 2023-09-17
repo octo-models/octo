@@ -1,8 +1,9 @@
 import hashlib
+import inspect
 import json
 import logging
 from functools import partial
-from typing import Dict, List, Optional, Sequence, Union
+from typing import Any, Dict, List, Optional, Sequence, Union
 
 import dlimp as dl
 import numpy as np
@@ -16,10 +17,16 @@ from orca.data.utils import bc_goal_relabeling
 
 
 def get_action_proprio_stats(
-    builder: DatasetBuilder, dataset: tf.data.Dataset
+    builder: DatasetBuilder,
+    dataset: tf.data.Dataset,
+    proprio_keys: List[str],
+    transform_fcn: Any,
 ) -> Dict[str, Dict[str, List[float]]]:
-    # get statistics file path --> embed unique hash that catches if dataset info changed
-    data_info_hash = hashlib.sha256(str(builder.info).encode("utf-8")).hexdigest()
+    # get statistics file path --> embed unique hash that catches if dataset info / keys / transform changed
+    transform_str = inspect.getsource(transform_fcn) if transform_fcn else ""
+    data_info_hash = hashlib.sha256(
+        (str(builder.info) + str(proprio_keys) + str(transform_str)).encode("utf-8")
+    ).hexdigest()
     path = tf.io.gfile.join(
         builder.info.data_dir, f"action_proprio_stats_{data_info_hash}.json"
     )
@@ -202,6 +209,7 @@ def make_dataset(
     image_obs_keys: Union[str, List[str]] = [],
     depth_obs_keys: Union[str, List[str]] = [],
     state_obs_keys: Union[str, List[str]] = [],
+    action_proprio_metadata: Optional[dict] = None,
     **kwargs,
 ) -> tf.data.Dataset:
     """Creates a dataset from the RLDS format.
@@ -272,11 +280,17 @@ def make_dataset(
         return traj
 
     dataset = dataset.map(restructure)
-
-    action_proprio_metadata = get_action_proprio_stats(builder, dataset)
+    if action_proprio_metadata is None:
+        action_proprio_metadata = get_action_proprio_stats(
+            builder,
+            dataset,
+            state_obs_keys,
+            RLDS_TRAJECTORY_MAP_TRANSFORMS.get(name, None),
+        )
 
     dataset = apply_common_transforms(
         dataset, train=train, action_proprio_metadata=action_proprio_metadata, **kwargs
     )
+    dataset.action_proprio_metadata = action_proprio_metadata
 
     return dataset
