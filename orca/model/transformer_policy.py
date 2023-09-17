@@ -154,8 +154,17 @@ class TransformerPolicy(nn.Module):
 
         # get the logits for current action by taking the action tokens of
         # the last timestep and projecting them to the vocab size
-        action_logits = output[:, -1, -self.tokens_per_action :]
-        action_logits = self.vocab_proj(action_logits)
+        action_embedding = output[:, -1, -self.tokens_per_action :]
+        action_embedding = jnp.reshape(
+            action_embedding,
+            (
+                action_embedding.shape[0],
+                self.pred_horizon,
+                self.action_dim,
+                self.token_embedding_size,
+            ),
+        )
+        action_logits = self.vocab_proj(action_embedding)
 
         if argmax:
             action_tokens = jnp.argmax(action_logits, axis=-1).astype(jnp.int32)
