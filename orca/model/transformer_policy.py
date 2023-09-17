@@ -97,11 +97,11 @@ class TransformerPolicy(nn.Module):
 
         action_pred = jnp.argmax(action_logits, axis=-1)
         accuracy = action_pred == action_labels
-        accuracy = (accuracy * observations["pad_mask"]).mean()
+        accuracy = (accuracy * observations["pad_mask"][:, :, None, None]).mean()
 
         action_values = self.action_tokenizer(action_pred, mode="detokenize")
         action_mse = jnp.square(actions - action_values).sum(axis=-1)
-        action_mse = (action_mse * observations["pad_mask"]).mean()
+        action_mse = (action_mse * observations["pad_mask"][:, :, None]).mean()
 
         return {"loss": action_loss, "mse": action_mse, "accuracy": accuracy}
 
