@@ -152,7 +152,7 @@ def get_config(config_string):
                         "goal-obs-tokenizer": {"num_tokens": 16, **base_sim_encoder_kwargs}
                     },
                     task_tokenizer_kwargs={
-                        "obs-tokenizer": {
+                        "goal-tokenizer": {
                             "num_tokens": 16,
                             **base_sim_encoder_kwargs,
                         }
@@ -172,7 +172,7 @@ def get_config(config_string):
                         "goal-obs-tokenizer": {"num_tokens": 64, **base_encoder_kwargs}
                     },
                     task_tokenizer_kwargs={
-                        "obs-tokenizer": {"num_tokens": 64, **base_encoder_kwargs}
+                        "goal-tokenizer": {"num_tokens": 64, **base_encoder_kwargs}
                     },
                 ),
                 optimizer=base_optimizer_config,
@@ -195,7 +195,7 @@ def get_config(config_string):
                         "goal-obs-tokenizer": {"num_tokens": 60, **base_encoder_kwargs}
                     },
                     task_tokenizer_kwargs={
-                        "obs-tokenizer": {"num_tokens": 60, **base_encoder_kwargs}
+                        "goal-tokenizer": {"num_tokens": 60, **base_encoder_kwargs}
                     },
                 ),
                 optimizer=base_optimizer_config,
