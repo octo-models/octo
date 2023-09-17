@@ -76,6 +76,15 @@ class TransformerPolicy(nn.Module):
         # get the logits for all the actions by taking the action tokens
         # of each timestep and projecting them to the vocab size
         action_embedding = output[:, :, -self.tokens_per_action :]
+        action_embedding = jnp.reshape(
+            action_embedding,
+            (
+                *action_embedding.shape[:2],
+                self.pred_horizon,
+                self.action_dim,
+                self.token_embedding_size,
+            ),
+        )
         action_logits = self.vocab_proj(action_embedding)
 
         action_logprob = jax.nn.log_softmax(action_logits, axis=-1)
@@ -84,11 +93,11 @@ class TransformerPolicy(nn.Module):
         action_labels_one_hot = jax.nn.one_hot(action_labels, self.vocab_size)
 
         action_loss = -jnp.sum(action_logprob * action_labels_one_hot, axis=-1)
-        action_loss = (action_loss * observations["pad_mask"][:, :, None]).mean()
+        action_loss = (action_loss * observations["pad_mask"][:, :, None, None]).mean()
 
         action_pred = jnp.argmax(action_logits, axis=-1)
         accuracy = action_pred == action_labels
-        accuracy = (accuracy * observations["pad_mask"][:, :, None]).mean()
+        accuracy = (accuracy * observations["pad_mask"]).mean()
 
         action_values = self.action_tokenizer(action_pred, mode="detokenize")
         action_mse = jnp.square(actions - action_values).sum(axis=-1)

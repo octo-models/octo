@@ -100,13 +100,28 @@ def _normalize_action_and_proprio(traj, metadata, normalization_type):
     raise ValueError(f"Unknown normalization type {normalization_type}")
 
 
-def _chunk_act_obs(traj, horizon):
+def _chunk_act_obs(traj, horizon, pred_horizon):
     """
-    Chunks actions and observations into the given horizon.
+    Chunks actions and observations into the given horizons.
 
-    The "action" and "observation" keys are each given a new axis (at index 1) of size `horizon`.
+    We first gather the actions into `pred_horizon` chunks (indexing into the future).
+    We then gather the observations and chunked actions into `horizon` size chunks (indexing into the past).
+
+    The observations end up with shape [traj_len, horizon, *].
+    The actions end up with shape [traj_len, horizon, pred_horizon, *].
     """
     traj_len = tf.shape(traj["action"])[0]
+
+    # create action chunks, indexing into the future
+    chunk_indices = tf.broadcast_to(
+        tf.range(pred_horizon), [traj_len, pred_horizon]
+    ) + tf.broadcast_to(tf.range(traj_len)[:, None], [traj_len, pred_horizon])
+    # pads by repeating the last action
+    # TODO (homer) add a mask so that these repeated actions can be masked
+    chunk_indices = tf.minimum(chunk_indices, traj_len - 1)
+    traj["action"] = tf.gather(traj["action"], chunk_indices)
+
+    # create observation and action-chunk chunks, indexing into the past
     chunk_indices = tf.broadcast_to(
         tf.range(-horizon + 1, 1), [traj_len, horizon]
     ) + tf.broadcast_to(tf.range(traj_len)[:, None], [traj_len, horizon])
@@ -117,6 +132,7 @@ def _chunk_act_obs(traj, horizon):
         )
     # out of bounds indices will be masked in transformer
     traj["observation"]["pad_mask"] = chunk_indices >= 0
+
     return traj
 
 
@@ -127,7 +143,8 @@ def apply_common_transforms(
     goal_relabeling_strategy: Optional[str] = None,
     goal_relabeling_kwargs: dict = {},
     augment_kwargs: dict = {},
-    horizon: int = 2,
+    horizon: int = 1,
+    pred_horizon: int = 1,
     skip_unlabeled: bool = False,
     action_proprio_metadata: Optional[dict] = None,
     action_proprio_normalization_type: Optional[str] = None,
@@ -185,7 +202,9 @@ def apply_common_transforms(
         )
 
     # chunks actions and observations
-    dataset = dataset.map(partial(_chunk_act_obs, horizon=horizon))
+    dataset = dataset.map(
+        partial(_chunk_act_obs, horizon=horizon, pred_horizon=pred_horizon)
+    )
 
     return dataset
 

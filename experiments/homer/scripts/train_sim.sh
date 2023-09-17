@@ -16,4 +16,4 @@ CMD="python experiments/homer/train_sim.py \
     --config experiments/homer/configs/train_config.py:sim_transformer_bc \
     --name $NAME"
 
-$CMD
+$CMD --debug
