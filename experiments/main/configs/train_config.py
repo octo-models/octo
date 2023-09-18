@@ -45,10 +45,6 @@ def get_config(config_string):
     normalization_type = "normal"
 
     base_data_config = dict(
-        #name="bridge_dataset",
-        #data_dir="/nfs/kun2/datasets/tfds",
-        #image_obs_keys=["image_0"],
-        #state_obs_keys=["state"],
         horizon=2,
         augment_kwargs=dict(
             random_resized_crop=dict(scale=[0.8, 1.0], ratio=[0.9, 1.1]),
@@ -67,6 +63,18 @@ def get_config(config_string):
         goal_relabeling_strategy="uniform",
         action_proprio_normalization_type=normalization_type,
     )
+
+    base_bridge_data_config = {
+        'common_kwargs': base_data_config,
+        'data_kwargs_list': [
+            {
+                'name': "bridge_dataset",
+                'data_dir': "/nfs/kun2/datasets/tfds",
+                'image_obs_keys': ["image_0"],
+                'state_obs_keys': ["state"],
+            },
+        ],
+    }
 
     base_optimizer_config = dict(
         learning_rate=3e-4,
@@ -108,13 +116,7 @@ def get_config(config_string):
                     },
                 ),
                 optimizer=base_optimizer_config,
-                dataset_kwargs=update_config(
-                    base_data_config,
-                    name="bridge_dataset",
-                    data_dir="/nfs/kun2/datasets/tfds",
-                    image_obs_keys=["image_0"],
-                    state_obs_keys=["state"],
-                ),
+                dataset_kwargs=base_bridge_data_config,
                 **base_config,
             )
         ),
@@ -137,13 +139,17 @@ def get_config(config_string):
                     },
                 ),
                 optimizer=base_optimizer_config,
-                dataset_kwargs=update_config(
-                    base_data_config,
-                    name="r2_d2_pen",
-                    data_dir="/nfs/kun2/datasets/r2d2/tfds",
-                    image_obs_keys=["exterior_image_1_left", "exterior_image_2_left", "wrist_image_left"],
-                    state_obs_keys=["joint_position"],
-                ),
+                dataset_kwargs={
+                    'common_kwargs': base_data_config,
+                    'data_kwargs_list': [
+                        {
+                            'name': "r2_d2_pen",
+                            'data_dir': "/nfs/kun2/datasets/r2d2/tfds",
+                            'image_obs_keys': ["exterior_image_1_left", "exterior_image_2_left", "wrist_image_left"],
+                            'state_obs_keys': ["joint_position"],
+                        },
+                    ],
+                },
                 **base_config,
             )
         ),
@@ -205,7 +211,7 @@ def get_config(config_string):
                     task_tokenizer_kwargs={},
                 ),
                 optimizer=base_optimizer_config,
-                dataset_kwargs=base_data_config,
+                dataset_kwargs=base_bridge_data_config,
                 **base_config,
             )
         ),
@@ -218,7 +224,7 @@ def get_config(config_string):
                     task_tokenizer_kwargs={"language-tokenizer": {"num_tokens": 16}},
                 ),
                 optimizer=base_optimizer_config,
-                dataset_kwargs=base_data_config,
+                dataset_kwargs=base_bridge_data_config,
                 **base_config,
             )
         ),
@@ -239,7 +245,7 @@ def get_config(config_string):
                     },
                 ),
                 optimizer=base_optimizer_config,
-                dataset_kwargs=base_data_config,
+                dataset_kwargs=base_bridge_data_config,
                 **update_config(
                     base_config,
                     text_processor="hf_tokenizer",
