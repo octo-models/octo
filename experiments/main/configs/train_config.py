@@ -171,7 +171,7 @@ def get_config(config_string):
                         base_data_config,
                         target_n_image_keys=3,
                         target_n_state_dims=7,
-                        resize_size=(128, 128),
+                        resize_size=(180, 320),
                     ),
                     'data_kwargs_list': [
                         {

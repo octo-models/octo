@@ -315,23 +315,26 @@ def make_dataset(
             )
 
         # pad missing keys
+        traj_len = tf.shape(traj["action"])[0]
         if target_n_image_keys:
             assert resize_size or image_obs_keys  # need to provide size for padding
             pad_shape = (
-                (resize_size[0], resize_size[1], 3)
+                (traj_len, resize_size[0], resize_size[1], 3)
                 if resize_size
                 else traj["observation"][f"image_0"].shape
             )
-            for j in range(len(image_obs_keys) - target_n_image_keys):
+            for j in range(target_n_image_keys - len(image_obs_keys)):
                 traj["observation"][f"image_{len(image_obs_keys) + j}"] = tf.zeros(
                     pad_shape, dtype=tf.uint8
                 )
         if target_n_depth_keys:
             assert resize_size or depth_obs_keys  # need to provide size for padding
             pad_shape = (
-                resize_size if resize_size else traj["observation"][f"depth_0"].shape
+                (traj_len, resize_size[0], resize_size[1])
+                if resize_size
+                else traj["observation"][f"depth_0"].shape
             )
-            for j in range(len(depth_obs_keys) - target_n_depth_keys):
+            for j in range(target_n_depth_keys - len(depth_obs_keys)):
                 traj["observation"][f"depth_{len(depth_obs_keys) + j}"] = tf.zeros(
                     pad_shape, dtype=tf.float32
                 )
@@ -345,7 +348,7 @@ def make_dataset(
                 traj["observation"]["proprio"] = tf.concat(
                     (
                         traj["observation"]["proprio"],
-                        tf.zeros(target_n_state_dims - n_proprio_dim, dtype=tf.float32),
+                        tf.zeros((traj_len, target_n_state_dims - n_proprio_dim), dtype=tf.float32),
                     ),
                     axis=-1,
                 )
