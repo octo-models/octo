@@ -204,8 +204,11 @@ def apply_common_transforms(
 
     # decodes string keys with name "image", resizes "image" and "depth"
     dataset = dataset.frame_map(dl.transforms.decode_images)
-    dataset = dataset.frame_map(partial(dl.transforms.resize_images, size=resize_size))
-    dataset = dataset.frame_map(partial(resize_depth_images, size=resize_size))
+    if resize_size:
+        dataset = dataset.frame_map(
+            partial(dl.transforms.resize_images, size=resize_size)
+        )
+        dataset = dataset.frame_map(partial(resize_depth_images, size=resize_size))
 
     if train:
         # augments the entire trajectory with the same seed
