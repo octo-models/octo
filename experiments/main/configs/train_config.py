@@ -147,6 +147,50 @@ def get_config(config_string):
                 **base_config,
             )
         ),
+        "transformer_bc_bridge_r2d2": ConfigDict(
+            dict(
+                agent="transformer_bc",
+                model=update_config(
+                    base_model_config,
+                    observation_tokenizer_kwargs={
+                        "obs-tokenizer": {
+                            "num_tokens": 60,
+                            **base_encoder_kwargs
+                        }
+                    },
+                    task_tokenizer_kwargs={
+                        "goal-obs-tokenizer": {
+                            "num_tokens": 60,
+                            **base_encoder_kwargs
+                        }
+                    },
+                ),
+                optimizer=base_optimizer_config,
+                dataset_kwargs={
+                    'common_kwargs': update_config(
+                        base_data_config,
+                        target_n_image_keys=3,
+                        target_n_state_dims=7,
+                        resize_size=(128, 128),
+                    ),
+                    'data_kwargs_list': [
+                        {
+                            'name': "r2_d2_pen",
+                            'data_dir': "/nfs/kun2/datasets/r2d2/tfds",
+                            'image_obs_keys': ["exterior_image_1_left", "exterior_image_2_left", "wrist_image_left"],
+                            'state_obs_keys': ["joint_position"],
+                        },
+                        {
+                            'name': "bridge_dataset",
+                            'data_dir': "/nfs/kun2/datasets/r2d2/tfds",
+                            'image_obs_keys': ["image_0"],
+                            'state_obs_keys': ["state"],
+                        },
+                    ],
+                },
+                **base_config,
+            )
+        ),
         "transformer_bc_film_lang": ConfigDict(
             dict(
                 agent="transformer_bc",
