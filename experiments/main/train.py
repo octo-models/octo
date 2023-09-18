@@ -138,7 +138,7 @@ def main(_):
                 .batch(FLAGS.config.batch_size))
         visualizers.append(
             Visualizer(dataset_kwargs, text_processor=text_processor))
-    train_data_iter = map(shard_fn, map(process_text, train_data.iterator()))
+    train_data_iter = map(shard_fn, map(process_text, train_data.as_numpy_iterator()))
     val_data_iters = [
         map(shard_fn, map(process_text, val_data.iterator())) for val_data in val_datas]
 
