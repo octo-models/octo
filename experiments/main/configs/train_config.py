@@ -45,10 +45,10 @@ def get_config(config_string):
     normalization_type = "normal"
 
     base_data_config = dict(
-        name="bridge_dataset",
-        data_dir="/nfs/kun2/datasets/tfds",
-        image_obs_keys=["image_0"],
-        state_obs_keys=["state"],
+        #name="bridge_dataset",
+        #data_dir="/nfs/kun2/datasets/tfds",
+        #image_obs_keys=["image_0"],
+        #state_obs_keys=["state"],
         horizon=2,
         augment_kwargs=dict(
             random_resized_crop=dict(scale=[0.8, 1.0], ratio=[0.9, 1.1]),
@@ -182,7 +182,7 @@ def get_config(config_string):
                         },
                         {
                             'name': "bridge_dataset",
-                            'data_dir': "/nfs/kun2/datasets/r2d2/tfds",
+                            'data_dir': "/nfs/kun2/datasets/tfds",
                             'image_obs_keys': ["image_0"],
                             'state_obs_keys': ["state"],
                         },

@@ -98,7 +98,6 @@ def main(_):
         logging.info("save_dir not passed in, not saving checkpoints")
 
     # load datasets
-    logging.info(f"Loading data from {FLAGS.config.dataset_kwargs.data_dir}")
     if FLAGS.config.text_processor is None:
         text_processor = None
     else:
@@ -116,30 +115,32 @@ def main(_):
             batch.pop("language_instruction")
         return batch
 
+    sample_weights = FLAGS.config.dataset_kwargs['sample_weights'] if 'sample_weights' in FLAGS.config.dataset_kwargs else None
     train_data = (
         make_interleaved_dataset(
             FLAGS.config.dataset_kwargs['common_kwargs'],
             FLAGS.config.dataset_kwargs['data_kwargs_list'],
             train=True,
-            sample_weights=FLAGS.config.dataset_kwargs['sample_weights']
+            sample_weights=sample_weights,
         )
         .repeat()
         .batch(FLAGS.config.batch_size)
     )
-    val_datas = [
-        make_dataset(dataset_kwargs.update(**FLAGS.config.dataset_kwargs['common_kwargs']), train=False)
-        .unbatch()
-        .shuffle(FLAGS.config.shuffle_buffer_size)
-        .repeat()
-        .batch(FLAGS.config.batch_size)
-                for dataset_kwargs in FLAGS.config.dataset_kwargs['data_kwargs_list']]
+    val_datas = []
+    visualizers = []
+    for dataset_kwargs in FLAGS.config.dataset_kwargs['data_kwargs_list']:
+        dataset_kwargs.update(**FLAGS.config.dataset_kwargs['common_kwargs'])
+        val_datas.append(
+                make_dataset(**dataset_kwargs, train=False)
+                .unbatch()
+                .shuffle(FLAGS.config.shuffle_buffer_size)
+                .repeat()
+                .batch(FLAGS.config.batch_size))
+        visualizers.append(
+            Visualizer(dataset_kwargs, text_processor=text_processor))
     train_data_iter = map(shard_fn, map(process_text, train_data.iterator()))
     val_data_iters = [
         map(shard_fn, map(process_text, val_data.iterator())) for val_data in val_datas]
-    visualizers = [
-        Visualizer(dataset_kwargs.update(**FLAGS.config.dataset_kwargs['common_kwargs']),
-                                         text_processor=text_processor)
-        for dataset_kwargs in FLAGS.config.dataset_kwargs['data_kwargs_list']]
 
     example_batch = next(train_data_iter)
     logging.info(f"Batch size: {example_batch['action'].shape[0]}")
