@@ -3,7 +3,7 @@ import json
 import logging
 from collections import defaultdict
 from functools import partial
-from typing import Dict, List, Optional, Sequence, Union
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 import dlimp as dl
 import numpy as np
@@ -41,7 +41,7 @@ def resize_depth_images(
     if isinstance(match, str):
         match = [match]
 
-    return dl.common.selective_tree_map(
+    return dl.transforms.selective_tree_map(
         x,
         lambda keypath, value: any([s in keypath for s in match])
         and value.dtype == tf.float32,
@@ -337,17 +337,18 @@ def make_dataset(
                 )
         if state_obs_keys and target_n_state_dims:
             n_proprio_dim = traj["observation"]["proprio"].shape[-1]
-            if n_proprio_dim < target_n_state_dims:
+            if n_proprio_dim > target_n_state_dims:
                 raise ValueError(
                     f"Target state dim too small for {state_obs_keys} in {name}."
                 )
-            traj["observation"]["proprio"] = tf.concat(
-                (
-                    traj["observation"]["proprio"],
-                    tf.zeros(target_n_state_dims - n_proprio_dim, dtype=tf.float32),
-                ),
-                axis=-1,
-            )
+            elif n_proprio_dim < target_n_state_dims:
+                traj["observation"]["proprio"] = tf.concat(
+                    (
+                        traj["observation"]["proprio"],
+                        tf.zeros(target_n_state_dims - n_proprio_dim, dtype=tf.float32),
+                    ),
+                    axis=-1,
+                )
 
         traj["action"] = tf.cast(traj["action"], tf.float32)
 
@@ -391,14 +392,14 @@ def make_interleaved_dataset(
     """
     # update dataset kwargs & create datasets
     if not sample_weights:
-        sample_weights = [1] * len(dataset_kwargs_list)
+        sample_weights = [1.] * len(dataset_kwargs_list)
     assert len(sample_weights) == len(dataset_kwargs_list)
 
     datasets = []
     for i, data_kwargs in enumerate(dataset_kwargs_list):
-        kwargs = data_kwargs.update(**common_dataset_args)
+        data_kwargs.update(**common_dataset_args)
         datasets.append(
-            make_dataset(**kwargs, train=train)
+            make_dataset(**data_kwargs, train=train)
             .unbatch()
             .shuffle(int(shuffle_buffer_size * sample_weights[i]))
             .repeat()
