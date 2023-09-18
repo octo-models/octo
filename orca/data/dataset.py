@@ -3,7 +3,7 @@ import json
 import logging
 from collections import defaultdict
 from functools import partial
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Dict, List, Optional, Sequence, Tuple, Union
 
 import dlimp as dl
 import numpy as np
@@ -14,39 +14,6 @@ from tensorflow_datasets.core.dataset_builder import DatasetBuilder
 
 from orca.data.dataset_transforms import RLDS_TRAJECTORY_MAP_TRANSFORMS
 from orca.data.utils import bc_goal_relabeling
-
-
-def resize_depth_image(depth_image: tf.Tensor, size: Tuple[int, int]) -> tf.Tensor:
-    """Resizes a depth image using bilinear interpolation. Expects & returns float32 in arbitrary range."""
-    assert depth_image.dtype == tf.float32
-    if len(depth_image.shape) < 3:
-        depth_image = tf.image.resize(
-            depth_image[..., None], size, method="bilinear", antialias=True
-        )[..., 0]
-    else:
-        depth_image = tf.image.resize(
-            depth_image, size, method="bilinear", antialias=True
-        )
-    return depth_image
-
-
-def resize_depth_images(
-    x: Dict[str, Any],
-    match: Union[str, Sequence[str]] = "depth",
-    size: Tuple[int, int] = (128, 128),
-) -> Dict[str, Any]:
-    """Can operate on nested dicts. Resizes any leaves that have `match` anywhere in their path. Takes float32 images
-    as input and returns float images (in arbitrary range).
-    """
-    if isinstance(match, str):
-        match = [match]
-
-    return dl.transforms.selective_tree_map(
-        x,
-        lambda keypath, value: any([s in keypath for s in match])
-        and value.dtype == tf.float32,
-        partial(resize_depth_image, size=size),
-    )
 
 
 def get_action_proprio_stats(
@@ -208,7 +175,9 @@ def apply_common_transforms(
         dataset = dataset.frame_map(
             partial(dl.transforms.resize_images, size=resize_size)
         )
-        dataset = dataset.frame_map(partial(resize_depth_images, size=resize_size))
+        dataset = dataset.frame_map(
+            partial(dl.transforms.resize_depth_images, size=resize_size)
+        )
 
     if train:
         # augments the entire trajectory with the same seed
@@ -261,9 +230,9 @@ def make_dataset(
         image_obs_keys (str, List[str], optional): List of image observation keys to be decoded. Mapped to "image_XXX".
         depth_obs_keys (str, List[str], optional): List of depth observation keys to be decoded. Mapped to "depth_XXX".
         state_obs_keys (str, List[str], optional): List of low-dim observation keys to be decoded.
-        target_n_image_keys (int, optional): Num. of RGB images to pad to.
-        target_n_depth_keys (int, optional): Num. of depth images to pad to.
-        target_n_state_dims (int, optional): Num. of state dimensions to pad to.
+        target_n_image_keys (int, optional): Num. of RGB images to pad to, for multi-dataset mixing.
+        target_n_depth_keys (int, optional): Num. of depth images to pad to, for multi-dataset mixing.
+        target_n_state_dims (int, optional): Num. of state dimensions to pad to, for multi-dataset mixing.
         resize_size (tuple, optional): target (height, width) for all RGB and depth images, default to no resize.
           Get concatenated and mapped to "proprio".
         **kwargs: Additional keyword arguments to pass to `apply_common_transforms`.
@@ -348,7 +317,10 @@ def make_dataset(
                 traj["observation"]["proprio"] = tf.concat(
                     (
                         traj["observation"]["proprio"],
-                        tf.zeros((traj_len, target_n_state_dims - n_proprio_dim), dtype=tf.float32),
+                        tf.zeros(
+                            (traj_len, target_n_state_dims - n_proprio_dim),
+                            dtype=tf.float32,
+                        ),
                     ),
                     axis=-1,
                 )
@@ -395,7 +367,7 @@ def make_interleaved_dataset(
     """
     # update dataset kwargs & create datasets
     if not sample_weights:
-        sample_weights = [1.] * len(dataset_kwargs_list)
+        sample_weights = [1.0] * len(dataset_kwargs_list)
     assert len(sample_weights) == len(dataset_kwargs_list)
 
     datasets = []
