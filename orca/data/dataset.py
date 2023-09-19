@@ -214,9 +214,6 @@ def make_dataset(
     image_obs_keys: Union[str, List[str]] = [],
     depth_obs_keys: Union[str, List[str]] = [],
     state_obs_keys: Union[str, List[str]] = [],
-    target_n_image_keys: Optional[int] = None,
-    target_n_depth_keys: Optional[int] = None,
-    target_n_state_dims: Optional[int] = None,
     resize_size: Optional[Tuple[int, int]] = None,
     **kwargs,
 ) -> tf.data.Dataset:
@@ -228,13 +225,12 @@ def make_dataset(
         train (bool): Whether to use the training or validation set.
         shuffle (bool, optional): Whether to shuffle the order of tfrecords.
         image_obs_keys (str, List[str], optional): List of image observation keys to be decoded. Mapped to "image_XXX".
+            Inserts padding image for each None key.
         depth_obs_keys (str, List[str], optional): List of depth observation keys to be decoded. Mapped to "depth_XXX".
+            Inserts padding image for each None key.
         state_obs_keys (str, List[str], optional): List of low-dim observation keys to be decoded.
-        target_n_image_keys (int, optional): Num. of RGB images to pad to, for multi-dataset mixing.
-        target_n_depth_keys (int, optional): Num. of depth images to pad to, for multi-dataset mixing.
-        target_n_state_dims (int, optional): Num. of state dimensions to pad to, for multi-dataset mixing.
+            Get concatenated and mapped to "proprio". Inserts 1d padding for each None key.
         resize_size (tuple, optional): target (height, width) for all RGB and depth images, default to no resize.
-          Get concatenated and mapped to "proprio".
         **kwargs: Additional keyword arguments to pass to `apply_common_transforms`.
     Returns:
         Dataset of trajectories where each step has the following fields:
@@ -270,60 +266,39 @@ def make_dataset(
         if name in RLDS_TRAJECTORY_MAP_TRANSFORMS:
             traj = RLDS_TRAJECTORY_MAP_TRANSFORMS[name](traj)
 
-        # extracts RGB images, depth images and proprio based on provided keys
+        # extracts RGB images, depth images and proprio based on provided keys, pad for all None keys
         orig_obs = traj.pop("observation")
         traj["observation"] = {}
         for i, key in enumerate(image_obs_keys):
-            traj["observation"][f"image_{i}"] = orig_obs[key]
-        for i, key in enumerate(depth_obs_keys):
-            traj["observation"][f"depth_{i}"] = orig_obs[key]
-        if state_obs_keys:
-            traj["observation"]["proprio"] = tf.concat(
-                [tf.cast(orig_obs[key], tf.float32) for key in state_obs_keys],
-                axis=-1,
-            )
-
-        # pad missing keys
-        traj_len = tf.shape(traj["action"])[0]
-        if target_n_image_keys:
-            assert resize_size or image_obs_keys  # need to provide size for padding
-            pad_shape = (
-                (traj_len, resize_size[0], resize_size[1], 3)
-                if resize_size
-                else traj["observation"][f"image_0"].shape
-            )
-            for j in range(target_n_image_keys - len(image_obs_keys)):
-                traj["observation"][f"image_{len(image_obs_keys) + j}"] = tf.zeros(
-                    pad_shape, dtype=tf.uint8
+            if key is None:
+                pad_shape = (
+                    (traj_len, resize_size[0], resize_size[1], 3)
+                    if resize_size
+                    else traj["observation"]["image_0"].shape
                 )
-        if target_n_depth_keys:
-            assert resize_size or depth_obs_keys  # need to provide size for padding
-            pad_shape = (
-                (traj_len, resize_size[0], resize_size[1])
-                if resize_size
-                else traj["observation"][f"depth_0"].shape
-            )
-            for j in range(target_n_depth_keys - len(depth_obs_keys)):
-                traj["observation"][f"depth_{len(depth_obs_keys) + j}"] = tf.zeros(
+                traj["observation"][f"image_{i}"] = tf.zeros(pad_shape, dtype=tf.uint8)
+            else:
+                traj["observation"][f"image_{i}"] = orig_obs[key]
+        for i, key in enumerate(depth_obs_keys):
+            if key is None:
+                pad_shape = (
+                    (traj_len, resize_size[0], resize_size[1])
+                    if resize_size
+                    else traj["observation"]["depth_0"].shape
+                )
+                traj["observation"][f"depth_{i}"] = tf.zeros(
                     pad_shape, dtype=tf.float32
                 )
-        if state_obs_keys and target_n_state_dims:
-            n_proprio_dim = traj["observation"]["proprio"].shape[-1]
-            if n_proprio_dim > target_n_state_dims:
-                raise ValueError(
-                    f"Target state dim too small for {state_obs_keys} in {name}."
-                )
-            elif n_proprio_dim < target_n_state_dims:
-                traj["observation"]["proprio"] = tf.concat(
-                    (
-                        traj["observation"]["proprio"],
-                        tf.zeros(
-                            (traj_len, target_n_state_dims - n_proprio_dim),
-                            dtype=tf.float32,
-                        ),
-                    ),
-                    axis=-1,
-                )
+            else:
+                traj["observation"][f"depth_{i}"] = orig_obs[key]
+        if state_obs_keys:
+            proprio = []
+            for key in state_obs_keys:
+                if key is None:
+                    proprio.append(tf.zeros((traj_len, 1), dtype=tf.float32))
+                else:
+                    proprio.append(tf.cast(orig_obs[key], tf.float32))
+            traj["observation"]["proprio"] = tf.concat(proprio, axis=-1)
 
         traj["action"] = tf.cast(traj["action"], tf.float32)
 
@@ -362,13 +337,16 @@ def make_interleaved_dataset(
         common_dataset_args: shared arguments that get copied into every dataset (image size, shuffling etc)
         dataset_kwargs_list: list of kwargs, each element is passed to 'make_dataset' for individual datasets.
         train: whether this is a training or validation dataset.
-        sample_weights: sampling weights for each dataset in list.
+        sample_weights: sampling weights for each dataset in list, values need to be >= 1.
         shuffle_buffer_size: size of the dataset shuffle buffer for each dataset.
     """
     # update dataset kwargs & create datasets
     if not sample_weights:
         sample_weights = [1.0] * len(dataset_kwargs_list)
     assert len(sample_weights) == len(dataset_kwargs_list)
+    assert (
+        min(sample_weights) >= 1.0
+    )  # convention to ensure sufficient shuffle buffer size
 
     datasets = []
     for i, data_kwargs in enumerate(dataset_kwargs_list):
@@ -381,7 +359,5 @@ def make_interleaved_dataset(
         )
 
     # interleave datasets with sampling weights
-    dataset = tf.data.Dataset.sample_from_datasets(
-        datasets, sample_weights, stop_on_empty_dataset=train
-    )
+    dataset = tf.data.Dataset.sample_from_datasets(datasets, sample_weights)
     return dataset
