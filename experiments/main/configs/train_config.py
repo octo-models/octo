@@ -175,8 +175,6 @@ def get_config(config_string):
                 dataset_kwargs={
                     'common_kwargs': update_config(
                         base_data_config,
-                        target_n_image_keys=3,
-                        target_n_state_dims=7,
                         resize_size=(180, 320),
                     ),
                     'data_kwargs_list': [
@@ -189,7 +187,7 @@ def get_config(config_string):
                         {
                             'name': "bridge_dataset",
                             'data_dir': "/nfs/kun2/datasets/tfds",
-                            'image_obs_keys': ["image_0"],
+                            'image_obs_keys': ["image_0", None, None],
                             'state_obs_keys': ["state"],
                         },
                     ],
