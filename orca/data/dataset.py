@@ -268,6 +268,7 @@ def make_dataset(
 
         # extracts RGB images, depth images and proprio based on provided keys, pad for all None keys
         orig_obs = traj.pop("observation")
+        traj_len = tf.shape(traj["action"])[0]
         traj["observation"] = {}
         for i, key in enumerate(image_obs_keys):
             if key is None:
