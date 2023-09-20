@@ -141,7 +141,7 @@ class OrcaPolicy:
 
         rng = jax.random.PRNGKey(0)
         self.rng, self.key = jax.random.split(rng)
-    
+
     def forward(self, observation):
         image = resize_img(observation['image']['16291792_left'][:,:,:3])[None].copy()
         obs  = dict(image=image)
@@ -162,7 +162,7 @@ train_state, action_mean, action_std = load_checkpoint(CHECKPOINT_PATH)
 policy = OrcaPolicy(train_state, action_mean, action_std, goal_image)
 
 
-env = RobotEnv(action_space='cartesian_position')
+env = RobotEnv()
 controller = VRPolicy()
 
 data_col = DataCollecter(env = env, controller=controller, policy=policy, save_data=False)
