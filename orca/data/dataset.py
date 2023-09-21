@@ -339,7 +339,8 @@ def make_interleaved_dataset(
         dataset_kwargs_list: list of kwargs, each element is passed to 'make_dataset' for individual datasets.
         train: whether this is a training or validation dataset.
         sample_weights: sampling weights for each dataset in list, values need to be >= 1.
-        shuffle_buffer_size: size of the dataset shuffle buffer for each dataset.
+        shuffle_buffer_size: base size of the dataset shuffle buffer for each dataset,
+            gets multiplied by sampling weight.
     """
     # update dataset kwargs & create datasets
     if not sample_weights:
