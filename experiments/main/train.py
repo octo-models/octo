@@ -1,3 +1,4 @@
+import copy
 import datetime
 import json
 import os
@@ -129,15 +130,16 @@ def main(_):
     val_datas = []
     visualizers = []
     for dataset_kwargs in FLAGS.config.dataset_kwargs['data_kwargs_list']:
-        dataset_kwargs.update(**FLAGS.config.dataset_kwargs['common_kwargs'])
+        val_data_kwargs = copy.deepcopy(dataset_kwargs)
+        val_data_kwargs.update(**FLAGS.config.dataset_kwargs['common_kwargs'])
         val_datas.append(
-                make_dataset(**dataset_kwargs, train=False)
+                make_dataset(**val_data_kwargs, train=False)
                 .unbatch()
                 .shuffle(FLAGS.config.shuffle_buffer_size)
                 .repeat()
                 .batch(FLAGS.config.batch_size))
         visualizers.append(
-            Visualizer(dataset_kwargs, text_processor=text_processor))
+            Visualizer(val_data_kwargs, text_processor=text_processor))
     train_data_iter = map(shard_fn, map(process_text, train_data.as_numpy_iterator()))
     val_data_iters = [
         map(shard_fn, map(process_text, val_data.iterator())) for val_data in val_datas]
@@ -256,12 +258,21 @@ def main(_):
         if (i + 1) % FLAGS.config.eval_interval == 0:
             logging.info("Evaluating...")
             timer.tick("val")
+            per_dataset_metrics = []
             for data_kwargs, val_data_iter in zip(FLAGS.config.dataset_kwargs['data_kwargs_list'], val_data_iters):
                 metrics = []
                 for _, batch in zip(range(FLAGS.config.num_val_batches), val_data_iter):
                     metrics.append(eval_step(train_state, batch))
                 metrics = jax.tree_map(lambda *xs: np.mean(xs), *metrics)
                 wandb_log({f"validation_{data_kwargs['name']}": metrics}, step=i)
+                per_dataset_metrics.append(metrics)
+            # log weighted aggregate metrics
+            sample_weights = sample_weights if sample_weights is not None else [1.] * len(per_dataset_metrics)
+            sample_weights = sample_weights / np.sum(sample_weights)    # normalize to sum to 1
+            agg_metrics = jax.tree_map(
+                lambda *xs: np.sum(xs), *[jax.tree_map(lambda x: x * weight, metric)
+                                          for metric, weight in zip(per_dataset_metrics, sample_weights)])
+            wandb_log({f"validation_aggregate": agg_metrics}, step=i)
             timer.tock("val")
 
             logging.info("Visualizing...")
