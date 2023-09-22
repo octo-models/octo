@@ -2,8 +2,9 @@ import hashlib
 import inspect
 import json
 import logging
+from collections import defaultdict
 from functools import partial
-from typing import Any, Dict, List, Optional, Sequence, Union
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 import dlimp as dl
 import numpy as np
@@ -135,6 +136,7 @@ def apply_common_transforms(
     goal_relabeling_strategy: Optional[str] = None,
     goal_relabeling_kwargs: dict = {},
     augment_kwargs: dict = {},
+    resize_size: Optional[Tuple[int, int]] = None,
     horizon: int = 2,
     skip_unlabeled: bool = False,
     action_proprio_metadata: Optional[dict] = None,
@@ -150,6 +152,7 @@ def apply_common_transforms(
         goal_relabeling_kwargs (dict, optional): Additional keyword arguments to pass to the goal relabeling function.
         augment_kwargs (dict, optional): Keyword arguments to pass to the augmentation function. See
             `dlimp.augmentations.augment_image` for documentation.
+        resize_size (tuple, optional): target (height, width) for all RGB and depth images, default to no resize.
         horizon (int, optional): The length of the snippets that trajectories are chunked into.
         skip_unlabeled (bool, optional): Whether to skip trajectories with no language labels.
         action_proprio_metadata (Optional[dict], optional): A dictionary containing metadata about the action and
@@ -171,8 +174,15 @@ def apply_common_transforms(
             )
         )
 
-    # decodes string keys with name "image"
+    # decodes string keys with name "image", resizes "image" and "depth"
     dataset = dataset.frame_map(dl.transforms.decode_images)
+    if resize_size:
+        dataset = dataset.frame_map(
+            partial(dl.transforms.resize_images, size=resize_size)
+        )
+        dataset = dataset.frame_map(
+            partial(dl.transforms.resize_depth_images, size=resize_size)
+        )
 
     if train:
         # augments the entire trajectory with the same seed
@@ -210,6 +220,7 @@ def make_dataset(
     depth_obs_keys: Union[str, List[str]] = [],
     state_obs_keys: Union[str, List[str]] = [],
     action_proprio_metadata: Optional[dict] = None,
+    resize_size: Optional[Tuple[int, int]] = None,
     **kwargs,
 ) -> tf.data.Dataset:
     """Creates a dataset from the RLDS format.
@@ -220,9 +231,14 @@ def make_dataset(
         train (bool): Whether to use the training or validation set.
         shuffle (bool, optional): Whether to shuffle the order of tfrecords.
         image_obs_keys (str, List[str], optional): List of image observation keys to be decoded. Mapped to "image_XXX".
+            Inserts padding image for each None key.
         depth_obs_keys (str, List[str], optional): List of depth observation keys to be decoded. Mapped to "depth_XXX".
+            Inserts padding image for each None key.
         state_obs_keys (str, List[str], optional): List of low-dim observation keys to be decoded.
-          Get concatenated and mapped to "proprio".
+            Get concatenated and mapped to "proprio". Inserts 1d padding for each None key.
+        action_proprio_metadata (dict, optional): dict with min/max/mean/std for action and proprio normalization.
+            If not provided, will get computed on the fly.
+        resize_size (tuple, optional): target (height, width) for all RGB and depth images, default to no resize.
         **kwargs: Additional keyword arguments to pass to `apply_common_transforms`.
     Returns:
         Dataset of trajectories where each step has the following fields:
@@ -258,18 +274,41 @@ def make_dataset(
         if name in RLDS_TRAJECTORY_MAP_TRANSFORMS:
             traj = RLDS_TRAJECTORY_MAP_TRANSFORMS[name](traj)
 
-        # extracts RGB images, depth images and proprio based on provided keys
+        # extracts RGB images, depth images and proprio based on provided keys, pad for all None keys
         orig_obs = traj.pop("observation")
+        traj_len = tf.shape(traj["action"])[0]
         traj["observation"] = {}
         for i, key in enumerate(image_obs_keys):
-            traj["observation"][f"image_{i}"] = orig_obs[key]
+            if key is None:
+                pad_shape = (
+                    (traj_len, resize_size[0], resize_size[1], 3)
+                    if resize_size
+                    else traj["observation"]["image_0"].shape
+                )
+                traj["observation"][f"image_{i}"] = tf.zeros(pad_shape, dtype=tf.uint8)
+            else:
+                traj["observation"][f"image_{i}"] = orig_obs[key]
         for i, key in enumerate(depth_obs_keys):
-            traj["observation"][f"depth_{i}"] = orig_obs[key]
+            if key is None:
+                pad_shape = (
+                    (traj_len, resize_size[0], resize_size[1])
+                    if resize_size
+                    else traj["observation"]["depth_0"].shape
+                )
+                traj["observation"][f"depth_{i}"] = tf.zeros(
+                    pad_shape, dtype=tf.float32
+                )
+            else:
+                traj["observation"][f"depth_{i}"] = orig_obs[key]
         if state_obs_keys:
-            traj["observation"]["proprio"] = tf.concat(
-                [tf.cast(orig_obs[key], tf.float32) for key in state_obs_keys],
-                axis=-1,
-            )
+            proprio = []
+            for key in state_obs_keys:
+                if key is None:
+                    proprio.append(tf.zeros((traj_len, 1), dtype=tf.float32))
+                else:
+                    proprio.append(tf.cast(orig_obs[key], tf.float32))
+            traj["observation"]["proprio"] = tf.concat(proprio, axis=-1)
+
         traj["action"] = tf.cast(traj["action"], tf.float32)
 
         # check that all other keys are present
@@ -289,8 +328,52 @@ def make_dataset(
         )
 
     dataset = apply_common_transforms(
-        dataset, train=train, action_proprio_metadata=action_proprio_metadata, **kwargs
+        dataset,
+        train=train,
+        action_proprio_metadata=action_proprio_metadata,
+        resize_size=resize_size,
+        **kwargs,
     )
     dataset.action_proprio_metadata = action_proprio_metadata
 
+    return dataset
+
+
+def make_interleaved_dataset(
+    common_dataset_args: dict,
+    dataset_kwargs_list: List[dict],
+    train: bool,
+    sample_weights: Optional[List[float]] = None,
+    shuffle_buffer_size: int = 100,
+):
+    """Creates an interleaved dataset from list of dataset kwargs.
+
+    Args:
+        common_dataset_args: shared arguments that get copied into every dataset (image size, shuffling etc)
+        dataset_kwargs_list: list of kwargs, each element is passed to 'make_dataset' for individual datasets.
+        train: whether this is a training or validation dataset.
+        sample_weights: sampling weights for each dataset in list, values need to be >= 1.
+        shuffle_buffer_size: base size of the dataset shuffle buffer for each dataset,
+            gets multiplied by sampling weight.
+    """
+    # update dataset kwargs & create datasets
+    if not sample_weights:
+        sample_weights = [1.0] * len(dataset_kwargs_list)
+    assert len(sample_weights) == len(dataset_kwargs_list)
+    assert (
+        min(sample_weights) >= 1.0
+    )  # convention to ensure sufficient shuffle buffer size
+
+    datasets = []
+    for i, data_kwargs in enumerate(dataset_kwargs_list):
+        data_kwargs.update(**common_dataset_args)
+        datasets.append(
+            make_dataset(**data_kwargs, train=train)
+            .unbatch()
+            .shuffle(int(shuffle_buffer_size * sample_weights[i]))
+            .repeat()
+        )
+
+    # interleave datasets with sampling weights
+    dataset = tf.data.Dataset.sample_from_datasets(datasets, sample_weights)
     return dataset
