@@ -139,7 +139,7 @@ def main(_):
                 .repeat()
                 .batch(FLAGS.config.batch_size))
         visualizers.append(
-            Visualizer(val_data_kwargs, text_processor=text_processor))
+            Visualizer(val_data_kwargs, text_processor=text_processor, cache_trajs=False))
 
         # save normalization constants for evaluation
         if save_dir is not None:
