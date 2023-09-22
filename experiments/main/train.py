@@ -135,7 +135,7 @@ def main(_):
         val_data_kwargs = copy.deepcopy(dataset_kwargs)
         val_data_kwargs.update(**FLAGS.config.dataset_kwargs['common_kwargs'])
         val_dataset = make_dataset(**val_data_kwargs, train=False)
-        action_proprio_metadata = train_data.action_proprio_metadata
+        action_proprio_metadata = val_dataset.action_proprio_metadata
         val_datas.append(
                 val_dataset
                 .unbatch()
@@ -150,7 +150,7 @@ def main(_):
             with tf.io.gfile.GFile(
                     os.path.join(save_dir, f"action_proprio_metadata_{val_data_kwargs['name']}.json"), "w"
             ) as f:
-                json.dump(action_proprio_metadata, f)
+                json.dump(jax.tree_map(lambda x: [float(e) for e in x.numpy()], action_proprio_metadata), f)
 
     train_data_iter = map(shard_fn, map(process_text, train_data.as_numpy_iterator()))
     val_data_iters = [
