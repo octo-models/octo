@@ -209,9 +209,8 @@ class TransformerPolicy(nn.Module):
         Predicts actions at test time.
 
         Args:
-            observations: A dictionary containing observation data for the conditioning window
-                of the chunk. Each entry has shape (batch, horizon-pred_horizon, *).
-            tasks: A dictionary containing task data for this chunk.
+            observations: A dictionary containing observation data for a horizon-length trajectory.
+            tasks: A dictionary containing task data for this trajectory.
                 Each entry has shape (batch, *).
             train: Whether this is a training call.
             argmax: Whether to randomly sample action distribution or take the mode.

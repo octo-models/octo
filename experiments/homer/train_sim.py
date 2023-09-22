@@ -24,7 +24,7 @@ from orca.train_utils import (
     shard_batch,
 )
 
-from sim.evaluation import evaluate_gc, supply_rng
+from sim.evaluation import evaluate_gc, supply_rng, stack_and_pad_obs
 from sim.utils import make_mujoco_gc_env, load_recorded_video
 from sim.dataset import make_sim_dataset
 
@@ -270,13 +270,16 @@ def main(_):
             timer.tock("val")
 
             rng, policy_key = jax.random.split(rng)
-            policy_fn = supply_rng(
-                partial(
-                    sample_actions,
-                    state=train_state,
-                    argmax=FLAGS.config.deterministic_eval,
+            policy_fn = stack_and_pad_obs(
+                supply_rng(
+                    partial(
+                        sample_actions,
+                        state=train_state,
+                        argmax=FLAGS.config.deterministic_eval,
+                    ),
+                    rng=policy_key,
                 ),
-                rng=policy_key,
+                horizon=FLAGS.config.dataset_kwargs.horizon,
             )
 
             logging.info("Evaluating...")
@@ -288,7 +291,6 @@ def main(_):
             eval_info = evaluate_gc(
                 policy_fn,
                 eval_env,
-                horizon=FLAGS.config.dataset_kwargs.horizon,
                 action_exec_horizon=FLAGS.config.action_exec_horizon,
                 num_episodes=FLAGS.config.eval_episodes,
             )
