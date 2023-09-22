@@ -57,7 +57,7 @@ def main(_):
     num_devices = len(devices)
     assert FLAGS.config.batch_size % num_devices == 0
 
-    # we shard the leading dimension (batch dimension) accross all devices evenly
+    # we shard the leading dimension (batch dimension) across all devices evenly
     sharding = jax.sharding.PositionalSharding(devices)
     shard_fn = partial(shard_batch, sharding=sharding)
 
@@ -98,7 +98,7 @@ def main(_):
         save_dir = None
         logging.info("save_dir not passed in, not saving checkpoints")
 
-    # load datasets
+    # set up text tokenization (this needs to happen after batching but before sharding)
     if FLAGS.config.text_processor is None:
         text_processor = None
     else:
@@ -116,7 +116,9 @@ def main(_):
             batch.pop("language_instruction")
         return batch
 
-    sample_weights = FLAGS.config.dataset_kwargs['sample_weights'] if 'sample_weights' in FLAGS.config.dataset_kwargs else None
+    # load datasets
+    sample_weights = (FLAGS.config.dataset_kwargs['sample_weights']
+                      if 'sample_weights' in FLAGS.config.dataset_kwargs else None)
     train_data = (
         make_interleaved_dataset(
             FLAGS.config.dataset_kwargs['common_kwargs'],
@@ -132,8 +134,10 @@ def main(_):
     for dataset_kwargs in FLAGS.config.dataset_kwargs['data_kwargs_list']:
         val_data_kwargs = copy.deepcopy(dataset_kwargs)
         val_data_kwargs.update(**FLAGS.config.dataset_kwargs['common_kwargs'])
+        val_dataset = make_dataset(**val_data_kwargs, train=False)
+        action_proprio_metadata = train_data.action_proprio_metadata
         val_datas.append(
-                make_dataset(**val_data_kwargs, train=False)
+                val_dataset
                 .unbatch()
                 .shuffle(FLAGS.config.shuffle_buffer_size)
                 .repeat()
@@ -146,7 +150,7 @@ def main(_):
             with tf.io.gfile.GFile(
                     os.path.join(save_dir, f"action_proprio_metadata_{val_data_kwargs['name']}.json"), "w"
             ) as f:
-                json.dump(val_datas[-1].action_proprio_metadata, f)
+                json.dump(action_proprio_metadata, f)
 
     train_data_iter = map(shard_fn, map(process_text, train_data.as_numpy_iterator()))
     val_data_iters = [
@@ -159,6 +163,7 @@ def main(_):
         f"Batch size per device: {example_batch['action'].shape[0] // num_devices}"
     )
 
+    # set up model, optimizer, loss
     model_def = create_model_def(
         action_dim=example_batch["action"].shape[-1],
         horizon=example_batch["observation"]["image_0"].shape[1],
@@ -274,6 +279,7 @@ def main(_):
                 metrics = jax.tree_map(lambda *xs: np.mean(xs), *metrics)
                 wandb_log({f"validation_{data_kwargs['name']}": metrics}, step=i)
                 per_dataset_metrics.append(metrics)
+
             # log weighted aggregate metrics
             sample_weights = sample_weights if sample_weights is not None else [1.] * len(per_dataset_metrics)
             sample_weights = sample_weights / np.sum(sample_weights)    # normalize to sum to 1
