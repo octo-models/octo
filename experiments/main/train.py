@@ -140,6 +140,14 @@ def main(_):
                 .batch(FLAGS.config.batch_size))
         visualizers.append(
             Visualizer(val_data_kwargs, text_processor=text_processor))
+
+        # save normalization constants for evaluation
+        if save_dir is not None:
+            with tf.io.gfile.GFile(
+                    os.path.join(save_dir, f"action_proprio_metadata_{val_data_kwargs['name']}.json"), "w"
+            ) as f:
+                json.dump(val_datas[-1].action_proprio_metadata, f)
+
     train_data_iter = map(shard_fn, map(process_text, train_data.as_numpy_iterator()))
     val_data_iters = [
         map(shard_fn, map(process_text, val_data.iterator())) for val_data in val_datas]

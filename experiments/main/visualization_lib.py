@@ -82,11 +82,7 @@ class Visualizer:
 
     def __post_init__(self):
         self.dataset = make_dataset(**self.dataset_kwargs, train=False, shuffle=False)
-        builder = tfds.builder(
-            self.dataset_kwargs["name"], data_dir=self.dataset_kwargs["data_dir"]
-        )
-        proprio_keys = self.dataset_kwargs['state_obs_keys'] if 'state_obs_keys' in self.dataset_kwargs else []
-        self.action_proprio_stats = get_action_proprio_stats(builder, None, proprio_keys)
+        self.action_proprio_stats = self.dataset.action_proprio_metadata
         self.trajs, self.viz_trajs = [], []
         self.visualized_trajs = False
 
