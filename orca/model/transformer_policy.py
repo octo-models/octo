@@ -23,7 +23,7 @@ class TransformerPolicy(nn.Module):
     With action chunking (`pred_horizon>1`), the actions in the chunk are packed between
     the observations. For example, if `pred_horizon=3`, the sequence looks like:
 
-    [task, o_0, a_0, a_1, a_2, o_1, a_1, a_2, a_3, o_2, ..., o_n, a_n]
+    [task, o_0, a_0, a_1, a_2, o_1, a_1, a_2, a_3, o_2, ..., o_n, a_n, a_n+1, a_n+2]
 
     In both cases, a causal mask ensures that each token can only attend to past tokens.
 
@@ -55,7 +55,7 @@ class TransformerPolicy(nn.Module):
     task_tokenizers: Sequence[nn.Module]
     vocab_size: int = 256
     token_embedding_size: int = 512
-    horizon: int = 1
+    window_size: int = 1
     pred_horizon: int = 1
     action_dim: int = 7
     normalization_type: str = "bounds"
@@ -80,6 +80,10 @@ class TransformerPolicy(nn.Module):
             normalization_type=self.normalization_type,
         )
 
+        assert (
+            self.window_size >= self.pred_horizon
+        ), "Trajectory must contain enough actions to predict a full chunk."
+        self.horizon = self.window_size - self.pred_horizon + 1
         self.tokens_per_action = self.action_dim * self.pred_horizon
         self.tokens_per_obs = sum(tok.num_tokens for tok in self.observation_tokenizers)
         self.tokens_per_task = sum(tok.num_tokens for tok in self.task_tokenizers)
@@ -114,11 +118,14 @@ class TransformerPolicy(nn.Module):
                 Each entry has shape (batch, horizon, *).
             tasks: A dictionary containing task data for this trajectory.
                 Each entry has shape (batch, *).
-            actions: The actions in this trajectory with shape (batch, horizon, pred_horizon, action_dim).
+            actions: The actions in this trajectory with shape (batch, horizon, action_dim).
             train: Whether this is a training call.
         Returns:
             The loss, mean squared error, and accuracy for the forward pass.
         """
+
+        # only use first horizon timesteps from the window
+        observations = jax.tree_map(lambda x: x[:, : self.horizon], observations)
 
         # output is (batch, horizon, tokens_per_time_step, token_embedding_size)
         output = self.transformer_call(
@@ -146,7 +153,12 @@ class TransformerPolicy(nn.Module):
 
         action_logprob = jax.nn.log_softmax(action_logits, axis=-1)
 
-        action_labels = self.action_tokenizer(actions, mode="tokenize")
+        actions_chunked = self.chunk_actions(actions)
+
+        # only use first horizon timesteps from the window
+        actions_chunked = actions_chunked[:, : self.horizon]
+
+        action_labels = self.action_tokenizer(actions_chunked, mode="tokenize")
         action_labels_one_hot = jax.nn.one_hot(action_labels, self.vocab_size)
 
         action_loss = -jnp.sum(action_logprob * action_labels_one_hot, axis=-1)
@@ -157,7 +169,7 @@ class TransformerPolicy(nn.Module):
         accuracy = (accuracy * observations["pad_mask"][:, :, None, None]).mean()
 
         action_values = self.action_tokenizer(action_pred, mode="detokenize")
-        action_mse = jnp.square(actions - action_values).sum(axis=-1)
+        action_mse = jnp.square(actions_chunked - action_values).sum(axis=-1)
         action_mse = (action_mse * observations["pad_mask"][:, :, None]).mean()
 
         return {"loss": action_loss, "mse": action_mse, "accuracy": accuracy}
@@ -368,3 +380,13 @@ class TransformerPolicy(nn.Module):
         # (batch, tokens_per_task + horizon * tokens_per_time_step, token_embedding_size)
         tokens = jnp.concatenate([task_tokens, tokens], axis=1)
         return tokens
+
+    def chunk_actions(self, actions):
+        chunk_indices = jnp.broadcast_to(
+            jnp.arange(self.pred_horizon), [self.window_size, self.pred_horizon]
+        ) + jnp.broadcast_to(
+            jnp.arange(self.window_size)[:, None],
+            [self.window_size, self.pred_horizon],
+        )
+        chunk_indices = jnp.minimum(chunk_indices, self.window_size - 1)
+        return actions[:, chunk_indices]

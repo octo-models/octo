@@ -107,31 +107,16 @@ def _normalize_action_and_proprio(traj, metadata, normalization_type):
     raise ValueError(f"Unknown normalization type {normalization_type}")
 
 
-def _chunk_act_obs(traj, horizon, pred_horizon):
+def _chunk_act_obs(traj, window_size):
     """
-    Chunks actions and observations into the given horizons.
+    Chunks actions and observations into the given window_size.
 
-    We first gather the actions into `pred_horizon` chunks (indexing into the future).
-    We then gather the observations and chunked actions into `horizon` size chunks (indexing into the past).
-
-    The observations end up with shape [traj_len, horizon, *].
-    The actions end up with shape [traj_len, horizon, pred_horizon, *].
+    The "action" and "observation" keys are each given a new axis (at index 1) of size `window_size`.
     """
     traj_len = tf.shape(traj["action"])[0]
-
-    # create action chunks, indexing into the future
     chunk_indices = tf.broadcast_to(
-        tf.range(pred_horizon), [traj_len, pred_horizon]
-    ) + tf.broadcast_to(tf.range(traj_len)[:, None], [traj_len, pred_horizon])
-    # pads by repeating the last action
-    # TODO (homer) add a mask so that these repeated actions can be masked
-    chunk_indices = tf.minimum(chunk_indices, traj_len - 1)
-    traj["action"] = tf.gather(traj["action"], chunk_indices)
-
-    # create observation and action-chunk chunks, indexing into the past
-    chunk_indices = tf.broadcast_to(
-        tf.range(-horizon + 1, 1), [traj_len, horizon]
-    ) + tf.broadcast_to(tf.range(traj_len)[:, None], [traj_len, horizon])
+        tf.range(-window_size + 1, 1), [traj_len, window_size]
+    ) + tf.broadcast_to(tf.range(traj_len)[:, None], [traj_len, window_size])
     floored_chunk_indices = tf.maximum(chunk_indices, 0)
     for key in ["observation", "action"]:
         traj[key] = tf.nest.map_structure(
@@ -150,8 +135,7 @@ def apply_common_transforms(
     goal_relabeling_strategy: Optional[str] = None,
     goal_relabeling_kwargs: dict = {},
     augment_kwargs: dict = {},
-    horizon: int = 1,
-    pred_horizon: int = 1,
+    window_size: int = 1,
     skip_unlabeled: bool = False,
     action_proprio_metadata: Optional[dict] = None,
     action_proprio_normalization_type: Optional[str] = None,
@@ -166,7 +150,7 @@ def apply_common_transforms(
         goal_relabeling_kwargs (dict, optional): Additional keyword arguments to pass to the goal relabeling function.
         augment_kwargs (dict, optional): Keyword arguments to pass to the augmentation function. See
             `dlimp.augmentations.augment_image` for documentation.
-        horizon (int, optional): The length of the snippets that trajectories are chunked into.
+        window_size (int, optional): The length of the snippets that trajectories are chunked into.
         skip_unlabeled (bool, optional): Whether to skip trajectories with no language labels.
         action_proprio_metadata (Optional[dict], optional): A dictionary containing metadata about the action and
             proprio statistics. If None, no normalization is performed.
@@ -209,9 +193,7 @@ def apply_common_transforms(
         )
 
     # chunks actions and observations
-    dataset = dataset.map(
-        partial(_chunk_act_obs, horizon=horizon, pred_horizon=pred_horizon)
-    )
+    dataset = dataset.map(partial(_chunk_act_obs, window_size=window_size))
 
     return dataset
 
