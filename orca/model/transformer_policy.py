@@ -32,6 +32,8 @@ class TransformerPolicy(nn.Module):
     in the input sequence in place of the action tokens. Thus, all the action tokens are masked
     at training time as well. Note: even though the attention mask ensures we don't attend to the
     actions, we still need to mask them because of the residual connection in the attention block.
+    When rolling out the policy, we left pad the observation-action history until we have enough
+    history to fill the entire context window.
 
     Parameters:
         observations_tokenizers: List of flax modules for tokenizing the observations. The output
@@ -83,7 +85,10 @@ class TransformerPolicy(nn.Module):
         assert (
             self.window_size >= self.pred_horizon
         ), "Trajectory must contain enough actions to predict a full chunk."
+        # If pred_horizon>1, we don't use the timesteps in the trajectory window where
+        # we can't predict a full action chunk (i.e the last (pred_horizon-1) timesteps)
         self.horizon = self.window_size - self.pred_horizon + 1
+
         self.tokens_per_action = self.action_dim * self.pred_horizon
         self.tokens_per_obs = sum(tok.num_tokens for tok in self.observation_tokenizers)
         self.tokens_per_task = sum(tok.num_tokens for tok in self.task_tokenizers)
@@ -114,11 +119,11 @@ class TransformerPolicy(nn.Module):
         Performs a forward pass of the network and computes the loss.
 
         Args:
-            observations: A dictionary containing observation data for a horizon-length trajectory.
-                Each entry has shape (batch, horizon, *).
-            tasks: A dictionary containing task data for this trajectory.
+            observations: A dictionary containing observation data for a batch of trajectory windows.
+                Each entry has shape (batch, window_size, *).
+            tasks: A dictionary containing task data for the trajectory windows.
                 Each entry has shape (batch, *).
-            actions: The actions in this trajectory with shape (batch, horizon, action_dim).
+            actions: The actions in the trajectory windows with shape (batch, window_size, action_dim).
             train: Whether this is a training call.
         Returns:
             The loss, mean squared error, and accuracy for the forward pass.
@@ -221,8 +226,9 @@ class TransformerPolicy(nn.Module):
         Predicts actions at test time.
 
         Args:
-            observations: A dictionary containing observation data for a horizon-length trajectory.
-            tasks: A dictionary containing task data for this trajectory.
+            observations: A dictionary containing observation data for a batch of trajectory windows.
+                Each entry has shape (batch, window_size, *).
+            tasks: A dictionary containing task data for the trajectory windows.
                 Each entry has shape (batch, *).
             train: Whether this is a training call.
             argmax: Whether to randomly sample action distribution or take the mode.
@@ -230,8 +236,11 @@ class TransformerPolicy(nn.Module):
             rng: A random key for sampling the action distribution.
             temperature: The temperature to use when sampling the action distribution.
         Returns:
-            The predicted actions given the provided observation/action history and task.
+            The predicted actions given the provided observation history and task.
         """
+
+        # only use first horizon timesteps from the window
+        observations = jax.tree_map(lambda x: x[:, : self.horizon], observations)
 
         output = self.transformer_call(
             observations,
@@ -382,6 +391,11 @@ class TransformerPolicy(nn.Module):
         return tokens
 
     def chunk_actions(self, actions):
+        """
+        Chunk actions into `pred_horizon` size chunks.
+        The resulting actions have shape (batch, window_size, pred_horizon, action_dim)
+        """
+
         chunk_indices = jnp.broadcast_to(
             jnp.arange(self.pred_horizon), [self.window_size, self.pred_horizon]
         ) + jnp.broadcast_to(
