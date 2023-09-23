@@ -154,7 +154,7 @@ def main(_):
 
     model_def = create_model_def(
         action_dim=example_batch["action"].shape[-1],
-        horizon=example_batch["observation"]["image_0"].shape[1],
+        window_size=example_batch["observation"]["image_0"].shape[1],
         **FLAGS.config.model.to_dict(),
     )
 
@@ -247,6 +247,8 @@ def main(_):
     def wandb_log(info, step):
         wandb.log(flatten_dict(info, sep="/"), step=step)
 
+    horizon = FLAGS.config.dataset_kwargs.window_size - FLAGS.config.model.policy_kwargs.pred_horizon + 1
+
     timer = Timer()
     for i in tqdm.tqdm(range(int(FLAGS.config.num_steps))):
         timer.tick("total")
@@ -279,7 +281,7 @@ def main(_):
                     ),
                     rng=policy_key,
                 ),
-                horizon=FLAGS.config.dataset_kwargs.horizon,
+                horizon=horizon,
             )
 
             logging.info("Evaluating...")
