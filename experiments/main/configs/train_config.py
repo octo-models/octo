@@ -184,12 +184,12 @@ def get_config(config_string):
                 model=update_config(
                     base_model_config,
                     observation_tokenizers=[
-                        ("image_tokenizer", {
-                            "num_tokens": 64,
-                            "task_stack_keys": [],
-                            "task_film_keys": ["language_instruction"],
-                            **base_tokenizer_kwargs
-                        }),
+                        ("image_tokenizer", update_config(
+                            base_tokenizer_kwargs,
+                            num_tokens=64,
+                            task_stack_keys=[],
+                            task_film_keys=["language_instruction"],
+                        )),
                     ],
                     task_tokenizers=[],
                 ),
@@ -204,11 +204,11 @@ def get_config(config_string):
                 model=update_config(
                     base_model_config,
                     observation_tokenizers=[
-                        ("image_tokenizer", {
-                            "num_tokens": 64,
-                            "task_stack_keys": [],
-                            **base_tokenizer_kwargs
-                        }),
+                        ("image_tokenizer", update_config(
+                            base_tokenizer_kwargs,
+                            num_tokens=64,
+                            task_stack_keys=[],
+                        )),
                     ],
                     task_tokenizers=[
                         ("language_tokenizer", {"num_tokens": 16}),
@@ -225,11 +225,11 @@ def get_config(config_string):
                 model=update_config(
                     base_model_config,
                     observation_tokenizers=[
-                        ("image_tokenizer", {
-                            "num_tokens": 64,
-                            "task_stack_keys": [],
-                            **base_tokenizer_kwargs
-                        }),
+                        ("image_tokenizer", update_config(
+                            base_tokenizer_kwargs,
+                            num_tokens=64,
+                            task_stack_keys=[],
+                        )),
                     ],
                     task_tokenizers=[
                         ("language_tokenizer", {
