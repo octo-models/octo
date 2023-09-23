@@ -1,3 +1,4 @@
+import copy
 import datetime
 import json
 import os
@@ -16,7 +17,7 @@ from flax.traverse_util import flatten_dict
 from ml_collections import config_flags
 from visualization_lib import Visualizer
 
-from orca.data.dataset import make_dataset
+from orca.data.dataset import make_dataset, make_interleaved_dataset
 from orca.data.utils.text_processing import text_processors
 from orca.model import create_model_def
 from orca.model.weights import weights_loaders
@@ -56,7 +57,7 @@ def main(_):
     num_devices = len(devices)
     assert FLAGS.config.batch_size % num_devices == 0
 
-    # we shard the leading dimension (batch dimension) accross all devices evenly
+    # we shard the leading dimension (batch dimension) across all devices evenly
     sharding = jax.sharding.PositionalSharding(devices)
     shard_fn = partial(shard_batch, sharding=sharding)
 
@@ -97,8 +98,7 @@ def main(_):
         save_dir = None
         logging.info("save_dir not passed in, not saving checkpoints")
 
-    # load datasets
-    logging.info(f"Loading data from {FLAGS.config.dataset_kwargs.data_dir}")
+    # set up text tokenization (this needs to happen after batching but before sharding)
     if FLAGS.config.text_processor is None:
         text_processor = None
     else:
@@ -116,31 +116,45 @@ def main(_):
             batch.pop("language_instruction")
         return batch
 
-    train_data = make_dataset(**FLAGS.config.dataset_kwargs, train=True)
-    action_proprio_metadata = train_data.action_proprio_metadata
-    if save_dir is not None:
-        with tf.io.gfile.GFile(
-            os.path.join(save_dir, "action_proprio_metadata.json"), "w"
-        ) as f:
-            json.dump(action_proprio_metadata, f)
-
+    # load datasets
+    sample_weights = (FLAGS.config.dataset_kwargs['sample_weights']
+                      if 'sample_weights' in FLAGS.config.dataset_kwargs else None)
     train_data = (
-        (train_data)
-        .unbatch()
-        .shuffle(FLAGS.config.shuffle_buffer_size)
+        make_interleaved_dataset(
+            FLAGS.config.dataset_kwargs['common_kwargs'],
+            FLAGS.config.dataset_kwargs['data_kwargs_list'],
+            train=True,
+            sample_weights=sample_weights,
+        )
         .repeat()
         .batch(FLAGS.config.batch_size)
     )
-    val_data = (
-        make_dataset(**FLAGS.config.dataset_kwargs, train=False)
-        .unbatch()
-        .shuffle(FLAGS.config.shuffle_buffer_size)
-        .repeat()
-        .batch(FLAGS.config.batch_size)
-    )
-    train_data_iter = map(shard_fn, map(process_text, train_data.iterator()))
-    val_data_iter = map(shard_fn, map(process_text, val_data.iterator()))
-    visualizer = Visualizer(FLAGS.config.dataset_kwargs, text_processor=text_processor)
+    val_datas = []
+    visualizers = []
+    for dataset_kwargs in FLAGS.config.dataset_kwargs['data_kwargs_list']:
+        val_data_kwargs = copy.deepcopy(dataset_kwargs)
+        val_data_kwargs.update(**FLAGS.config.dataset_kwargs['common_kwargs'])
+        val_dataset = make_dataset(**val_data_kwargs, train=False)
+        action_proprio_metadata = val_dataset.action_proprio_metadata
+        val_datas.append(
+                val_dataset
+                .unbatch()
+                .shuffle(FLAGS.config.shuffle_buffer_size)
+                .repeat()
+                .batch(FLAGS.config.batch_size))
+        visualizers.append(
+            Visualizer(val_data_kwargs, text_processor=text_processor, cache_trajs=False))
+
+        # save normalization constants for evaluation
+        if save_dir is not None:
+            with tf.io.gfile.GFile(
+                    os.path.join(save_dir, f"action_proprio_metadata_{val_data_kwargs['name']}.json"), "w"
+            ) as f:
+                json.dump(jax.tree_map(lambda x: [float(e) for e in x.numpy()], action_proprio_metadata), f)
+
+    train_data_iter = map(shard_fn, map(process_text, train_data.as_numpy_iterator()))
+    val_data_iters = [
+        map(shard_fn, map(process_text, val_data.iterator())) for val_data in val_datas]
 
     example_batch = next(train_data_iter)
     logging.info(f"Batch size: {example_batch['action'].shape[0]}")
@@ -149,6 +163,7 @@ def main(_):
         f"Batch size per device: {example_batch['action'].shape[0] // num_devices}"
     )
 
+    # set up model, optimizer, loss
     model_def = create_model_def(
         action_dim=example_batch["action"].shape[-1],
         window_size=example_batch["observation"]["image_0"].shape[1],
@@ -256,27 +271,42 @@ def main(_):
         if (i + 1) % FLAGS.config.eval_interval == 0:
             logging.info("Evaluating...")
             timer.tick("val")
-            metrics = []
-            for _, batch in zip(range(FLAGS.config.num_val_batches), val_data_iter):
-                metrics.append(eval_step(train_state, batch))
-            metrics = jax.tree_map(lambda *xs: np.mean(xs), *metrics)
-            wandb_log({"validation": metrics}, step=i)
+            per_dataset_metrics = []
+            for data_kwargs, val_data_iter in zip(FLAGS.config.dataset_kwargs['data_kwargs_list'], val_data_iters):
+                metrics = []
+                for _, batch in zip(range(FLAGS.config.num_val_batches), val_data_iter):
+                    metrics.append(eval_step(train_state, batch))
+                metrics = jax.tree_map(lambda *xs: np.mean(xs), *metrics)
+                wandb_log({f"validation_{data_kwargs['name']}": metrics}, step=i)
+                per_dataset_metrics.append(metrics)
+
+            # log weighted aggregate metrics
+            sample_weights = sample_weights if sample_weights is not None else [1.] * len(per_dataset_metrics)
+            sample_weights = sample_weights / np.sum(sample_weights)    # normalize to sum to 1
+            agg_metrics = jax.tree_map(
+                lambda *xs: np.sum(xs), *[jax.tree_map(lambda x: x * weight, metric)
+                                          for metric, weight in zip(per_dataset_metrics, sample_weights)])
+            wandb_log({f"validation_aggregate": agg_metrics}, step=i)
             timer.tock("val")
 
+            logging.info("Visualizing...")
             timer.tick("visualize")
             policy_fn = batched_apply(
                 partial(get_policy_sampled_actions, train_state, argmax=False, n=8),
                 FLAGS.config.batch_size,
                 sharding=sharding,
             )
-            raw_infos = visualizer.raw_evaluations(
-                policy_fn, max_trajs=100, task_definition="image"
-            )
-            metrics = visualizer.metrics_for_wandb(raw_infos)
-            images = visualizer.visualize_for_wandb(
-                policy_fn, task_definition="image", max_trajs=8
-            )
-            wandb_log({"offline_metrics": metrics, "visualizations": images}, step=i)
+            for data_kwargs, visualizer in zip(FLAGS.config.dataset_kwargs['data_kwargs_list'], visualizers):
+                raw_infos = visualizer.raw_evaluations(
+                    policy_fn, max_trajs=100, task_definition="image"
+                )
+                metrics = visualizer.metrics_for_wandb(raw_infos)
+                images = visualizer.visualize_for_wandb(
+                    policy_fn, task_definition="image", max_trajs=8
+                )
+                wandb_log({f"offline_metrics_{data_kwargs['name']}": metrics,
+                           f"visualizations_{data_kwargs['name']}": images}, step=i)
+            timer.tock("visualize")
 
         if (i + 1) % FLAGS.config.save_interval == 0 and save_dir is not None:
             logging.info("Saving checkpoint...")
