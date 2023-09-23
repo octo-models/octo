@@ -95,11 +95,12 @@ def get_config(config_string):
         )
     )
 
-    base_encoder_kwargs = dict(
+    base_tokenizer_kwargs = dict(
         encoder="resnetv1-34-bridge",
         encoder_kwargs=dict(
             pooling_method="none", add_spatial_coordinates=True, act="swish"
         ),
+        task_stack_keys=['image_.*'],       # by default, early fuse goal images into visual encoder
     )
 
     possible_structures = {
@@ -108,12 +109,10 @@ def get_config(config_string):
                 agent="transformer_bc",
                 model=update_config(
                     base_model_config,
-                    observation_tokenizer_kwargs={
-                        "obs-tokenizer": {"num_tokens": 64, **base_encoder_kwargs}
-                    },
-                    task_tokenizer_kwargs={
-                        "goal-obs-tokenizer": {"num_tokens": 64, **base_encoder_kwargs}
-                    },
+                    observation_tokenizers=[
+                        ("image_tokenizer", {"num_tokens": 64, **base_tokenizer_kwargs}),
+                    ],
+                    task_tokenizers=[],
                 ),
                 optimizer=base_optimizer_config,
                 dataset_kwargs=base_bridge_data_config,
@@ -125,18 +124,10 @@ def get_config(config_string):
                 agent="transformer_bc",
                 model=update_config(
                     base_model_config,
-                    observation_tokenizer_kwargs={
-                        "obs-tokenizer": {
-                            "num_tokens": 60,
-                            **base_encoder_kwargs
-                        }
-                    },
-                    task_tokenizer_kwargs={
-                        "goal-obs-tokenizer": {
-                            "num_tokens": 60,
-                            **base_encoder_kwargs
-                        }
-                    },
+                    observation_tokenizers=[
+                        ("image_tokenizer", {"num_tokens": 60, **base_tokenizer_kwargs}),
+                    ],
+                    task_tokenizers=[],
                 ),
                 optimizer=base_optimizer_config,
                 dataset_kwargs={
@@ -158,18 +149,10 @@ def get_config(config_string):
                 agent="transformer_bc",
                 model=update_config(
                     base_model_config,
-                    observation_tokenizer_kwargs={
-                        "obs-tokenizer": {
-                            "num_tokens": 60,
-                            **base_encoder_kwargs
-                        }
-                    },
-                    task_tokenizer_kwargs={
-                        "goal-obs-tokenizer": {
-                            "num_tokens": 60,
-                            **base_encoder_kwargs
-                        }
-                    },
+                    observation_tokenizers=[
+                        ("image_tokenizer", {"num_tokens": 60, **base_tokenizer_kwargs}),
+                    ],
+                    task_tokenizers=[],
                 ),
                 optimizer=base_optimizer_config,
                 dataset_kwargs={
@@ -195,52 +178,66 @@ def get_config(config_string):
                 **base_config,
             )
         ),
-        "transformer_bc_film_lang": ConfigDict(
+        "transformer_bc_bridge_film_lang": ConfigDict(
             dict(
                 agent="transformer_bc",
                 model=update_config(
                     base_model_config,
-                    observation_tokenizer_kwargs={
-                        "obs-film-language-tokenizer": {
+                    observation_tokenizers=[
+                        ("image_tokenizer", {
                             "num_tokens": 64,
-                            **base_encoder_kwargs,
-                        }
-                    },
-                    task_tokenizer_kwargs={},
+                            "task_stack_keys": [],
+                            "task_film_keys": ["language_instruction"],
+                            **base_tokenizer_kwargs
+                        }),
+                    ],
+                    task_tokenizers=[],
                 ),
                 optimizer=base_optimizer_config,
                 dataset_kwargs=base_bridge_data_config,
                 **base_config,
             )
         ),
-        "transformer_bc_lang": ConfigDict(
+        "transformer_bc_bridge_lang": ConfigDict(
             dict(
                 agent="transformer_bc",
                 model=update_config(
                     base_model_config,
-                    observation_tokenizer_kwargs={"obs-tokenizer": {"num_tokens": 64}},
-                    task_tokenizer_kwargs={"language-tokenizer": {"num_tokens": 16}},
+                    observation_tokenizers=[
+                        ("image_tokenizer", {
+                            "num_tokens": 64,
+                            "task_stack_keys": [],
+                            **base_tokenizer_kwargs
+                        }),
+                    ],
+                    task_tokenizers=[
+                        ("language_tokenizer", {"num_tokens": 16}),
+                    ],
                 ),
                 optimizer=base_optimizer_config,
                 dataset_kwargs=base_bridge_data_config,
                 **base_config,
             )
         ),
-        "transformer_bc_distilbert": ConfigDict(
+        "transformer_bc_bridge_distilbert": ConfigDict(
             dict(
                 agent="transformer_bc",
                 model=update_config(
                     base_model_config,
-                    observation_tokenizer_kwargs={
-                        "obs-tokenizer": {"num_tokens": 64, **base_encoder_kwargs}
-                    },
-                    task_tokenizer_kwargs={
-                        "language-tokenizer": {
+                    observation_tokenizers=[
+                        ("image_tokenizer", {
+                            "num_tokens": 64,
+                            "task_stack_keys": [],
+                            **base_tokenizer_kwargs
+                        }),
+                    ],
+                    task_tokenizers=[
+                        ("language_tokenizer", {
                             "num_tokens": 64,
                             "projection_dim": 512,
                             "encoder": "distilbert-base-uncased",
-                        }
-                    },
+                        }),
+                    ],
                 ),
                 optimizer=base_optimizer_config,
                 dataset_kwargs=base_bridge_data_config,
