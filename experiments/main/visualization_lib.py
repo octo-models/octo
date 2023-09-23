@@ -46,14 +46,14 @@ def run_policy_on_trajectory(
 
     assert task_definition == "image"
     tasks = {}
-    if task_definition in ["image", "text_and_image"]:
+    if True: #task_definition in ["image", "text_and_image"]:
         tasks.update(
             jax.tree_map(
                 lambda arr: np.tile(arr[-1][-1], (len_traj, *([1] * (arr.ndim - 2)))),
                 traj["observation"],
             )
         )
-    if task_definition in ["text", "text_and_image"]:
+    if True: #task_definition in ["text", "text_and_image"]:
         assert (
             text_processor is not None
         ), "Must provide a text processor to use text inputs"
