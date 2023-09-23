@@ -1,5 +1,6 @@
 import functools as ft
 import re
+from typing import List
 
 import flax.linen as nn
 import jax
@@ -15,6 +16,15 @@ EPS = 1e-6
 
 # adapted from https://github.com/google-research/robotics_transformer/blob/master/tokenizers/token_learner.py
 class TokenLearner(nn.Module):
+    """
+    Learns to map fixed-length sequence of tokens into specified number of tokens.
+
+    Args:
+        num_tokens (int): Number of output tokens.
+        bottleneck_dim (int): Size of the hidden layers of the mapping MLP.
+        dropout_rate (float): Rate of dropout applied in the mapping MLP. Defaults to no dropout.
+    """
+
     num_tokens: int
     bottleneck_dim: int = 64
     dropout_rate: float = 0.0
@@ -34,7 +44,6 @@ class TokenLearner(nn.Module):
         return jnp.einsum("bna,baf->bnf", x, inputs)
 
 
-# adapted from https://github.com/google-research/robotics_transformer/blob/master/tokenizers/image_tokenizer.py
 class ImageTokenizer(nn.Module):
     """Image tokenizer that encodes image stack into tokens with optional FiLM conditioning.
 
@@ -112,12 +121,22 @@ class ImageTokenizer(nn.Module):
 
 
 class LanguageTokenizer(nn.Module):
+    """
+    Language tokenizer that embeds text input IDs into continuous language embeddings. Supports pre-trained HF models.
+
+     Args:
+         num_tokens (int): Number of output tokens (not enforced).
+         encoder (str, optional): Optional HuggingFace AutoModel name for encoding input IDs.
+         projection_dim (int, optional): Optional output Dense layer projection dimension.
+    """
+
     num_tokens: int = 1
     encoder: str = None
     projection_dim: int = None
 
     def setup(self):
-        self.projection = nn.Dense(self.projection_dim, use_bias=False)
+        if self.projection_dim:
+            self.projection = nn.Dense(self.projection_dim, use_bias=False)
 
         if self.encoder is not None:
             from transformers import AutoConfig, FlaxAutoModel
@@ -148,7 +167,16 @@ class LanguageTokenizer(nn.Module):
 
 
 class ActionTokenizer(nn.Module):
-    action_dim: int
+    """
+    Tokenizes actions via uniform or gaussian binning in given range.
+
+    Args:
+        vocab_size (int): Number of discrete bins per dimension.
+        normalization_type (str): Type of binning. ['bounds' = uniform, 'normal' = Gaussian]
+        low (float): Lower bound for action bin range.
+        high (float): Upper bound for action bin range.
+    """
+
     vocab_size: int
     normalization_type: str = "bounds"
     low: float = 0
@@ -193,9 +221,7 @@ if __name__ == "__main__":
 
     action = np.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7])
     action = np.broadcast_to(action, [2, 2, 7])
-    tokenizer = ActionTokenizer(
-        action_dim=7, vocab_size=256, normalization_type="normal"
-    )
+    tokenizer = ActionTokenizer(vocab_size=256, normalization_type="normal")
     params = tokenizer.init(jax.random.PRNGKey(0), action)
     action_tokens = tokenizer.apply(params, action)
     detokenized_actions = tokenizer.apply(params, action_tokens, mode="detokenize")
