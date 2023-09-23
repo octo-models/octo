@@ -211,7 +211,7 @@ def get_config(config_string):
                         )),
                     ],
                     task_tokenizers=[
-                        ("language_tokenizer", {"num_tokens": 16}),
+                        ("language_tokenizer", {"num_tokens": 1}),
                     ],
                 ),
                 optimizer=base_optimizer_config,
