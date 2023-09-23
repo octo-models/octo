@@ -1,6 +1,6 @@
 import functools as ft
 import re
-from typing import List
+from typing import Sequence
 
 import flax.linen as nn
 import jax
@@ -52,9 +52,9 @@ class ImageTokenizer(nn.Module):
         encoder_kwargs (dict, optional): Overwrite dict for encoder hyperparameters.
         use_token_learner (bool): Whether to use token learner. Defaults to False.
         num_tokens (int): Number of output tokens, only enforced when use_token_learner is True.
-        obs_stack_keys (List[str]): Which spatial observation inputs get stacked for encoder input. Supports regex.
-        task_stack_keys (List[str]): Which spatial task inputs get stacked for encoder input. Supports regex.
-        task_film_keys (List[str]): Which non-spatial task keys get passed into FiLM conditioning. Supports regex.
+        obs_stack_keys (Sequence[str]): Which spatial observation inputs get stacked for encoder input. Supports regex.
+        task_stack_keys (Sequence[str]): Which spatial task inputs get stacked for encoder input. Supports regex.
+        task_film_keys (Sequence[str]): Which non-spatial task keys get passed into FiLM conditioning. Supports regex.
     """
 
     encoder: str
@@ -62,9 +62,9 @@ class ImageTokenizer(nn.Module):
     use_token_learner: bool = False
     num_tokens: int = 8
     conditioning_type: str = "none"
-    obs_stack_keys: List[str] = ["image_.*", "depth_.*"]
-    task_stack_keys: List[str] = []
-    task_film_keys: List[str] = []
+    obs_stack_keys: Sequence[str] = ("image_.*", "depth_.*")
+    task_stack_keys: Sequence[str] = tuple()
+    task_film_keys: Sequence[str] = tuple()
 
     @nn.compact
     def __call__(
