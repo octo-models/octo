@@ -13,7 +13,7 @@ export CUDA_VISIBLE_DEVICES=1
 NAME="test"
 
 CMD="python experiments/main/train.py \
-    --config experiments/homer/configs/train_config.py:transformer_bc_bridge \
+    --config experiments/main/configs/train_config.py:transformer_bc_bridge \
     --name $NAME"
 
 $CMD --debug
