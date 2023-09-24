@@ -22,17 +22,17 @@ from flax.training import checkpoints
 from flax.traverse_util import flatten_dict
 from ml_collections import ConfigDict, config_flags
 from ml_collections.config_dict import placeholder
-from visualization_lib import Visualizer
 
 from orca.data.utils.text_processing import text_processors
 from orca.model import create_model_def
-from orca.model.weights import weights_loaders
-from orca.train_utils import (
+from orca.model.components.hf_weight_loaders import weights_loaders
+from orca.utils.train_utils import (
     batched_apply,
     create_train_state,
     initialize_compilation_cache,
     shard_batch,
 )
+from orca.utils.visualization_lib import Visualizer
 
 FLAGS = flags.FLAGS
 flags.DEFINE_bool("dummy", False, "Dummy visualization run.")
@@ -54,7 +54,7 @@ flags.DEFINE_multi_string(
 config_dir = os.path.join(os.path.dirname(__file__), "configs")
 config_flags.DEFINE_config_file(
     "config",
-    os.path.join(config_dir, "train_config.py:transformer_bc_bridge"),
+    os.path.join(config_dir, "config.py:transformer_bc_bridge"),
     "File path used to get the dataset kwargs.",
     lock_config=False,
 )
