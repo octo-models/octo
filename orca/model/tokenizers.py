@@ -1,4 +1,6 @@
 import functools as ft
+import re
+from typing import Sequence
 
 import flax.linen as nn
 import jax
@@ -14,6 +16,15 @@ EPS = 1e-6
 
 # adapted from https://github.com/google-research/robotics_transformer/blob/master/tokenizers/token_learner.py
 class TokenLearner(nn.Module):
+    """
+    Learns to map fixed-length sequence of tokens into specified number of tokens.
+
+    Args:
+        num_tokens (int): Number of output tokens.
+        bottleneck_dim (int): Size of the hidden layers of the mapping MLP.
+        dropout_rate (float): Rate of dropout applied in the mapping MLP. Defaults to no dropout.
+    """
+
     num_tokens: int
     bottleneck_dim: int = 64
     dropout_rate: float = 0.0
@@ -33,13 +44,27 @@ class TokenLearner(nn.Module):
         return jnp.einsum("bna,baf->bnf", x, inputs)
 
 
-# adapted from https://github.com/google-research/robotics_transformer/blob/master/tokenizers/image_tokenizer.py
 class ImageTokenizer(nn.Module):
+    """Image tokenizer that encodes image stack into tokens with optional FiLM conditioning.
+
+    Args:
+        encoder (str): Name of used encoder.
+        encoder_kwargs (dict, optional): Overwrite dict for encoder hyperparameters.
+        use_token_learner (bool): Whether to use token learner. Defaults to False.
+        num_tokens (int): Number of output tokens, only enforced when use_token_learner is True.
+        obs_stack_keys (Sequence[str]): Which spatial observation inputs get stacked for encoder input. Supports regex.
+        task_stack_keys (Sequence[str]): Which spatial task inputs get stacked for encoder input. Supports regex.
+        task_film_keys (Sequence[str]): Which non-spatial task keys get passed into FiLM conditioning. Supports regex.
+    """
+
     encoder: str
     encoder_kwargs: dict = None
     use_token_learner: bool = False
-    num_tokens: int = 8  # this is not enforced unless use_token_learner is True
+    num_tokens: int = 8
     conditioning_type: str = "none"
+    obs_stack_keys: Sequence[str] = ("image_.*", "depth_.*")
+    task_stack_keys: Sequence[str] = tuple()
+    task_film_keys: Sequence[str] = tuple()
 
     @nn.compact
     def __call__(
@@ -48,44 +73,42 @@ class ImageTokenizer(nn.Module):
         tasks=None,
         train: bool = True,
     ):
-        def assemble_image_obs(obs):
-            return jnp.concatenate(
-                [
-                    obs[key]
-                    for key in sorted(obs)
-                    if ("image_" in key or "depth_" in key)
-                ],
-                axis=-1,
+        def extract_inputs(regex_keys, inputs, check_spatial=False):
+            extracted_outputs = []
+            for r_key in regex_keys:
+                for key in filter(re.compile(r_key).match, sorted(inputs.keys())):
+                    if check_spatial:
+                        assert len(inputs[key]) >= 4
+                    extracted_outputs.append(inputs[key])
+            return jnp.concatenate(extracted_outputs, axis=-1)
+
+        # stack all spatial observation and task inputs
+        enc_inputs = extract_inputs(
+            self.obs_stack_keys, observations, check_spatial=True
+        )
+        if tasks and self.task_stack_keys:
+            task_inputs = extract_inputs(
+                self.task_stack_keys, tasks, check_spatial=True
+            )
+            task_inputs = task_inputs[:, None].repeat(enc_inputs.shape[1], axis=1)
+            enc_inputs = jnp.concatenate([enc_inputs, task_inputs], axis=-1)
+        b, t, h, w, c = enc_inputs.shape
+        enc_inputs = jnp.reshape(enc_inputs, (b * t, h, w, c))
+
+        # extract non-spatial FiLM inputs
+        encoder_input_kwargs = {}
+        if self.task_film_keys:
+            film_inputs = extract_inputs(self.task_film_keys, tasks)
+            film_inputs = film_inputs[:, None].repeat(t, axis=1)
+            encoder_input_kwargs.update(
+                {"cond_var": jnp.reshape(film_inputs, (b * t, -1))}
             )
 
-        # observations["image_XXX"] is (batch, obs_horizon, height, width, channel)
-        # tasks["image_XXX"] is (batch, height, width, channel)
-        image = assemble_image_obs(observations)
-        b, t, h, w, c = image.shape
-        if self.conditioning_type == "none":
-            # late-fusion architecture, image encoder doesn't see task and obs together
-            image = jnp.reshape(image, (b * t, h, w, c))
-            image_tokens = encoders[self.encoder](**self.encoder_kwargs)(image)
-            image_tokens = jnp.reshape(image_tokens, (b, t, -1, image_tokens.shape[-1]))
-        elif self.conditioning_type == "goal_image":
-            # early-fusion goal-image only architecture, concatenate obs and goal image channel-wise
-            image = jnp.concatenate([image[:, -1], assemble_image_obs(tasks)], axis=-1)
-            image_tokens = encoders[self.encoder](**self.encoder_kwargs)(image)
-            image_tokens = jnp.reshape(image_tokens, (b, -1, image_tokens.shape[-1]))
-        elif self.conditioning_type == "goal_image_no_obs":
-            image = assemble_image_obs(tasks)
-            image_tokens = encoders[self.encoder](**self.encoder_kwargs)(image)
-            image_tokens = jnp.reshape(image_tokens, (b, -1, image_tokens.shape[-1]))
-        elif self.conditioning_type == "film_language":
-            # encode task and pass into encoder with FiLM
-            image = jnp.reshape(image, (b * t, h, w, c))
-            lang = tasks["language_instruction"]
-            lang = lang[:, None, :].repeat(t, axis=1)
-            lang = jnp.reshape(lang, (b * t, -1))
-            image_tokens = encoders[self.encoder](**self.encoder_kwargs)(
-                image, cond_var=lang
-            )
-            image_tokens = jnp.reshape(image_tokens, (b, t, -1, image_tokens.shape[-1]))
+        # run visual encoder
+        image_tokens = encoders[self.encoder](**self.encoder_kwargs)(
+            enc_inputs, **encoder_input_kwargs
+        )
+        image_tokens = jnp.reshape(image_tokens, (b, t, -1, image_tokens.shape[-1]))
 
         if self.use_token_learner:
             image_tokens = jnp.reshape(
@@ -98,12 +121,22 @@ class ImageTokenizer(nn.Module):
 
 
 class LanguageTokenizer(nn.Module):
+    """
+    Language tokenizer that embeds text input IDs into continuous language embeddings. Supports pre-trained HF models.
+
+     Args:
+         num_tokens (int): Number of output tokens (not enforced).
+         encoder (str, optional): Optional HuggingFace AutoModel name for encoding input IDs.
+         projection_dim (int, optional): Optional output Dense layer projection dimension.
+    """
+
     num_tokens: int = 1
     encoder: str = None
     projection_dim: int = None
 
     def setup(self):
-        self.projection = nn.Dense(self.projection_dim, use_bias=False)
+        if self.projection_dim:
+            self.projection = nn.Dense(self.projection_dim, use_bias=False)
 
         if self.encoder is not None:
             from transformers import AutoConfig, FlaxAutoModel
@@ -134,7 +167,16 @@ class LanguageTokenizer(nn.Module):
 
 
 class ActionTokenizer(nn.Module):
-    action_dim: int
+    """
+    Tokenizes actions via uniform or gaussian binning in given range.
+
+    Args:
+        vocab_size (int): Number of discrete bins per dimension.
+        normalization_type (str): Type of binning. ['bounds' = uniform, 'normal' = Gaussian]
+        low (float): Lower bound for action bin range.
+        high (float): Upper bound for action bin range.
+    """
+
     vocab_size: int
     normalization_type: str = "bounds"
     low: float = 0
@@ -166,37 +208,12 @@ class ActionTokenizer(nn.Module):
             return actions
 
 
-tokenizers = {
-    "obs-tokenizer": ft.partial(
-        ImageTokenizer,
-        conditioning_type="none",
-    ),
-    "goal-tokenizer": ft.partial(
-        ImageTokenizer,
-        conditioning_type="goal_image_no_obs",
-    ),
-    "goal-obs-tokenizer": ft.partial(
-        ImageTokenizer,
-        conditioning_type="goal_image",
-    ),
-    "obs-film-language-tokenizer": ft.partial(
-        ImageTokenizer,
-        conditioning_type="film_language",
-    ),
-    "language-tokenizer": LanguageTokenizer,
-    "clip-obs-tokenizer": ft.partial(
-        CLIPVisionTokenizer,
-        conditioning_type="obs_image",
-    ),
-    "clip-goal-tokenizer": ft.partial(
-        CLIPVisionTokenizer,
-        conditioning_type="goal_image",
-    ),
-    "clip-text-tokenizer": CLIPTextTokenizer,
-    # TODO (andre) other possible tokenizers:
-    # "language-wordpiece-tokenizer": use token-level embeddings
-    # "proprio": use proprio from observations
+TOKENIZERS = {
+    "image_tokenizer": ImageTokenizer,
+    "language_tokenizer": LanguageTokenizer,
+    "action_tokenizer": ActionTokenizer,
 }
+
 
 if __name__ == "__main__":
     import jax
@@ -204,9 +221,7 @@ if __name__ == "__main__":
 
     action = np.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7])
     action = np.broadcast_to(action, [2, 2, 7])
-    tokenizer = ActionTokenizer(
-        action_dim=7, vocab_size=256, normalization_type="normal"
-    )
+    tokenizer = ActionTokenizer(vocab_size=256, normalization_type="normal")
     params = tokenizer.init(jax.random.PRNGKey(0), action)
     action_tokens = tokenizer.apply(params, action)
     detokenized_actions = tokenizer.apply(params, action_tokens, mode="detokenize")
