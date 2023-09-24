@@ -35,23 +35,23 @@ class TransformerPolicy(nn.Module):
     When rolling out the policy, we left pad the observation-action history until we have enough
     history to fill the entire context window.
 
-    Parameters:
-        observations_tokenizers: List of flax modules for tokenizing the observations. The output
-            of each tokenizer is concatenated to form the observation tokens.
-        task_tokenizers: List of flax modules for tokenizing the task. The output of each tokenizer
-            is concatenated to form the task token prefix.
-        vocab_size: Number of bins for each action dimension.
-        token_embedding_size: Size of the tokens.
-        horizon: Length of the observation-action sequence that the transformer processes.
-        pred_horizon: Number of actions to predict at once (the "action chunk").
-        action_dim: Dimension of the actions.
-        normalization_type: The type of normalization used on the actions. Either "normal" for
+    Args:
+        observations_tokenizers (Sequence[nn.Module]): List of flax modules for tokenizing the observations.
+            The output of each tokenizer is concatenated to form the observation tokens.
+        task_tokenizers (Sequence[nn.Module]): List of flax modules for tokenizing the task.
+            The output of each tokenizer is concatenated to form the task token prefix.
+        vocab_size (int): Number of bins for each action dimension.
+        token_embedding_size (int): Size of the tokens.
+        window_size (int): Length of the observation-action sequence that the transformer processes.
+        pred_horizon (int): Number of actions to predict at once (the "action chunk").
+        action_dim (int): Dimension of the actions.
+        normalization_type (str): The type of normalization used on the actions. Either "normal" for
             normalization to unit Gaussian or "bounds" for normalization to [-1, 1].
-        num_layers: Number of layers in transformer.
-        mlp_dim: MLP dim of transformer.
-        num_heads: Number of heads in transformer.
-        dropout_rate: Dropout rate for transformer
-        attention_dropout_rate: Dropout in self-attention."""
+        num_layers (int): Number of layers in transformer.
+        mlp_dim (int): MLP dim of transformer.
+        num_heads (int): Number of attention heads in transformer.
+        dropout_rate (float): Dropout rate for transformer
+        attention_dropout_rate (float): Dropout in self-attention."""
 
     observation_tokenizers: Sequence[nn.Module]
     task_tokenizers: Sequence[nn.Module]
@@ -106,6 +106,8 @@ class TransformerPolicy(nn.Module):
             for _ in range(len(self.task_tokenizers))
         ]
 
+        # default attention mask is causal and additionally masks previous
+        # action tokens (since attending to previous actions can hurt perfomance)
         self.default_attention_mask = self.generate_default_attention_mask()
 
     def __call__(
@@ -156,25 +158,37 @@ class TransformerPolicy(nn.Module):
         # (batch, horizon, pred_horizon, action_dim, vocab_size)
         action_logits = self.vocab_proj(action_embedding)
 
+        # compute log probabilities for predicted actions
         action_logprob = jax.nn.log_softmax(action_logits, axis=-1)
 
+        # chunk the target actions to match the predicted actions
         actions_chunked = self.chunk_actions(actions)
 
         # only use first horizon timesteps from the window
         actions_chunked = actions_chunked[:, : self.horizon]
 
+        # tokenize the target actions and convert them to one hot vectors
         action_labels = self.action_tokenizer(actions_chunked, mode="tokenize")
         action_labels_one_hot = jax.nn.one_hot(action_labels, self.vocab_size)
 
+        # compute the CE loss using the log probabilities and target actions
         action_loss = -jnp.sum(action_logprob * action_labels_one_hot, axis=-1)
+        # mask the loss with the pad mask to avoid supervising padding
         action_loss = (action_loss * observations["pad_mask"][:, :, None, None]).mean()
 
+        # take the highest probability actions as the predicted actions
         action_pred = jnp.argmax(action_logits, axis=-1)
+
+        # compute accuracy between predicted actions and target actions
         accuracy = action_pred == action_labels
+        # mask the accuracy with the pad mask to remove the contribution of padding
         accuracy = (accuracy * observations["pad_mask"][:, :, None, None]).mean()
 
+        # detokenize the predicted actions
         action_values = self.action_tokenizer(action_pred, mode="detokenize")
+        # compute the mean squared error between predicted actions and target actions
         action_mse = jnp.square(actions_chunked - action_values).sum(axis=-1)
+        # mask the mse with the pad mask to remove the contribution of padding
         action_mse = (action_mse * observations["pad_mask"][:, :, None]).mean()
 
         return {"loss": action_loss, "mse": action_mse, "accuracy": accuracy}
@@ -186,6 +200,7 @@ class TransformerPolicy(nn.Module):
         train: bool = False,
     ):
         # combine the default attention mask and a padding mask specifc to this batch
+        # to avoid attending to padding tokens
         # attention_mask is broadcast to (batch, num_heads, total_tokens, total_tokens)
         attention_mask = jnp.logical_and(
             self.default_attention_mask,
@@ -276,7 +291,30 @@ class TransformerPolicy(nn.Module):
 
     def generate_default_attention_mask(self):
         """
-        Generate default attention mask for transformer call.
+        Generate default attention mask for transformer call. The default attention mask
+        is causal (tokens cannot attend to future tokens) and masks attention to past action
+        tokens (since attending to previous actions can hurt performance).
+
+        We generate an NxN mask where the nth row denotes which tokens the nth token
+        can attend to.
+
+        attention_mask[i, j] = 1 denotes that token j can attend to token i.
+        attention_mask[i, j] = 0 denotes that token j cannot attend to token i.
+
+        This function first creates a lower triangular matrix with past actions masked out.
+        Then this causal mask is offset by a non-causal mask for the task tokens.
+
+        For example, given the token sequence: [t_0, t_1, o_0, a_0, o_1, a_1, o_2, a_2]
+        the attention mask would be:
+
+        1 1 0 0 0 0 0 0
+        1 1 0 0 0 0 0 0
+        1 1 0 0 0 0 0 0
+        1 1 1 0 0 0 0 0
+        1 1 1 0 0 0 0 0
+        1 1 1 0 1 0 0 0
+        1 1 1 0 1 0 0 0
+        1 1 1 0 1 0 1 0
         """
 
         attention_mask = np.zeros((self.total_tokens, self.total_tokens), dtype=int)
