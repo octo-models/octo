@@ -231,8 +231,12 @@ def main(_):
         loss, info = loss_fn(state.params, state, batch, state.rng, train=False)
         return info
 
+    horizon = FLAGS.config.dataset_kwargs.common_kwargs.window_size - FLAGS.config.model.policy_kwargs.pred_horizon + 1
+
     @partial(jax.jit, static_argnames=("argmax", "n"))
     def get_policy_sampled_actions(state, observations, tasks, *, argmax=False, n=1):
+        # only use first horizon timesteps as input to predict_action
+        observations = jax.tree_map(lambda x: x[:, : horizon], observations)
         actions = state.apply_fn(
             {"params": state.params},
             observations,
