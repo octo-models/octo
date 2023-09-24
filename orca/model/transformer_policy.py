@@ -131,6 +131,10 @@ class TransformerPolicy(nn.Module):
             The loss, mean squared error, and accuracy for the forward pass.
         """
 
+        assert all(
+            [observations[k].shape[1] == self.window_size for k in observations]
+        ), "Data loader must return trajectory windows of length window_size"
+
         # only use first horizon timesteps from the window
         observations = jax.tree_map(lambda x: x[:, : self.horizon], observations)
 
@@ -254,8 +258,9 @@ class TransformerPolicy(nn.Module):
             The predicted actions given the provided observation history and task.
         """
 
-        # only use first horizon timesteps from the window
-        observations = jax.tree_map(lambda x: x[:, : self.horizon], observations)
+        assert all(
+            [observations[k].shape[1] == self.horizon for k in observations]
+        ), "predict_action expects an observation history of length horizon"
 
         output = self.transformer_call(
             observations,
