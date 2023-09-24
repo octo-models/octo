@@ -1,12 +1,12 @@
 import logging
 
-from .tokenizers import tokenizers
+from .tokenizers import TOKENIZERS
 from .transformer_policy import TransformerPolicy
 
 
 def create_model_def(
-    observation_tokenizer_kwargs,
-    task_tokenizer_kwargs,
+    observation_tokenizers,
+    task_tokenizers,
     action_dim,
     horizon,
     policy_kwargs,
@@ -15,10 +15,10 @@ def create_model_def(
     if len(kwargs) > 0:
         logging.warn(f"Extra kwargs passed into create_model_def: {kwargs}")
     observation_tokenizer_defs = tuple(
-        tokenizers[k](**kwargs) for k, kwargs in observation_tokenizer_kwargs.items()
+        TOKENIZERS[tokenizer](**kwargs) for tokenizer, kwargs in observation_tokenizers
     )
     task_tokenizer_defs = tuple(
-        tokenizers[k](**kwargs) for k, kwargs in task_tokenizer_kwargs.items()
+        TOKENIZERS[tokenizer](**kwargs) for tokenizer, kwargs in task_tokenizers
     )
     model_def = TransformerPolicy(
         observation_tokenizers=observation_tokenizer_defs,
