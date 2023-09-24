@@ -31,7 +31,7 @@ BASE_SUB_CONDITIONS = {
 
 
 def run_policy_on_trajectory(
-    policy_fn, traj, *, task_definition="image", text_processor=None
+    policy_fn, traj, *, text_processor=None
 ):
     """
     Args:
@@ -39,24 +39,18 @@ def run_policy_on_trajectory(
             of shape (batch_size, n_samples, action_dim). (n_samples can be arbitrary). policy_fn should be
             willing to take in arbitrary batch sizes (use `batched_apply` to wrap a jitted function)
         traj: A dictionary of trajectory data. Should contain "observations", "actions", and "language_instruction" keys.
-        task_definition: The task definition to use. Can be "image", "text", or "text_and_image"
         text_processor: A function that takes in a batch of text and returns a batch of tokens.
     """
     len_traj = len(traj["action"])
 
-    assert task_definition == "image"
     tasks = {}
-    if task_definition in ["image", "text_and_image"]:
-        tasks.update(
-            jax.tree_map(
-                lambda arr: np.tile(arr[-1][-1], (len_traj, *([1] * (arr.ndim - 2)))),
-                traj["observation"],
-            )
+    tasks.update(
+        jax.tree_map(
+            lambda arr: np.tile(arr[-1][-1], (len_traj, *([1] * (arr.ndim - 2)))),
+            traj["observation"],
         )
-    if task_definition in ["text", "text_and_image"]:
-        assert (
-            text_processor is not None
-        ), "Must provide a text processor to use text inputs"
+    )
+    if text_processor:
         tasks["language_instruction"] = text_processor.encode(
             [s.decode("utf-8") for s in traj["language_instruction"]]
         )
@@ -75,7 +69,6 @@ class Visualizer:
     dataset_kwargs: dict  # TODO: maybe replace with a dataset object
     metric_keys: dict = None
     sub_conditions: dict = None
-    task_definition: str = None
     cache_trajs: bool = True  # Use the same trajectories for metrics every time
     cache_viz_trajectories: bool = True  # Use same trajs for `visualize` every time
     text_processor: object = None
@@ -134,18 +127,15 @@ class Visualizer:
         self,
         policy_fn,
         max_trajs=1,
-        task_definition=None,
         add_images=None,
     ):
         """Returns a dictionary of visualizations to log to wandb.
         Args:
             policy_fn: See `raw_evaluations`
             max_trajs: The maximum number of trajectories to visualize.
-            task_definition: See `raw_evaluations`
             add_images: Whether to add images of the trajectory to the visualization. If None, will add images if `cache_viz_trajectories` is False
         """
 
-        task_definition = task_definition or self.task_definition or "image"
         iterator = self.get_maybe_cached_iterator(
             self.dataset,
             max_trajs,
@@ -158,7 +148,6 @@ class Visualizer:
             info = run_policy_on_trajectory(
                 policy_fn,
                 traj,
-                task_definition=task_definition,
                 text_processor=self.text_processor,
             )
             info = add_unnormalized_info(info, self.action_proprio_stats)
@@ -188,7 +177,6 @@ class Visualizer:
         self,
         policy_fn,
         max_trajs=int(1e6),
-        task_definition=None,
     ):
         """Computes accuracy metrics for trajectories in the dataset.
 
@@ -199,7 +187,6 @@ class Visualizer:
         Returns:
             all_traj_info: A list of dictionaries containing information about each trajectory (pass into `process_for_wandb`)
         """
-        task_definition = task_definition or self.task_definition or "image"
         iterator = self.get_maybe_cached_iterator(
             self.dataset,
             max_trajs,
@@ -213,7 +200,6 @@ class Visualizer:
             info = run_policy_on_trajectory(
                 policy_fn,
                 traj,
-                task_definition=task_definition,
                 text_processor=self.text_processor,
             )
             info = add_unnormalized_info(info, self.action_proprio_stats)
