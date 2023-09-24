@@ -1,7 +1,7 @@
 from typing import Any, Dict
 import tensorflow as tf
 import dlimp as dl
-from orca.data.utils.bridge_utils import binarize_gripper_actions
+from orca.data.bridge.bridge_utils import binarize_gripper_actions
 from orca.data.dataset import apply_common_transforms
 
 

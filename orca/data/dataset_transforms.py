@@ -3,7 +3,7 @@ from typing import Any, Dict
 
 import tensorflow as tf
 
-import orca.data.utils.bridge_utils as bridge
+import orca.data.bridge.bridge_utils as bridge
 
 
 def stanford_kuka_multimodal_dataset_transform(

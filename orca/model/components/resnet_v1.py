@@ -9,7 +9,7 @@ import jax.numpy as jnp
 # import jax.numpy as jnp
 import numpy as np
 
-from orca.model.vision.film_conditioning_layer import FilmConditioning
+from orca.model.components.film_conditioning_layer import FilmConditioning
 
 ModuleDef = Any
 
