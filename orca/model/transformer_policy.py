@@ -77,7 +77,6 @@ class TransformerPolicy(nn.Module):
         )
 
         self.action_tokenizer = ActionTokenizer(
-            action_dim=self.action_dim,
             vocab_size=self.vocab_size,
             normalization_type=self.normalization_type,
         )
