@@ -330,13 +330,9 @@ def main(_):
             for data_kwargs, visualizer in zip(
                 FLAGS.config.dataset_kwargs["data_kwargs_list"], visualizers
             ):
-                raw_infos = visualizer.raw_evaluations(
-                    policy_fn, max_trajs=100, task_definition="image"
-                )
+                raw_infos = visualizer.raw_evaluations(policy_fn, max_trajs=100)
                 metrics = visualizer.metrics_for_wandb(raw_infos)
-                images = visualizer.visualize_for_wandb(
-                    policy_fn, task_definition="image", max_trajs=8
-                )
+                images = visualizer.visualize_for_wandb(policy_fn, max_trajs=8)
                 wandb_log(
                     {
                         f"offline_metrics_{data_kwargs['name']}": metrics,
