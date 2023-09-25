@@ -36,29 +36,22 @@ please reach out to [pertsch@berkeley.edu](mailto:pertsch@berkeley.edu) or downl
 ### Base Policy Training
 
 To train foundational ORCA policies, you can follow the example command below. You can modify hyperparameters like
-dataset, batch size etc. in [train_config.py](experiments/main/configs/train_config.py).
+dataset, batch size etc. in [config.py](config.py).
 ```
-python experiments/main/train.py --config.data_path=<...> --config.save_dir=<...>
+python train.py --config config.py:transformer_bc_bridge --name=orca_bridge --config.data_path=<...> --config.save_dir=<...>
 ```
 
-### Policy Finetuning
-
-To finetune on of the existing ORCA checkpoints, you can follow the example command below. You can modify hyperparameters like
-dataset, batch size etc. in [train_config.py](experiments/main/configs/train_config.py).
-```
-python experiments/main/train.py --config.data_path=<...> --config.save_dir=<...>
-```
 
 ## Code Structure
 
-|  | File | Description                                                               |
-| --- | --- |---------------------------------------------------------------------------|
-| Hyperparameters | [config.py](experiments/main/configs/train_config.py) | Defines all hyperparameters for the training run.                         |
-| Training Loop | [train.py](experiments/main/train.py) | Main training script.                                                     |
-| Datasets | [dataset.py](orca/data/dataset.py) | Functions for creating single / interleaved datasets + data augmentation. |
-| Encoders | [tokenizers.py](orca/model/tokenizers.py) | Tokenizers that encode image / text inputs into tokens.                   |
-| Model + Objective | [transformer_policy.py](orca/model/transformer_policy.py) | Sort tokens into sequence, run forward pass, compute loss.                |
-| Visualization | [visualization_lib.py](experiments/main/visualization_lib.py) | Utilities for offline qualitative & quantitative eval.                    |
+|  | File                                                    | Description                                                               |
+| --- |---------------------------------------------------------|---------------------------------------------------------------------------|
+| Hyperparameters | [config.py](config.py)                                  | Defines all hyperparameters for the training run.                         |
+| Training Loop | [train.py](train.py)                                    | Main training script.                                                     |
+| Datasets | [dataset.py](orca/data/dataset.py)                      | Functions for creating single / interleaved datasets + data augmentation. |
+| Encoders | [tokenizers.py](orca/model/components/tokenizers.py)    | Tokenizers that encode image / text inputs into tokens.                   |
+| Model + Objective | [orca_policy.py](orca/model/orca_policy.py)             | Sort tokens into sequence, run forward pass, compute loss.                |
+| Visualization | [visualization_lib.py](orca/utils/visualization_lib.py) | Utilities for offline qualitative & quantitative eval.                    |
 
 ## Contributing
 Experimental things and training/eval scripts should go in `experiments/<your_name>`. To make any changes to files outside of your experiments directory, please open a pull request.
