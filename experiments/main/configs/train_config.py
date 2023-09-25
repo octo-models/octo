@@ -244,7 +244,7 @@ def get_config(config_string):
                 dataset_kwargs={
                     "common_kwargs": update_config(
                         base_data_config,
-                        resize_size=(250, 250),
+                        resize_size=(256, 256),
                     ),
                     "data_kwargs_list": [
                         {
