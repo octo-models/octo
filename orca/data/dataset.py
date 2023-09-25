@@ -154,6 +154,9 @@ def apply_common_transforms(
         goal_relabeling_kwargs (dict, optional): Additional keyword arguments to pass to the goal relabeling function.
         image_augment_kwargs (dict, optional): Keyword arguments to pass to the augmentation function. See
             `dlimp.augmentations.augment_image` for documentation.
+        task_augmentation_strategy (Optional[str], optional): The task augmentation strategy to use, or None for no task
+            augmentation. See `task_augmentation.py`.
+        task_augmentation_kwargs (dict, optional): Additional keyword arguments to pass to the task augmentation
         resize_size (tuple, optional): target (height, width) for all RGB and depth images, default to no resize.
         window_size (int, optional): The length of the snippets that trajectories are chunked into.
         skip_unlabeled (bool, optional): Whether to skip trajectories with no language labels.
