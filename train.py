@@ -107,13 +107,9 @@ def main(_):
         )
 
     def process_text(batch):
-        if text_processor is None:
-            batch.pop("language_instruction")
-        else:
-            batch["tasks"]["language_instruction"] = text_processor.encode(
-                [s.decode("utf-8") for s in batch["language_instruction"]]
-            )
-            batch.pop("language_instruction")
+        batch["tasks"]["language_instruction"] = text_processor.encode(
+            [s.decode("utf-8") for s in batch["tasks"]["language_instruction"]]
+        )
         return batch
 
     # load datasets

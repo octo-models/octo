@@ -14,7 +14,7 @@ import tqdm
 from tensorflow_datasets.core.dataset_builder import DatasetBuilder
 
 from orca.data.dataset_transforms import RLDS_TRAJECTORY_MAP_TRANSFORMS
-from orca.data.utils import bc_goal_relabeling
+from orca.data.utils import bc_goal_relabeling, task_augmentation
 
 
 def get_action_proprio_stats(
@@ -135,7 +135,9 @@ def apply_common_transforms(
     train: bool,
     goal_relabeling_strategy: Optional[str] = None,
     goal_relabeling_kwargs: dict = {},
-    augment_kwargs: dict = {},
+    image_augment_kwargs: dict = {},
+    task_augmentation_strategy: Optional[str] = None,
+    task_augmentation_kwargs: dict = {},
     window_size: int = 1,
     resize_size: Optional[Tuple[int, int]] = None,
     skip_unlabeled: bool = False,
@@ -150,8 +152,11 @@ def apply_common_transforms(
         goal_relabeling_strategy (Optional[str], optional): The goal relabeling strategy to use, or None for no goal
             relabeling. See `bc_goal_relabeling.py`.
         goal_relabeling_kwargs (dict, optional): Additional keyword arguments to pass to the goal relabeling function.
-        augment_kwargs (dict, optional): Keyword arguments to pass to the augmentation function. See
+        image_augment_kwargs (dict, optional): Keyword arguments to pass to the augmentation function. See
             `dlimp.augmentations.augment_image` for documentation.
+        task_augmentation_strategy (Optional[str], optional): The task augmentation strategy to use, or None for no task
+            augmentation. See `task_augmentation.py`.
+        task_augmentation_kwargs (dict, optional): Additional keyword arguments to pass to the task augmentation
         resize_size (tuple, optional): target (height, width) for all RGB and depth images, default to no resize.
         window_size (int, optional): The length of the snippets that trajectories are chunked into.
         skip_unlabeled (bool, optional): Whether to skip trajectories with no language labels.
@@ -189,7 +194,7 @@ def apply_common_transforms(
         dataset = dataset.frame_map(
             partial(
                 dl.transforms.augment,
-                augment_kwargs=augment_kwargs,
+                augment_kwargs=image_augment_kwargs,
             )
         )
 
@@ -199,6 +204,20 @@ def apply_common_transforms(
             partial(
                 getattr(bc_goal_relabeling, goal_relabeling_strategy),
                 **goal_relabeling_kwargs,
+            )
+        )
+
+        def move_language_instruction_to_tasks(traj):
+            traj["tasks"]["language_instruction"] = traj.pop("language_instruction")
+            return traj
+
+        dataset = dataset.map(move_language_instruction_to_tasks)
+
+    if task_augmentation_strategy is not None:
+        dataset = dataset.map(
+            partial(
+                getattr(task_augmentation, task_augmentation_strategy),
+                **task_augmentation_kwargs,
             )
         )
 
