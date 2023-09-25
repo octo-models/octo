@@ -15,8 +15,8 @@ from flax.traverse_util import flatten_dict
 from ml_collections import config_flags
 
 from orca.model import create_model_def
-from orca.model.weights import weights_loaders
-from orca.train_utils import (
+from orca.model.components.hf_weight_loaders import weights_loaders
+from orca.utils.train_utils import (
     Timer,
     create_train_state,
     format_name_with_config,
@@ -24,7 +24,7 @@ from orca.train_utils import (
     shard_batch,
 )
 
-from sim.evaluation import evaluate_gc, supply_rng
+from sim.evaluation import evaluate_gc, supply_rng, stack_and_pad_obs
 from sim.utils import make_mujoco_gc_env, load_recorded_video
 from sim.dataset import make_sim_dataset
 
@@ -43,7 +43,7 @@ flags.DEFINE_bool("debug", False, "Debug config (no wandb logging)")
 config_dir = os.path.join(os.path.dirname(__file__), "configs")
 config_flags.DEFINE_config_file(
     "config",
-    os.path.join(config_dir, "train_config.py:transformer_bc"),
+    os.path.join(config_dir, "config.py:transformer_bc"),
     "File path to the training hyperparameter configuration.",
     lock_config=False,
 )
@@ -117,10 +117,6 @@ def main(_):
         save_video_prefix="eval",
         goals=eval_goals,
     )
-    history_length = (
-        FLAGS.config.dataset_kwargs.horizon
-        - FLAGS.config.model.policy_kwargs.pred_horizon
-    )
 
     # load datasets
     logging.info(f"Loading data from {FLAGS.config.dataset_kwargs.data_path}")
@@ -158,7 +154,7 @@ def main(_):
 
     model_def = create_model_def(
         action_dim=example_batch["action"].shape[-1],
-        horizon=example_batch["observation"]["image_0"].shape[1],
+        window_size=example_batch["observation"]["image_0"].shape[1],
         **FLAGS.config.model.to_dict(),
     )
 
@@ -229,20 +225,16 @@ def main(_):
         goals,
         state,
         rng,
-        past_actions=None,
         argmax=False,
         temperature=1.0,
     ):
         # add batch dim
         observations = jax.tree_map(lambda x: x[None], observations)
         goals = jax.tree_map(lambda x: x[None], goals)
-        if past_actions is not None:
-            past_actions = past_actions[None]
         actions = state.apply_fn(
             {"params": state.params},
             observations,
             goals,
-            actions=past_actions,
             train=False,
             argmax=argmax,
             rng=rng,
@@ -254,6 +246,8 @@ def main(_):
 
     def wandb_log(info, step):
         wandb.log(flatten_dict(info, sep="/"), step=step)
+
+    horizon = FLAGS.config.dataset_kwargs.window_size - FLAGS.config.model.policy_kwargs.pred_horizon + 1
 
     timer = Timer()
     for i in tqdm.tqdm(range(int(FLAGS.config.num_steps))):
@@ -278,13 +272,16 @@ def main(_):
             timer.tock("val")
 
             rng, policy_key = jax.random.split(rng)
-            policy_fn = supply_rng(
-                partial(
-                    sample_actions,
-                    state=train_state,
-                    argmax=FLAGS.config.deterministic_eval,
+            policy_fn = stack_and_pad_obs(
+                supply_rng(
+                    partial(
+                        sample_actions,
+                        state=train_state,
+                        argmax=FLAGS.config.deterministic_eval,
+                    ),
+                    rng=policy_key,
                 ),
-                rng=policy_key,
+                horizon=horizon,
             )
 
             logging.info("Evaluating...")
@@ -296,7 +293,6 @@ def main(_):
             eval_info = evaluate_gc(
                 policy_fn,
                 eval_env,
-                history_length=history_length,
                 action_exec_horizon=FLAGS.config.action_exec_horizon,
                 num_episodes=FLAGS.config.eval_episodes,
             )
