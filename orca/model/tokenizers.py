@@ -78,7 +78,7 @@ class ImageTokenizer(nn.Module):
             for r_key in regex_keys:
                 for key in filter(re.compile(r_key).match, sorted(inputs.keys())):
                     if check_spatial:
-                        assert len(inputs[key]) >= 4
+                        assert len(inputs[key].shape) >= 4
                     extracted_outputs.append(inputs[key])
             return jnp.concatenate(extracted_outputs, axis=-1)
 
