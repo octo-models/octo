@@ -367,6 +367,43 @@ def get_config(config_string):
                 ),
             )
         ),
+        "transformer_bc_bridge_multimodal_switch": ConfigDict(
+            dict(
+                agent="transformer_bc",
+                model=update_config(
+                    base_model_config,
+                    observation_tokenizers=[
+                        (
+                            "image_tokenizer",
+                            update_config(
+                                base_tokenizer_kwargs,
+                                num_tokens=64,
+                                task_stack_keys=["image_.*"],
+                                task_film_keys=["language_instruction"],
+                            ),
+                        ),
+                    ],
+                    task_tokenizers=[],
+                ),
+                optimizer=base_optimizer_config,
+                dataset_kwargs=update_config(
+                    base_bridge_data_config,
+                    common_kwargs=dict(
+                        task_augmentation_strategy="switch_keys",
+                        task_augmentation_kwargs=dict(
+                            switch_key_groups_probs=[
+                                (["image_0"], 0.5),
+                                (["language_instruction"], 0.5),
+                            ],
+                        ),
+                    ),
+                ),
+                **update_config(
+                    base_config,
+                    text_processor="muse_embedding",
+                ),
+            )
+        ),
     }
 
     return possible_structures[config_string]
