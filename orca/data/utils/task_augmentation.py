@@ -2,8 +2,9 @@
 Contains basic logic for randomly zero-ing out keys in the task specification.
 """
 
+from typing import Any, Dict
+
 import tensorflow as tf
-from typing import Dict, Any
 
 
 def drop_keys_independent(

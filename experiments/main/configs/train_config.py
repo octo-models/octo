@@ -72,13 +72,13 @@ def get_config(config_string):
     )
 
     base_bridge_data_config = {
-        'common_kwargs': base_data_config,
-        'data_kwargs_list': [
+        "common_kwargs": base_data_config,
+        "data_kwargs_list": [
             {
-                'name': "bridge_dataset",
-                'data_dir': "/nfs/kun2/datasets/tfds",
-                'image_obs_keys': ["image_0"],
-                'state_obs_keys': ["state"],
+                "name": "bridge_dataset",
+                "data_dir": "/nfs/kun2/datasets/tfds",
+                "image_obs_keys": ["image_0"],
+                "state_obs_keys": ["state"],
             },
         ],
     }
@@ -98,7 +98,7 @@ def get_config(config_string):
             dropout_rate=0.1,
             normalization_type=normalization_type,
             pred_horizon=1,
-            cond_prev_actions=False
+            cond_prev_actions=False,
         )
     )
 
@@ -133,27 +133,25 @@ def get_config(config_string):
                 model=update_config(
                     base_model_config,
                     observation_tokenizer_kwargs={
-                        "obs-tokenizer": {
-                            "num_tokens": 60,
-                            **base_encoder_kwargs
-                        }
+                        "obs-tokenizer": {"num_tokens": 60, **base_encoder_kwargs}
                     },
                     task_tokenizer_kwargs={
-                        "goal-obs-tokenizer": {
-                            "num_tokens": 60,
-                            **base_encoder_kwargs
-                        }
+                        "goal-obs-tokenizer": {"num_tokens": 60, **base_encoder_kwargs}
                     },
                 ),
                 optimizer=base_optimizer_config,
                 dataset_kwargs={
-                    'common_kwargs': base_data_config,
-                    'data_kwargs_list': [
+                    "common_kwargs": base_data_config,
+                    "data_kwargs_list": [
                         {
-                            'name': "r2_d2_pen",
-                            'data_dir': "/nfs/kun2/datasets/r2d2/tfds",
-                            'image_obs_keys': ["exterior_image_1_left", "exterior_image_2_left", "wrist_image_left"],
-                            'state_obs_keys': ["joint_position"],
+                            "name": "r2_d2_pen",
+                            "data_dir": "/nfs/kun2/datasets/r2d2/tfds",
+                            "image_obs_keys": [
+                                "exterior_image_1_left",
+                                "exterior_image_2_left",
+                                "wrist_image_left",
+                            ],
+                            "state_obs_keys": ["joint_position"],
                         },
                     ],
                 },
@@ -166,36 +164,34 @@ def get_config(config_string):
                 model=update_config(
                     base_model_config,
                     observation_tokenizer_kwargs={
-                        "obs-tokenizer": {
-                            "num_tokens": 60,
-                            **base_encoder_kwargs
-                        }
+                        "obs-tokenizer": {"num_tokens": 60, **base_encoder_kwargs}
                     },
                     task_tokenizer_kwargs={
-                        "goal-obs-tokenizer": {
-                            "num_tokens": 60,
-                            **base_encoder_kwargs
-                        }
+                        "goal-obs-tokenizer": {"num_tokens": 60, **base_encoder_kwargs}
                     },
                 ),
                 optimizer=base_optimizer_config,
                 dataset_kwargs={
-                    'common_kwargs': update_config(
+                    "common_kwargs": update_config(
                         base_data_config,
                         resize_size=(180, 320),
                     ),
-                    'data_kwargs_list': [
+                    "data_kwargs_list": [
                         {
-                            'name': "r2_d2_pen",
-                            'data_dir': "/nfs/kun2/datasets/r2d2/tfds",
-                            'image_obs_keys': ["exterior_image_1_left", "exterior_image_2_left", "wrist_image_left"],
-                            'state_obs_keys': ["joint_position"],
+                            "name": "r2_d2_pen",
+                            "data_dir": "/nfs/kun2/datasets/r2d2/tfds",
+                            "image_obs_keys": [
+                                "exterior_image_1_left",
+                                "exterior_image_2_left",
+                                "wrist_image_left",
+                            ],
+                            "state_obs_keys": ["joint_position"],
                         },
                         {
-                            'name': "bridge_dataset",
-                            'data_dir': "/nfs/kun2/datasets/tfds",
-                            'image_obs_keys': ["image_0", None, None],
-                            'state_obs_keys': ["state"],
+                            "name": "bridge_dataset",
+                            "data_dir": "/nfs/kun2/datasets/tfds",
+                            "image_obs_keys": ["image_0", None, None],
+                            "state_obs_keys": ["state"],
                         },
                     ],
                 },

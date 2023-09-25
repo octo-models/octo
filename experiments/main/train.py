@@ -108,17 +108,20 @@ def main(_):
 
     def process_text(batch):
         batch["tasks"]["language_instruction"] = text_processor.encode(
-                [s.decode("utf-8") for s in batch["tasks"]["language_instruction"]]
-            )
+            [s.decode("utf-8") for s in batch["tasks"]["language_instruction"]]
+        )
         return batch
 
     # load datasets
-    sample_weights = (FLAGS.config.dataset_kwargs['sample_weights']
-                      if 'sample_weights' in FLAGS.config.dataset_kwargs else None)
+    sample_weights = (
+        FLAGS.config.dataset_kwargs["sample_weights"]
+        if "sample_weights" in FLAGS.config.dataset_kwargs
+        else None
+    )
     train_data = (
         make_interleaved_dataset(
-            FLAGS.config.dataset_kwargs['common_kwargs'],
-            FLAGS.config.dataset_kwargs['data_kwargs_list'],
+            FLAGS.config.dataset_kwargs["common_kwargs"],
+            FLAGS.config.dataset_kwargs["data_kwargs_list"],
             train=True,
             sample_weights=sample_weights,
         )
@@ -127,30 +130,42 @@ def main(_):
     )
     val_datas = []
     visualizers = []
-    for dataset_kwargs in FLAGS.config.dataset_kwargs['data_kwargs_list']:
+    for dataset_kwargs in FLAGS.config.dataset_kwargs["data_kwargs_list"]:
         val_data_kwargs = copy.deepcopy(dataset_kwargs)
-        val_data_kwargs.update(**FLAGS.config.dataset_kwargs['common_kwargs'])
+        val_data_kwargs.update(**FLAGS.config.dataset_kwargs["common_kwargs"])
         val_dataset = make_dataset(**val_data_kwargs, train=False)
         action_proprio_metadata = val_dataset.action_proprio_metadata
         val_datas.append(
-                val_dataset
-                .unbatch()
-                .shuffle(FLAGS.config.shuffle_buffer_size)
-                .repeat()
-                .batch(FLAGS.config.batch_size))
+            val_dataset.unbatch()
+            .shuffle(FLAGS.config.shuffle_buffer_size)
+            .repeat()
+            .batch(FLAGS.config.batch_size)
+        )
         visualizers.append(
-            Visualizer(val_data_kwargs, text_processor=text_processor, cache_trajs=False))
+            Visualizer(
+                val_data_kwargs, text_processor=text_processor, cache_trajs=False
+            )
+        )
 
         # save normalization constants for evaluation
         if save_dir is not None:
             with tf.io.gfile.GFile(
-                    os.path.join(save_dir, f"action_proprio_metadata_{val_data_kwargs['name']}.json"), "w"
+                os.path.join(
+                    save_dir, f"action_proprio_metadata_{val_data_kwargs['name']}.json"
+                ),
+                "w",
             ) as f:
-                json.dump(jax.tree_map(lambda x: [float(e) for e in x.numpy()], action_proprio_metadata), f)
+                json.dump(
+                    jax.tree_map(
+                        lambda x: [float(e) for e in x.numpy()], action_proprio_metadata
+                    ),
+                    f,
+                )
 
     train_data_iter = map(shard_fn, map(process_text, train_data.as_numpy_iterator()))
     val_data_iters = [
-        map(shard_fn, map(process_text, val_data.iterator())) for val_data in val_datas]
+        map(shard_fn, map(process_text, val_data.iterator())) for val_data in val_datas
+    ]
 
     example_batch = next(train_data_iter)
     logging.info(f"Batch size: {example_batch['action'].shape[0]}")
@@ -268,7 +283,9 @@ def main(_):
             logging.info("Evaluating...")
             timer.tick("val")
             per_dataset_metrics = []
-            for data_kwargs, val_data_iter in zip(FLAGS.config.dataset_kwargs['data_kwargs_list'], val_data_iters):
+            for data_kwargs, val_data_iter in zip(
+                FLAGS.config.dataset_kwargs["data_kwargs_list"], val_data_iters
+            ):
                 metrics = []
                 for _, batch in zip(range(FLAGS.config.num_val_batches), val_data_iter):
                     metrics.append(eval_step(train_state, batch))
@@ -277,11 +294,21 @@ def main(_):
                 per_dataset_metrics.append(metrics)
 
             # log weighted aggregate metrics
-            sample_weights = sample_weights if sample_weights is not None else [1.] * len(per_dataset_metrics)
-            sample_weights = sample_weights / np.sum(sample_weights)    # normalize to sum to 1
+            sample_weights = (
+                sample_weights
+                if sample_weights is not None
+                else [1.0] * len(per_dataset_metrics)
+            )
+            sample_weights = sample_weights / np.sum(
+                sample_weights
+            )  # normalize to sum to 1
             agg_metrics = jax.tree_map(
-                lambda *xs: np.sum(xs), *[jax.tree_map(lambda x: x * weight, metric)
-                                          for metric, weight in zip(per_dataset_metrics, sample_weights)])
+                lambda *xs: np.sum(xs),
+                *[
+                    jax.tree_map(lambda x: x * weight, metric)
+                    for metric, weight in zip(per_dataset_metrics, sample_weights)
+                ],
+            )
             wandb_log({f"validation_aggregate": agg_metrics}, step=i)
             timer.tock("val")
 
@@ -292,7 +319,9 @@ def main(_):
                 FLAGS.config.batch_size,
                 sharding=sharding,
             )
-            for data_kwargs, visualizer in zip(FLAGS.config.dataset_kwargs['data_kwargs_list'], visualizers):
+            for data_kwargs, visualizer in zip(
+                FLAGS.config.dataset_kwargs["data_kwargs_list"], visualizers
+            ):
                 raw_infos = visualizer.raw_evaluations(
                     policy_fn, max_trajs=100, task_definition="image"
                 )
@@ -300,8 +329,13 @@ def main(_):
                 images = visualizer.visualize_for_wandb(
                     policy_fn, task_definition="image", max_trajs=8
                 )
-                wandb_log({f"offline_metrics_{data_kwargs['name']}": metrics,
-                           f"visualizations_{data_kwargs['name']}": images}, step=i)
+                wandb_log(
+                    {
+                        f"offline_metrics_{data_kwargs['name']}": metrics,
+                        f"visualizations_{data_kwargs['name']}": images,
+                    },
+                    step=i,
+                )
             timer.tock("visualize")
 
         if (i + 1) % FLAGS.config.save_interval == 0 and save_dir is not None:
