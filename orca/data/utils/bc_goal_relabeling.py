@@ -5,7 +5,7 @@ Contains simple goal relabeling logic for BC use-cases where rewards and next_ob
 import tensorflow as tf
 
 
-def uniform(traj, _probs=None):
+def uniform(traj):
     """
     Relabels with a true uniform distribution over future states.
     """
