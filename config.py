@@ -253,16 +253,21 @@ def get_config(config_string):
                         pred_horizon=1,
                     ),
                     observation_tokenizers=[
-                        ("image_tokenizer", dict(
-                        num_tokens=64,
-                        encoder="resnetv1-18-bridge",
-                        encoder_kwargs=dict(
-                            pooling_method="none",
-                            add_spatial_coordinates=True,
-                            act="swish",
+                        (
+                            "image_tokenizer",
+                            dict(
+                                num_tokens=64,
+                                encoder="resnetv1-18-bridge",
+                                encoder_kwargs=dict(
+                                    pooling_method="none",
+                                    add_spatial_coordinates=True,
+                                    act="swish",
+                                ),
+                                task_stack_keys=[
+                                    "image_.*"
+                                ],  # by default, early fuse goal images into visual encoder
                             ),
-                        task_stack_keys=['image_.*'],  # by default, early fuse goal images into visual encoder
-                        )),
+                        ),
                     ],
                     task_tokenizers=[],
                 ),
@@ -281,7 +286,7 @@ def get_config(config_string):
                         },
                     ],
                 },
-                **update_config(base_config, batch_size=2),
+                **update_config(base_config, batch_size=2, num_steps=20),
             )
         ),
         "transformer_bc_bridge_distilbert": ConfigDict(
