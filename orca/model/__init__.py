@@ -1,30 +1,31 @@
 import logging
 
-from .tokenizers import tokenizers
-from .transformer_policy import TransformerPolicy
+from orca.model.components.tokenizers import TOKENIZERS
+
+from .orca_policy import ORCAPolicy
 
 
 def create_model_def(
-    observation_tokenizer_kwargs,
-    task_tokenizer_kwargs,
+    observation_tokenizers,
+    task_tokenizers,
     action_dim,
-    horizon,
+    window_size,
     policy_kwargs,
     **kwargs,
 ):
     if len(kwargs) > 0:
         logging.warn(f"Extra kwargs passed into create_model_def: {kwargs}")
     observation_tokenizer_defs = tuple(
-        tokenizers[k](**kwargs) for k, kwargs in observation_tokenizer_kwargs.items()
+        TOKENIZERS[tokenizer](**kwargs) for tokenizer, kwargs in observation_tokenizers
     )
     task_tokenizer_defs = tuple(
-        tokenizers[k](**kwargs) for k, kwargs in task_tokenizer_kwargs.items()
+        TOKENIZERS[tokenizer](**kwargs) for tokenizer, kwargs in task_tokenizers
     )
-    model_def = TransformerPolicy(
+    model_def = ORCAPolicy(
         observation_tokenizers=observation_tokenizer_defs,
         task_tokenizers=task_tokenizer_defs,
         action_dim=action_dim,
-        horizon=horizon,
+        window_size=window_size,
         **policy_kwargs,
     )
     return model_def
