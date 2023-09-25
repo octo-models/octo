@@ -61,10 +61,12 @@ python train.py --config config.py:transformer_bc_bridge --name=orca_bridge --co
 ## Contributing
 Experimental things and training/eval scripts should go in `experiments/<your_name>`. To make any changes to files outside of your experiments directory, please open a pull request.
 
-To enable code checks and auto-formatting, please install pre-commit hooks:
-```
-pre-commit install
-```
+Steps to contribute:
+1. Fork the repo and create your branch from `master`.
+2. Use `pre-commit` to enable code checks and auto-formatting.
+3. Test that a basic training starts with the debug dataset with: ```
+python experiments/main/train.py --config experiments/main/configs/train_config.py:ci_debug_dataset  --name debug```
+
 
 ## FAQ
 
