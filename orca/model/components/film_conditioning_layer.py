@@ -3,7 +3,7 @@
 import flax.linen as nn
 import jax.numpy as jnp
 
-from orca.typing import *
+from orca.utils.typing import *
 
 
 class FilmConditioning(nn.Module):

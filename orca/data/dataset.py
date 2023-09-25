@@ -108,24 +108,24 @@ def _normalize_action_and_proprio(traj, metadata, normalization_type):
     raise ValueError(f"Unknown normalization type {normalization_type}")
 
 
-def _chunk_act_obs(traj, horizon):
+def _chunk_act_obs(traj, window_size):
     """
-    Chunks actions and observations into the given horizon.
+    Chunks actions and observations into the given window_size.
 
-    The "action" and "observation" keys are each given a new axis (at index 1) of size `horizon`.
+    The "action" and "observation" keys are each given a new axis (at index 1) of size `window_size`.
     """
     traj_len = tf.shape(traj["action"])[0]
     chunk_indices = tf.broadcast_to(
-        tf.range(-horizon + 1, 1), [traj_len, horizon]
-    ) + tf.broadcast_to(tf.range(traj_len)[:, None], [traj_len, horizon])
-    # pads by repeating the first timestep
-    chunk_indices = tf.maximum(chunk_indices, 0)
-    traj["observation"] = tf.nest.map_structure(
-        lambda x: tf.gather(x, chunk_indices), traj["observation"]
-    )
-    traj["action"] = tf.nest.map_structure(
-        lambda x: tf.gather(x, chunk_indices), traj["action"]
-    )
+        tf.range(-window_size + 1, 1), [traj_len, window_size]
+    ) + tf.broadcast_to(tf.range(traj_len)[:, None], [traj_len, window_size])
+    floored_chunk_indices = tf.maximum(chunk_indices, 0)
+    for key in ["observation", "action"]:
+        traj[key] = tf.nest.map_structure(
+            lambda x: tf.gather(x, floored_chunk_indices), traj[key]
+        )
+    # out of bounds indices will be masked in transformer
+    traj["observation"]["pad_mask"] = chunk_indices >= 0
+
     return traj
 
 
@@ -138,8 +138,8 @@ def apply_common_transforms(
     image_augment_kwargs: dict = {},
     task_augmentation_strategy: Optional[str] = None,
     task_augmentation_kwargs: dict = {},
+    window_size: int = 1,
     resize_size: Optional[Tuple[int, int]] = None,
-    horizon: int = 2,
     skip_unlabeled: bool = False,
     action_proprio_metadata: Optional[dict] = None,
     action_proprio_normalization_type: Optional[str] = None,
@@ -155,7 +155,7 @@ def apply_common_transforms(
         image_augment_kwargs (dict, optional): Keyword arguments to pass to the augmentation function. See
             `dlimp.augmentations.augment_image` for documentation.
         resize_size (tuple, optional): target (height, width) for all RGB and depth images, default to no resize.
-        horizon (int, optional): The length of the snippets that trajectories are chunked into.
+        window_size (int, optional): The length of the snippets that trajectories are chunked into.
         skip_unlabeled (bool, optional): Whether to skip trajectories with no language labels.
         action_proprio_metadata (Optional[dict], optional): A dictionary containing metadata about the action and
             proprio statistics. If None, no normalization is performed.
@@ -219,10 +219,7 @@ def apply_common_transforms(
         )
 
     # chunks actions and observations
-    assert (
-        horizon >= 2
-    ), "Horizon must be at least 2 to provide a timestep for conditioning and a timestep for prediction."
-    dataset = dataset.map(partial(_chunk_act_obs, horizon=horizon))
+    dataset = dataset.map(partial(_chunk_act_obs, window_size=window_size))
 
     return dataset
 

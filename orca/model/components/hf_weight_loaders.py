@@ -3,7 +3,7 @@ import functools as ft
 from flax.core.frozen_dict import freeze
 from transformers import FlaxAutoModel
 
-from orca.model.clip import clip_weights_loader
+from orca.model.components.clip import clip_weights_loader
 
 
 def hf_weights_loader(hf_model, params):
