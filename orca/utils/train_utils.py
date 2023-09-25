@@ -8,7 +8,7 @@ import numpy as np
 from flax.training import train_state
 from jax.experimental.compilation_cache import compilation_cache
 
-from orca.typing import PRNGKey
+from orca.utils.typing import PRNGKey
 
 
 class TrainState(train_state.TrainState):

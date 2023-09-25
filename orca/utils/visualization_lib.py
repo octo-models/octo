@@ -30,9 +30,7 @@ BASE_SUB_CONDITIONS = {
 }
 
 
-def run_policy_on_trajectory(
-    policy_fn, traj, *, text_processor=None
-):
+def run_policy_on_trajectory(policy_fn, traj, *, text_processor=None):
     """
     Args:
         policy_fn: A function that takes in a batch of observations and tasks and returns $n$ sampled actions

@@ -1,7 +1,8 @@
 import logging
 
-from .tokenizers import TOKENIZERS
-from .transformer_policy import TransformerPolicy
+from orca.model.components.tokenizers import TOKENIZERS
+
+from .orca_policy import ORCAPolicy
 
 
 def create_model_def(
@@ -20,7 +21,7 @@ def create_model_def(
     task_tokenizer_defs = tuple(
         TOKENIZERS[tokenizer](**kwargs) for tokenizer, kwargs in task_tokenizers
     )
-    model_def = TransformerPolicy(
+    model_def = ORCAPolicy(
         observation_tokenizers=observation_tokenizer_defs,
         task_tokenizers=task_tokenizer_defs,
         action_dim=action_dim,
