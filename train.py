@@ -15,13 +15,12 @@ from absl import app, flags, logging
 from flax.training import checkpoints
 from flax.traverse_util import flatten_dict
 from ml_collections import config_flags
-from visualization_lib import Visualizer
 
 from orca.data.dataset import make_dataset, make_interleaved_dataset
 from orca.data.utils.text_processing import text_processors
 from orca.model import create_model_def
-from orca.model.weights import weights_loaders
-from orca.train_utils import (
+from orca.model.components.hf_weight_loaders import weights_loaders
+from orca.utils.train_utils import (
     Timer,
     batched_apply,
     create_train_state,
@@ -29,6 +28,7 @@ from orca.train_utils import (
     initialize_compilation_cache,
     shard_batch,
 )
+from orca.utils.visualization_lib import Visualizer
 
 try:
     from jax_smi import initialise_tracking  # type: ignore
@@ -45,7 +45,7 @@ flags.DEFINE_bool("debug", False, "Debug config (no wandb logging)")
 config_dir = os.path.join(os.path.dirname(__file__), "configs")
 config_flags.DEFINE_config_file(
     "config",
-    os.path.join(config_dir, "train_config.py:transformer_bc"),
+    os.path.join(config_dir, "config.py:transformer_bc"),
     "File path to the training hyperparameter configuration.",
     lock_config=False,
 )
@@ -177,7 +177,7 @@ def main(_):
     # set up model, optimizer, loss
     model_def = create_model_def(
         action_dim=example_batch["action"].shape[-1],
-        horizon=example_batch["observation"]["image_0"].shape[1],
+        window_size=example_batch["observation"]["image_0"].shape[1],
         **FLAGS.config.model.to_dict(),
     )
 
@@ -242,8 +242,16 @@ def main(_):
         loss, info = loss_fn(state.params, state, batch, state.rng, train=False)
         return info
 
+    horizon = (
+        FLAGS.config.dataset_kwargs.common_kwargs.window_size
+        - FLAGS.config.model.policy_kwargs.pred_horizon
+        + 1
+    )
+
     @partial(jax.jit, static_argnames=("argmax", "n"))
     def get_policy_sampled_actions(state, observations, tasks, *, argmax=False, n=1):
+        # only use first horizon timesteps as input to predict_action
+        observations = jax.tree_map(lambda x: x[:, :horizon], observations)
         actions = state.apply_fn(
             {"params": state.params},
             observations,
