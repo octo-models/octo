@@ -239,6 +239,56 @@ def get_config(config_string):
                 **base_config,
             )
         ),
+        "ci_debug_dataset": ConfigDict(
+            dict(
+                agent="minimal_transformer",
+                model=dict(
+                    policy_kwargs=dict(
+                        num_layers=1,
+                        mlp_dim=128,
+                        vocab_size=256,
+                        num_heads=1,
+                        dropout_rate=0.1,
+                        normalization_type=normalization_type,
+                        pred_horizon=1,
+                    ),
+                    observation_tokenizers=[
+                        (
+                            "image_tokenizer",
+                            dict(
+                                num_tokens=64,
+                                encoder="resnetv1-18-bridge",
+                                encoder_kwargs=dict(
+                                    pooling_method="none",
+                                    add_spatial_coordinates=True,
+                                    act="swish",
+                                ),
+                                task_stack_keys=[
+                                    "image_.*"
+                                ],  # by default, early fuse goal images into visual encoder
+                            ),
+                        ),
+                    ],
+                    task_tokenizers=[],
+                ),
+                optimizer=base_optimizer_config,
+                dataset_kwargs={
+                    "common_kwargs": update_config(
+                        base_data_config,
+                        resize_size=(256, 256),
+                    ),
+                    "data_kwargs_list": [
+                        {
+                            "name": "bridge_dataset",
+                            "data_dir": "./datasets/debug_dataset",
+                            "image_obs_keys": ["image_0"],
+                            "state_obs_keys": ["state"],
+                        },
+                    ],
+                },
+                **update_config(base_config, batch_size=2, num_steps=20),
+            )
+        ),
         "transformer_bc_bridge_distilbert": ConfigDict(
             dict(
                 agent="transformer_bc",
