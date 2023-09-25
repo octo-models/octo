@@ -103,8 +103,7 @@ def get_config(config_string):
     base_task_augmentation_kwargs = dict(
         task_augmentation_strategy="drop_keys_independent",
         task_augmentation_kwargs=dict(
-            drop_keys_probs={"language_instruction": 0.5},
-            drop_key_groups_probs=[(["image_0"], 0.5)],
+            drop_key_groups_probs=[(["image_0"], 0.5), (["language_instruction"], 0.5)],
             allow_drop_all=True,
         ),
     )
