@@ -28,7 +28,7 @@ See the [Jax Github page](https://github.com/google/jax) for more details on ins
 
 Test the installation by training on the debug dataset:
 ```
-python experiments/main/train.py --config experiments/main/configs/train_config.py:ci_debug_dataset  --name debug
+python train.py --config config.py:ci_debug_dataset  --name debug
 ```
 
 ## Training
