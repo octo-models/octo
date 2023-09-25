@@ -46,7 +46,7 @@ def get_config(config_string):
 
     base_data_config = dict(
         horizon=2,
-        augment_kwargs=dict(
+        image_augment_kwargs=dict(
             random_resized_crop=dict(scale=[0.8, 1.0], ratio=[0.9, 1.1]),
             random_brightness=[0.2],
             random_contrast=[0.8, 1.2],
@@ -62,6 +62,13 @@ def get_config(config_string):
         ),
         goal_relabeling_strategy="uniform",
         action_proprio_normalization_type=normalization_type,
+        task_augmentation_strategy="drop_keys_independent",
+        task_augmentation_kwargs={
+            "drop_keys_probs": {
+                "language_instruction": 0.0,
+                "image_0": 0.0,
+            }
+        },
     )
 
     base_bridge_data_config = {

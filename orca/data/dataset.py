@@ -204,6 +204,12 @@ def apply_common_transforms(
             )
         )
 
+        def move_language_instruction_to_tasks(traj):
+            traj["tasks"]["language_instruction"] = traj.pop("language_instruction")
+            return traj
+        
+        dataset = dataset.map(move_language_instruction_to_tasks)
+
     if task_augmentation_strategy is not None:
         dataset = dataset.map(
             partial(
