@@ -26,6 +26,11 @@ pip install --upgrade "jax[tpu]==0.4.13" -f https://storage.googleapis.com/jax-r
 ```
 See the [Jax Github page](https://github.com/google/jax) for more details on installing Jax.
 
+Test the installation by training on the debug dataset:
+```
+python experiments/main/train.py --config experiments/main/configs/train_config.py:ci_debug_dataset  --name debug
+```
+
 ## Training
 
 ### Data
