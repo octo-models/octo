@@ -44,7 +44,7 @@ def get_config(config_string):
 
     base_data_config = dict(
         window_size=4,
-        augment_kwargs=dict(
+        image_augment_kwargs=dict(
             random_resized_crop=dict(scale=[0.8, 1.0], ratio=[0.9, 1.1]),
             random_brightness=[0.2],
             random_contrast=[0.8, 1.2],
@@ -98,6 +98,14 @@ def get_config(config_string):
         task_stack_keys=[
             "image_.*"
         ],  # by default, early fuse goal images into visual encoder
+    )
+
+    base_task_augmentation_kwargs = dict(
+        task_augmentation_strategy="drop_keys_independent",
+        task_augmentation_kwargs=dict(
+            drop_key_groups_probs=[(["image_0"], 0.5), (["language_instruction"], 0.5)],
+            allow_drop_all=True,
+        ),
     )
 
     possible_structures = {
@@ -325,6 +333,37 @@ def get_config(config_string):
                         encode_with_model=False,
                     ),
                     pretrained_weights=["distilbert"],
+                ),
+            )
+        ),
+        "transformer_bc_bridge_multimodal": ConfigDict(
+            dict(
+                agent="transformer_bc",
+                model=update_config(
+                    base_model_config,
+                    observation_tokenizers=[
+                        (
+                            "image_tokenizer",
+                            update_config(
+                                base_tokenizer_kwargs,
+                                num_tokens=64,
+                                task_stack_keys=["image_.*"],
+                                task_film_keys=["language_instruction"],
+                            ),
+                        ),
+                    ],
+                    task_tokenizers=[],
+                ),
+                optimizer=base_optimizer_config,
+                dataset_kwargs=update_config(
+                    base_bridge_data_config,
+                    common_kwargs=dict(
+                        **base_task_augmentation_kwargs,
+                    ),
+                ),
+                **update_config(
+                    base_config,
+                    text_processor="muse_embedding",
                 ),
             )
         ),
