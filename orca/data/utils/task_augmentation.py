@@ -11,13 +11,15 @@ def drop_keys_independent(
     traj: Dict[str, Any],
     drop_keys_probs: Dict[str, float],
     drop_key_groups_probs: List[Tuple[List[str], float]],
-    allow_drop_all: bool = False, 
+    allow_drop_all: bool = False,
 ) -> Dict[str, Any]:
     """
     Independently drop keys in the tasks dictionary.
 
     :param traj: A dictionary containing trajectory data. should have a "tasks" key.
     :param drop_keys_probs: A dictionary specifying the dropout probability for each key in tasks.
+    :param drop_key_groups_probs: A list of tuples, where each tuple contains a list of keys and a dropout probability.
+    :param allow_drop_all: If True, allow dropping all keys. Otherwise, if all keys are dropped, return the original
     :return: A dictionary with keys dropped out according to the specified probabilities.
     """
 
@@ -39,7 +41,9 @@ def drop_keys_independent(
         dropped_all = dropped_all and drop_key
         new_tasks[key] = tf.where(
             drop_key,
-            tf.zeros_like(tasks[key]) if tf.debugging.is_numeric_tensor(tasks[key]) else "",
+            tf.zeros_like(tasks[key])
+            if tf.debugging.is_numeric_tensor(tasks[key])
+            else "",
             tasks[key],
         )
 
@@ -54,7 +58,9 @@ def drop_keys_independent(
         for key in key_group:
             new_tasks[key] = tf.where(
                 drop_group,
-                tf.zeros_like(tasks[key]) if tf.debugging.is_numeric_tensor(tasks[key]) else "",
+                tf.zeros_like(tasks[key])
+                if tf.debugging.is_numeric_tensor(tasks[key])
+                else "",
                 tasks[key],
             )
 
