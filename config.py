@@ -100,6 +100,15 @@ def get_config(config_string):
         ],  # by default, early fuse goal images into visual encoder
     )
 
+    base_task_augmentation_kwargs = dict(
+        task_augmentation_strategy = "drop_keys_independent",
+        task_augmentation_kwargs = dict(
+            drop_keys_probs = {"language_instruction": 0.5},
+            drop_key_groups_probs = [(["image_0"], 0.5)],
+            allow_drop_all = False,
+        )
+    )
+
     possible_structures = {
         "transformer_bc_bridge": ConfigDict(
             dict(
@@ -117,6 +126,37 @@ def get_config(config_string):
                 optimizer=base_optimizer_config,
                 dataset_kwargs=base_bridge_data_config,
                 **base_config,
+            )
+        ),
+        "transformer_bc_bridge_multimodal": ConfigDict(
+            dict(
+                agent="transformer_bc",
+                model=update_config(
+                    base_model_config,
+                    observation_tokenizers=[
+                        (
+                            "image_tokenizer",
+                            update_config(
+                                base_tokenizer_kwargs,
+                                num_tokens=64,
+                                task_stack_keys=["image_.*"],
+                                task_film_keys=["language_instruction"],
+                            ),
+                        ),
+                    ],
+                    task_tokenizers=[],
+                ),
+                optimizer=base_optimizer_config,
+                dataset_kwargs=update_config(
+                    base_bridge_data_config,
+                    common_kwargs=dict(
+                        **base_task_augmentation_kwargs,
+                    ),
+                ),
+                **update_config(
+                    base_config,
+                    text_processor="muse_embedding",
+                ),
             )
         ),
         "transformer_bc_r2d2": ConfigDict(
