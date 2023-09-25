@@ -19,7 +19,7 @@ import tensorflow as tf
 from widowx_envs.utils.multicam_server_rospkg.src.topic_utils import IMTopic
 from orca.model import create_model_def
 from functools import partial
-from orca.train_utils import create_train_state
+from orca.utils.train_utils import create_train_state
 import optax
 
 np.set_printoptions(suppress=True)

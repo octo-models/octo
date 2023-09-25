@@ -7,9 +7,9 @@ import jax
 import jax.numpy as jnp
 from jax.scipy.stats import norm
 
-from orca.model.clip import CLIPTextTokenizer, CLIPVisionTokenizer
-from orca.model.transformer import MlpBlock
-from orca.model.vision import encoders
+from orca.model.components import encoders
+from orca.model.components.clip import CLIPTextTokenizer, CLIPVisionTokenizer
+from orca.model.components.transformer import MlpBlock
 
 EPS = 1e-6
 
