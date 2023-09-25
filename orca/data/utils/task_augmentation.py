@@ -11,6 +11,7 @@ def drop_keys_independent(
     traj: Dict[str, Any],
     drop_keys_probs: Dict[str, float],
     drop_key_groups_probs: List[Tuple[List[str], float]],
+    allow_drop_all: bool = False, 
 ) -> Dict[str, Any]:
     """
     Independently drop keys in the tasks dictionary.
@@ -26,6 +27,7 @@ def drop_keys_independent(
 
     tasks = traj["tasks"]
     new_tasks = tasks.copy()
+    dropped_all = True
 
     for key in drop_keys_probs:
         if key not in tasks:
@@ -33,9 +35,11 @@ def drop_keys_independent(
                 f"{key} is not present in tasks dictionary. tasks keys: {tasks.keys()}"
             )
 
+        drop_key = tf.random.uniform([]) < drop_keys_probs[key]
+        dropped_all = dropped_all and drop_key
         new_tasks[key] = tf.where(
-            tf.random.uniform([]) < drop_keys_probs[key],
-            tf.zeros_like(tasks[key]) if tf.is_numeric_tensor(tasks[key]) else "",
+            drop_key,
+            tf.zeros_like(tasks[key]) if tf.debugging.is_numeric_tensor(tasks[key]) else "",
             tasks[key],
         )
 
@@ -46,13 +50,16 @@ def drop_keys_independent(
             )
 
         drop_group = tf.random.uniform([]) < prob
+        dropped_all = dropped_all and drop_group
         for key in key_group:
             new_tasks[key] = tf.where(
                 drop_group,
-                tf.zeros_like(tasks[key]) if tf.is_numeric_tensor(tasks[key]) else "",
+                tf.zeros_like(tasks[key]) if tf.debugging.is_numeric_tensor(tasks[key]) else "",
                 tasks[key],
             )
 
-    traj["tasks"] = new_tasks
+    if not allow_drop_all and dropped_all:
+        return traj
 
+    traj["tasks"] = new_tasks
     return traj
