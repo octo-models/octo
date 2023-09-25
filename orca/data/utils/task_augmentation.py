@@ -3,6 +3,7 @@ Contains basic logic for randomly zero-ing out keys in the task specification.
 """
 
 import tensorflow as tf
+from typing import Dict, Any
 
 
 def drop_keys_independent(
@@ -15,13 +16,15 @@ def drop_keys_independent(
     :param drop_keys_probs: A dictionary specifying the dropout probability for each key in tasks.
     :return: A dictionary with keys dropped out according to the specified probabilities.
     """
-    new_tasks = traj["tasks"].copy()
+    tasks = traj["tasks"]
+    new_tasks = tasks.copy()
+
     for key in drop_keys_probs:
         if key not in tasks:
-            raise KeyError(f"{key} is not present in tasks dictionary.")
+            raise KeyError(f"{key} is not present in tasks dictionary. {tasks.keys()}")
 
         new_tasks[key] = tf.where(
-            tf.random.uniform([tf.shape(tasks[key])[0]]) < drop_keys_probs[key],
+            tf.random.uniform([]) < drop_keys_probs[key],
             tf.zeros_like(tasks[key]),
             tasks[key],
         )
