@@ -1,6 +1,7 @@
+from copy import deepcopy
+
 from ml_collections import ConfigDict
 from ml_collections.config_dict import placeholder
-from copy import deepcopy
 
 
 def update_config(config, **kwargs):
@@ -62,13 +63,13 @@ def get_config(config_string):
     )
 
     base_bridge_data_config = {
-        'common_kwargs': base_data_config,
-        'data_kwargs_list': [
+        "common_kwargs": base_data_config,
+        "data_kwargs_list": [
             {
-                'name': "bridge_dataset",
-                'data_dir': "/nfs/kun2/datasets/tfds",
-                'image_obs_keys': ["image_0"],
-                'state_obs_keys': ["state"],
+                "name": "bridge_dataset",
+                "data_dir": "/nfs/kun2/datasets/tfds",
+                "image_obs_keys": ["image_0"],
+                "state_obs_keys": ["state"],
             },
         ],
     }
@@ -94,7 +95,9 @@ def get_config(config_string):
         encoder_kwargs=dict(
             pooling_method="none", add_spatial_coordinates=True, act="swish"
         ),
-        task_stack_keys=['image_.*'],       # by default, early fuse goal images into visual encoder
+        task_stack_keys=[
+            "image_.*"
+        ],  # by default, early fuse goal images into visual encoder
     )
 
     possible_structures = {
@@ -104,7 +107,10 @@ def get_config(config_string):
                 model=update_config(
                     base_model_config,
                     observation_tokenizers=[
-                        ("image_tokenizer", {"num_tokens": 64, **base_tokenizer_kwargs}),
+                        (
+                            "image_tokenizer",
+                            {"num_tokens": 64, **base_tokenizer_kwargs},
+                        ),
                     ],
                     task_tokenizers=[],
                 ),
@@ -119,19 +125,26 @@ def get_config(config_string):
                 model=update_config(
                     base_model_config,
                     observation_tokenizers=[
-                        ("image_tokenizer", {"num_tokens": 60, **base_tokenizer_kwargs}),
+                        (
+                            "image_tokenizer",
+                            {"num_tokens": 60, **base_tokenizer_kwargs},
+                        ),
                     ],
                     task_tokenizers=[],
                 ),
                 optimizer=base_optimizer_config,
                 dataset_kwargs={
-                    'common_kwargs': base_data_config,
-                    'data_kwargs_list': [
+                    "common_kwargs": base_data_config,
+                    "data_kwargs_list": [
                         {
-                            'name': "r2_d2_pen",
-                            'data_dir': "/nfs/kun2/datasets/r2d2/tfds",
-                            'image_obs_keys': ["exterior_image_1_left", "exterior_image_2_left", "wrist_image_left"],
-                            'state_obs_keys': ["joint_position"],
+                            "name": "r2_d2_pen",
+                            "data_dir": "/nfs/kun2/datasets/r2d2/tfds",
+                            "image_obs_keys": [
+                                "exterior_image_1_left",
+                                "exterior_image_2_left",
+                                "wrist_image_left",
+                            ],
+                            "state_obs_keys": ["joint_position"],
                         },
                     ],
                 },
@@ -144,28 +157,35 @@ def get_config(config_string):
                 model=update_config(
                     base_model_config,
                     observation_tokenizers=[
-                        ("image_tokenizer", {"num_tokens": 60, **base_tokenizer_kwargs}),
+                        (
+                            "image_tokenizer",
+                            {"num_tokens": 60, **base_tokenizer_kwargs},
+                        ),
                     ],
                     task_tokenizers=[],
                 ),
                 optimizer=base_optimizer_config,
                 dataset_kwargs={
-                    'common_kwargs': update_config(
+                    "common_kwargs": update_config(
                         base_data_config,
                         resize_size=(180, 320),
                     ),
-                    'data_kwargs_list': [
+                    "data_kwargs_list": [
                         {
-                            'name': "r2_d2_pen",
-                            'data_dir': "/nfs/kun2/datasets/r2d2/tfds",
-                            'image_obs_keys': ["exterior_image_1_left", "exterior_image_2_left", "wrist_image_left"],
-                            'state_obs_keys': ["joint_position"],
+                            "name": "r2_d2_pen",
+                            "data_dir": "/nfs/kun2/datasets/r2d2/tfds",
+                            "image_obs_keys": [
+                                "exterior_image_1_left",
+                                "exterior_image_2_left",
+                                "wrist_image_left",
+                            ],
+                            "state_obs_keys": ["joint_position"],
                         },
                         {
-                            'name': "bridge_dataset",
-                            'data_dir': "/nfs/kun2/datasets/tfds",
-                            'image_obs_keys': ["image_0", None, None],
-                            'state_obs_keys': ["state"],
+                            "name": "bridge_dataset",
+                            "data_dir": "/nfs/kun2/datasets/tfds",
+                            "image_obs_keys": ["image_0", None, None],
+                            "state_obs_keys": ["state"],
                         },
                     ],
                 },
@@ -178,12 +198,15 @@ def get_config(config_string):
                 model=update_config(
                     base_model_config,
                     observation_tokenizers=[
-                        ("image_tokenizer", update_config(
-                            base_tokenizer_kwargs,
-                            num_tokens=64,
-                            task_stack_keys=[],
-                            task_film_keys=["language_instruction"],
-                        )),
+                        (
+                            "image_tokenizer",
+                            update_config(
+                                base_tokenizer_kwargs,
+                                num_tokens=64,
+                                task_stack_keys=[],
+                                task_film_keys=["language_instruction"],
+                            ),
+                        ),
                     ],
                     task_tokenizers=[],
                 ),
@@ -198,11 +221,14 @@ def get_config(config_string):
                 model=update_config(
                     base_model_config,
                     observation_tokenizers=[
-                        ("image_tokenizer", update_config(
-                            base_tokenizer_kwargs,
-                            num_tokens=64,
-                            task_stack_keys=[],
-                        )),
+                        (
+                            "image_tokenizer",
+                            update_config(
+                                base_tokenizer_kwargs,
+                                num_tokens=64,
+                                task_stack_keys=[],
+                            ),
+                        ),
                     ],
                     task_tokenizers=[
                         ("language_tokenizer", {"num_tokens": 1}),
@@ -264,18 +290,24 @@ def get_config(config_string):
                 model=update_config(
                     base_model_config,
                     observation_tokenizers=[
-                        ("image_tokenizer", update_config(
-                            base_tokenizer_kwargs,
-                            num_tokens=64,
-                            task_stack_keys=[],
-                        )),
+                        (
+                            "image_tokenizer",
+                            update_config(
+                                base_tokenizer_kwargs,
+                                num_tokens=64,
+                                task_stack_keys=[],
+                            ),
+                        ),
                     ],
                     task_tokenizers=[
-                        ("language_tokenizer", {
-                            "num_tokens": 64,
-                            "projection_dim": 512,
-                            "encoder": "distilbert-base-uncased",
-                        }),
+                        (
+                            "language_tokenizer",
+                            {
+                                "num_tokens": 64,
+                                "projection_dim": 512,
+                                "encoder": "distilbert-base-uncased",
+                            },
+                        ),
                     ],
                 ),
                 optimizer=base_optimizer_config,
