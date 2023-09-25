@@ -5,7 +5,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from orca.model.components.tokenizers import TOKENIZERS, ActionTokenizer
+from orca.model.components.tokenizers import ActionTokenizer
 from orca.model.components.transformer import Transformer
 from orca.utils.typing import PRNGKey, Sequence
 
@@ -36,9 +36,9 @@ class ORCAPolicy(nn.Module):
     history to fill the entire context window.
 
     Args:
-        observations_tokenizers (Sequence[tuple(str, dict)]): List of observation tokenizer names and kwargs.
+        observations_tokenizers (Sequence[nn.Module]): List of flax modules for tokenizing the observations.
             The output of each tokenizer is concatenated to form the observation tokens.
-        task_tokenizers (Sequence[tuple(str, dict)]): List of task tokenizer names and kwargs.
+        task_tokenizers (Sequence[nn.Module]): List of flax modules for tokenizing the task.
             The output of each tokenizer is concatenated to form the task token prefix.
         vocab_size (int): Number of bins for each action dimension.
         token_embedding_size (int): Size of the tokens.
@@ -53,8 +53,8 @@ class ORCAPolicy(nn.Module):
         dropout_rate (float): Dropout rate for transformer
         attention_dropout_rate (float): Dropout in self-attention."""
 
-    observation_tokenizers: Sequence[tuple(str, dict)]
-    task_tokenizers: Sequence[tuple(str, dict)]
+    observation_tokenizers: Sequence[nn.Module]
+    task_tokenizers: Sequence[nn.Module]
     vocab_size: int = 256
     token_embedding_size: int = 512
     window_size: int = 1
@@ -74,15 +74,6 @@ class ORCAPolicy(nn.Module):
             num_heads=self.num_heads,
             dropout_rate=self.dropout_rate,
             attention_dropout_rate=self.attention_dropout_rate,
-        )
-
-        self.observation_tokenizers = tuple(
-            TOKENIZERS[tokenizer](**kwargs)
-            for tokenizer, kwargs in self.observation_tokenizers
-        )
-        self.task_tokenizers = tuple(
-            TOKENIZERS[tokenizer](**kwargs)
-            for tokenizer, kwargs in self.task_tokenizers
         )
 
         self.action_tokenizer = ActionTokenizer(
