@@ -5,12 +5,12 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from orca.model.tokenizers import ActionTokenizer
-from orca.model.transformer import Transformer
-from orca.typing import PRNGKey, Sequence
+from orca.model.components.tokenizers import ActionTokenizer
+from orca.model.components.transformer import Transformer
+from orca.utils.typing import PRNGKey, Sequence
 
 
-class TransformerPolicy(nn.Module):
+class ORCAPolicy(nn.Module):
     """
     This transformer models a sequence of observations and actions (of length `horizon`),
     prefixed by a task (either a goal image or language instruction). The observations,
@@ -293,6 +293,68 @@ class TransformerPolicy(nn.Module):
             )
         return self.action_tokenizer(action_tokens, mode="detokenize")
 
+    def get_tokens(self, observations, tasks, train: bool = False):
+        """
+        Tokenize observation/action history and task (either goal image or language).
+        """
+
+        # a list of (batch, horizon, tokens_per_obs_tokenizer, token_embedding_size)
+        obs_tokens = [
+            proj(tok(observations, tasks, train=train))
+            for tok, proj in zip(self.observation_tokenizers, self.obs_proj)
+        ]
+        # (batch, horizon, tokens_per_obs, token_embedding_size)
+        obs_tokens = jnp.concatenate(obs_tokens, axis=-2)
+        assert obs_tokens.shape[-2] == self.tokens_per_obs
+
+        if len(self.task_tokenizers) > 0:
+            # a list of (batch, tokens_per_task_tokenizer, token_embedding_size)
+            task_tokens = [
+                proj(tok(observations, tasks, train=train))
+                for tok, proj in zip(self.task_tokenizers, self.task_proj)
+            ]
+            # (batch, tokens_per_task, token_embedding_size)
+            task_tokens = jnp.concatenate(task_tokens, axis=-2)
+            assert task_tokens.shape[-2] == self.tokens_per_task
+        else:
+            task_tokens = jnp.zeros(
+                (obs_tokens.shape[0], self.tokens_per_task, self.token_embedding_size)
+            )
+
+        # we don't attend to past actions so set action tokens to zero
+        # (batch, horizon, tokens_per_action, token_embedding_size)
+        action_tokens = jnp.zeros(
+            (
+                *obs_tokens.shape[:2],
+                self.tokens_per_action,
+                self.token_embedding_size,
+            )
+        )
+
+        return task_tokens, obs_tokens, action_tokens
+
+    def assemble_input_tokens(
+        self,
+        task_tokens,
+        obs_tokens,
+        action_tokens,
+    ):
+        """
+        Concatenate obs and action tokens.
+        Fold horizon dim into token sequence dim.
+        Prepend task tokens.
+        """
+
+        # (batch, horizon, tokens_per_time_step, token_embedding_size)
+        tokens = jnp.concatenate([obs_tokens, action_tokens], axis=2)
+
+        # (batch, horizon * tokens_per_time_step, token_embedding_size)
+        tokens = jnp.reshape(tokens, (tokens.shape[0], -1, tokens.shape[-1]))
+
+        # (batch, tokens_per_task + horizon * tokens_per_time_step, token_embedding_size)
+        tokens = jnp.concatenate([task_tokens, tokens], axis=1)
+        return tokens
+
     def generate_default_attention_mask(self):
         """
         Generate default attention mask for transformer call. The default attention mask
@@ -369,68 +431,6 @@ class TransformerPolicy(nn.Module):
             ),
         )
         return full_mask
-
-    def get_tokens(self, observations, tasks, train: bool = False):
-        """
-        Tokenize observation/action history and task (either goal image or language).
-        """
-
-        # a list of (batch, horizon, tokens_per_obs_tokenizer, token_embedding_size)
-        obs_tokens = [
-            proj(tok(observations, tasks, train=train))
-            for tok, proj in zip(self.observation_tokenizers, self.obs_proj)
-        ]
-        # (batch, horizon, tokens_per_obs, token_embedding_size)
-        obs_tokens = jnp.concatenate(obs_tokens, axis=-2)
-        assert obs_tokens.shape[-2] == self.tokens_per_obs
-
-        if len(self.task_tokenizers) > 0:
-            # a list of (batch, tokens_per_task_tokenizer, token_embedding_size)
-            task_tokens = [
-                proj(tok(observations, tasks, train=train))
-                for tok, proj in zip(self.task_tokenizers, self.task_proj)
-            ]
-            # (batch, tokens_per_task, token_embedding_size)
-            task_tokens = jnp.concatenate(task_tokens, axis=-2)
-            assert task_tokens.shape[-2] == self.tokens_per_task
-        else:
-            task_tokens = jnp.zeros(
-                (obs_tokens.shape[0], self.tokens_per_task, self.token_embedding_size)
-            )
-
-        # we don't attend to past actions so set action tokens to zero
-        # (batch, horizon, tokens_per_action, token_embedding_size)
-        action_tokens = jnp.zeros(
-            (
-                *obs_tokens.shape[:2],
-                self.tokens_per_action,
-                self.token_embedding_size,
-            )
-        )
-
-        return task_tokens, obs_tokens, action_tokens
-
-    def assemble_input_tokens(
-        self,
-        task_tokens,
-        obs_tokens,
-        action_tokens,
-    ):
-        """
-        Concatenate obs and action tokens.
-        Fold horizon dim into token sequence dim.
-        Prepend task tokens.
-        """
-
-        # (batch, horizon, tokens_per_time_step, token_embedding_size)
-        tokens = jnp.concatenate([obs_tokens, action_tokens], axis=2)
-
-        # (batch, horizon * tokens_per_time_step, token_embedding_size)
-        tokens = jnp.reshape(tokens, (tokens.shape[0], -1, tokens.shape[-1]))
-
-        # (batch, tokens_per_task + horizon * tokens_per_time_step, token_embedding_size)
-        tokens = jnp.concatenate([task_tokens, tokens], axis=1)
-        return tokens
 
     def chunk_actions(self, actions):
         """
