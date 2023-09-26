@@ -50,7 +50,7 @@ def run_policy_on_trajectory(policy_fn, traj, *, text_processor=None):
     )
     if text_processor:
         tasks["language_instruction"] = text_processor.encode(
-            [s.decode("utf-8") for s in traj["language_instruction"]]
+            [s.decode("utf-8") for s in traj["tasks"]["language_instruction"]]
         )
 
     actions = policy_fn(traj["observation"], tasks)
@@ -390,7 +390,7 @@ def plot_trajectory_overview_mpl(
                 alpha=0.5,
             )
             ax.set_ylabel(f"dim {i}")
-        fig.suptitle(traj["language_instruction"][0].decode("utf-8"))
+        fig.suptitle(traj["tasks"]["language_instruction"][0].decode("utf-8"))
     return wandb.Image(wandb_figure.image)
 
 
