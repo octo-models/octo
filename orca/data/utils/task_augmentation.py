@@ -73,7 +73,7 @@ def switch_keys(
     switch_probs = [prob for _, prob in switch_key_groups_probs]
     switch_group_idx = tf.random.categorical(tf.math.log([switch_probs]), 1)[0, 0]
     switch_key_groups_probs = switch_key_groups_probs.copy()
-    switch_key_groups_probs.pop(switch_group_idx)
+    switch_key_groups_probs.pop(int(switch_group_idx))
 
     for key_group, _ in switch_key_groups_probs:
         if not all(key in tasks for key in key_group):
