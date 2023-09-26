@@ -72,20 +72,20 @@ def switch_keys(
 
     switch_probs = [prob for _, prob in switch_key_groups_probs]
     switch_group_idx = tf.random.categorical(tf.math.log([switch_probs]), 1)[0, 0]
-    switch_key_groups_probs = switch_key_groups_probs.copy()
-    switch_key_groups_probs.pop(int(switch_group_idx))
 
-    for key_group, _ in switch_key_groups_probs:
+    for i, (key_group, _) in enumerate(switch_key_groups_probs):
         if not all(key in tasks for key in key_group):
             raise KeyError(
                 f"keys {key_group} are not all present in tasks dictionary. tasks keys: {tasks.keys()}"
             )
 
         for key in key_group:
-            new_tasks[keys] = (
+            new_tasks[key] = tf.where(
+                i == switch_group_idx,
                 tf.zeros_like(tasks[key])
                 if tf.debugging.is_numeric_tensor(tasks[key])
-                else tf.fill(tf.shape(tasks[key]), "", tasks[key].dtype)
+                else "",
+                tasks[key],
             )
 
     traj["tasks"] = new_tasks
