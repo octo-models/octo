@@ -1,17 +1,17 @@
+from collections import defaultdict
+from functools import partial
 import hashlib
 import inspect
 import json
 import logging
-from collections import defaultdict
-from functools import partial
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 import dlimp as dl
 import numpy as np
 import tensorflow as tf
 import tensorflow_datasets as tfds
-import tqdm
 from tensorflow_datasets.core.dataset_builder import DatasetBuilder
+import tqdm
 
 from orca.data.dataset_transforms import RLDS_TRAJECTORY_MAP_TRANSFORMS
 from orca.data.utils import bc_goal_relabeling, task_augmentation
