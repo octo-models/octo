@@ -1,3 +1,5 @@
+default_language_version:
+    python: python3.10
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v2.3.0
@@ -16,6 +18,11 @@ repos:
     rev: 22.10.0
     hooks:
       - id: black
+        exclude: ^experiments/
+  - repo: https://github.com/PyCQA/flake8
+    rev: 6.1.0
+    hooks:
+      - id: flake8
         exclude: ^experiments/
   - repo: https://github.com/pycqa/isort
     rev: 5.12.0

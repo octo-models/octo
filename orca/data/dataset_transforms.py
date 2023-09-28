@@ -3,7 +3,7 @@ from typing import Any, Dict
 
 import tensorflow as tf
 
-import orca.data.utils.bridge_utils as bridge
+import orca.data.bridge.bridge_utils as bridge
 
 
 def stanford_kuka_multimodal_dataset_transform(
@@ -26,8 +26,8 @@ def r2_d2_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
     # every input feature is batched, ie has leading batch dimension
     trajectory["action"] = tf.concat(
         (
-            trajectory["action_dict"]["cartesian_velocity"],  # scaled version of delta ee actions
-            trajectory["action_dict"]["gripper_velocity"],    # setting cartesian_velocity causes robot to use gripper_velocity actions
+            trajectory["action_dict"]["cartesian_velocity"],
+            trajectory["action_dict"]["gripper_velocity"],
         ),
         axis=-1,
     )
@@ -63,9 +63,7 @@ def bridge_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
         ],
         axis=1,
     )
-    # TODO (homer) commit to relabeling actions or just removing the last timestep
     trajectory = bridge.relabel_actions(trajectory)
-    # trajectory = tf.nest.map_structure(lambda y: y[:-1], trajectory)
     keep_keys = [
         "observation",
         "action",

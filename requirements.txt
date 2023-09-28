@@ -19,4 +19,6 @@ transformers >= 4.31.0
 tensorflow_hub >= 0.14.0
 tensorflow_text >= 2.13.0
 tensorflow_datasets >= 4.9.2
-dlimp @ git+https://github.com/kvablack/dlimp@915a155e1e7a28b86fe597a8b54474b38d439909
+dlimp @ git+https://github.com/kvablack/dlimp@fba663b10858793d35f9a0fdbe8f0d51906c8c90
+plotly >= 5.16.1
+matplotlib
