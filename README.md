@@ -45,7 +45,20 @@ dataset, batch size etc. in [config.py](config.py).
 ```
 python train.py --config config.py:transformer_bc_bridge --name=orca_bridge --config.data_path=<...> --config.save_dir=<...>
 ```
+### TPU Training
+1. Install the [Google Cloud CLI](https://cloud.google.com/sdk/docs/install)
+2. Request access to the [RAIL TPU Project](https://console.cloud.google.com/compute/tpus?project=rail-tpus&pli=1)
+3. Check free TPUs at http://tpus.kevin.black
+4. Login into a TPU with gcloud alpha compute tpus tpu-vm ssh [insert_tpu_name] --zone=[insert_tpu_location]
+5. Create personal bucket on the same region to store checkpoints
+6. ```python train.py --config config.py:transformer_bc_bridge --name=orca_bridge --config.dataset_kwargs.data_kwargs_list[0].data_dir=gs://rail-orca-central1 --config.save_dir=gs://oier_v3_bucket```
 
+### TPU Troubleshooting
+If you encounter an error of ```TpuStatesManager::GetOrCreate(): no tpu system exists``` reboot and mount nfs:
+1. ```sudo reboot now```
+2. ```sudo apt -y update && sudo apt install nfs-common```
+3. ```sudo mkdir -p -m 777 /nfs/nfs1```
+4. ```sudo mount -o rw,intr 10.244.23.202:/nfs1 /nfs/nfs1```
 
 ## Code Structure
 
