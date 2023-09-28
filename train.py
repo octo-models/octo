@@ -1,32 +1,32 @@
 import copy
 import datetime
+from functools import partial
 import json
 import os
-from functools import partial
 
+from absl import app, flags, logging
+from flax.training import checkpoints
+from flax.traverse_util import flatten_dict
 import jax
 import jax.numpy as jnp
+from ml_collections import config_flags
 import numpy as np
 import optax
 import tensorflow as tf
 import tqdm
 import wandb
-from absl import app, flags, logging
-from flax.training import checkpoints
-from flax.traverse_util import flatten_dict
-from ml_collections import config_flags
 
 from orca.data.dataset import make_dataset, make_interleaved_dataset
 from orca.data.utils.text_processing import text_processors
 from orca.model import create_model_def
 from orca.model.components.hf_weight_loaders import weights_loaders
 from orca.utils.train_utils import (
-    Timer,
     batched_apply,
     create_train_state,
     format_name_with_config,
     initialize_compilation_cache,
     shard_batch,
+    Timer,
 )
 from orca.utils.visualization_lib import Visualizer
 
@@ -107,9 +107,12 @@ def main(_):
         )
 
     def process_text(batch):
-        batch["tasks"]["language_instruction"] = text_processor.encode(
-            [s.decode("utf-8") for s in batch["tasks"]["language_instruction"]]
-        )
+        if text_processor is None:
+            batch["tasks"].pop("language_instruction")
+        else:
+            batch["tasks"]["language_instruction"] = text_processor.encode(
+                [s.decode("utf-8") for s in batch["tasks"]["language_instruction"]]
+            )
         return batch
 
     # load datasets
@@ -317,7 +320,7 @@ def main(_):
                     for metric, weight in zip(per_dataset_metrics, sample_weights)
                 ],
             )
-            wandb_log({f"validation_aggregate": agg_metrics}, step=i)
+            wandb_log({"validation_aggregate": agg_metrics}, step=i)
             timer.tock("val")
 
             logging.info("Visualizing...")

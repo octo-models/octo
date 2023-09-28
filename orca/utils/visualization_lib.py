@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import flax
 import jax
 import jax.numpy as jnp
+from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 import matplotlib.gridspec as gridspec
 import matplotlib.pyplot as plt
 import numpy as np
@@ -13,7 +14,6 @@ import plotly.graph_objects as go
 import tensorflow_datasets as tfds
 import tqdm
 import wandb
-from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 
 from orca.data.dataset import get_action_proprio_stats, make_dataset
 

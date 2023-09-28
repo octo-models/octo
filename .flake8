@@ -1,0 +1,14 @@
+[flake8]
+exclude = .git
+max-line-length = 88
+select = E,F,W,C
+ignore=W503,
+       E203,
+       E731,
+       E722,
+       F401,
+       F841,
+       E402,
+       E741,
+       E501,
+       C406,

@@ -1,12 +1,12 @@
+from collections import defaultdict
 import logging
 import time
-from collections import defaultdict
 
 import flax
-import jax
-import numpy as np
 from flax.training import train_state
+import jax
 from jax.experimental.compilation_cache import compilation_cache
+import numpy as np
 
 from orca.utils.typing import PRNGKey
 

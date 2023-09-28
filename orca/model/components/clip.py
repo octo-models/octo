@@ -1,6 +1,6 @@
+from flax.core.frozen_dict import freeze
 import flax.linen as nn
 import jax
-from flax.core.frozen_dict import freeze
 from transformers import CLIPTextConfig, CLIPVisionConfig, FlaxCLIPModel
 from transformers.models.clip.modeling_flax_clip import (
     FlaxCLIPTextTransformer,
@@ -96,7 +96,6 @@ def clip_weights_loader(params):
 
 if __name__ == "__main__":
     # test CLIPVisionTokenizer
-    import jax
     import numpy as np
 
     rng = jax.random.PRNGKey(0)
