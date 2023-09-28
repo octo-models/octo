@@ -19,7 +19,7 @@ import tensorflow as tf
 from widowx_envs.utils.multicam_server_rospkg.src.topic_utils import IMTopic
 from orca.model import create_model_def
 from functools import partial
-from orca.train_utils import create_train_state
+from orca.utils.train_utils import create_train_state
 import optax
 
 np.set_printoptions(suppress=True)
@@ -37,7 +37,7 @@ flags.DEFINE_bool("blocking", False, "Use the blocking controller")
 flags.DEFINE_spaceseplist("goal_eep", None, "Goal position")
 flags.DEFINE_spaceseplist("initial_eep", None, "Initial position")
 flags.DEFINE_integer("obs_horizon", None, "Observation history length")
-flags.DEFINE_integer("act_exec_horizon", 1, "Action sequence length")
+flags.DEFINE_integer("action_exec_horizon", 1, "Action sequence length")
 flags.DEFINE_integer("act_pred_horizon", None, "Action sequence length")
 flags.DEFINE_integer("im_size", 128, "Image size")
 flags.DEFINE_bool("deterministic", True, "Whether to sample action deterministically")
@@ -98,7 +98,7 @@ def load_checkpoint(path, wandb_run_name):
 
     model_def = create_model_def(
         action_dim=example_batch["actions"].shape[-1],
-        time_sequence_length=example_batch["observations"]["image"].shape[1],
+        horizon=example_batch["observations"]["image"].shape[1],
         **run.config["model"],
     )
 
@@ -296,7 +296,7 @@ def main(_):
                     )
                     if len(actions.shape) == 1:
                         actions = actions[None]
-                    for i in range(FLAGS.act_exec_horizon):
+                    for i in range(FLAGS.action_exec_horizon):
                         action = actions[i]
                         action = unnormalize_action(action, action_mean, action_std)
                         action += np.random.normal(0, FIXED_STD)

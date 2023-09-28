@@ -4,7 +4,7 @@ from typing import Callable, Optional
 import flax.linen as nn
 import jax.numpy as jnp
 
-from orca.typing import Array, Dtype, PRNGKey, Shape
+from orca.utils.typing import Array, Dtype, PRNGKey, Shape
 
 
 class AddPositionEmbs(nn.Module):

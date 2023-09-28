@@ -18,8 +18,8 @@ from ml_collections import config_flags
 from bridge.bridge_dataset import make_bridge_dataset
 from orca.data.utils.text_processing import text_processors
 from orca.model import create_model_def
-from orca.model.weights import weights_loaders
-from orca.train_utils import (
+from orca.model.components.hf_weight_loaders import weights_loaders
+from orca.utils.train_utils import (
     Timer,
     create_train_state,
     format_name_with_config,
@@ -42,7 +42,7 @@ flags.DEFINE_bool("debug", False, "Debug config (no wandb logging)")
 config_dir = os.path.join(os.path.dirname(__file__), "configs")
 config_flags.DEFINE_config_file(
     "config",
-    os.path.join(config_dir, "train_config.py:transformer_bc"),
+    os.path.join(config_dir, "config.py:transformer_bc"),
     "File path to the training hyperparameter configuration.",
     lock_config=False,
 )
@@ -69,13 +69,9 @@ def main(_):
     tf.config.set_visible_devices([], "GPU")
 
     # set up wandb and logging
-    name = format_name_with_config(
-        FLAGS.name,
-        FLAGS.config.to_dict(),
-    )
+    name = format_name_with_config(FLAGS.name, FLAGS.config.to_dict())
     wandb_id = "{name}_{time}".format(
-        name=name,
-        time=datetime.datetime.now().strftime("%Y%m%d_%H%M%S"),
+        name=name, time=datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     )
     wandb.init(
         config=FLAGS.config.to_dict(),
@@ -146,7 +142,7 @@ def main(_):
 
     model_def = create_model_def(
         action_dim=example_batch["actions"].shape[-1],
-        time_sequence_length=example_batch["observations"]["image"].shape[1],
+        horizon=example_batch["observations"]["image"].shape[1],
         **FLAGS.config.model.to_dict(),
     )
 

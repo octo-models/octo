@@ -7,7 +7,7 @@ from scipy.spatial.transform import Rotation
 
 def convert_obs(obs):
     return {
-        "image": obs["pixels"].astype(np.uint8),
+        "image_0": obs["pixels"].astype(np.uint8),
         "proprio": np.concatenate(
             [
                 obs["end_effector_pos"],
@@ -38,7 +38,7 @@ class GCMujocoWrapper(gym.Wrapper):
         self.env = env
         self.observation_space = gym.spaces.Dict(
             {
-                "image": gym.spaces.Box(
+                "image_0": gym.spaces.Box(
                     low=np.zeros((128, 128, 3)),
                     high=255 * np.ones((128, 128, 3)),
                     dtype=np.uint8,
@@ -84,7 +84,7 @@ class GCMujocoWrapper(gym.Wrapper):
             obs = convert_obs(obs)
             goal_image = self.goal_sampler(obs)
 
-        goal = {"image": goal_image}
+        goal = {"image_0": goal_image}
 
         self.current_goal = goal
 
