@@ -49,7 +49,7 @@ python train.py --config config.py:transformer_bc_bridge --name=orca_bridge --co
 1. Install the [Google Cloud CLI](https://cloud.google.com/sdk/docs/install)
 2. Request access to the [RAIL TPU Project](https://console.cloud.google.com/compute/tpus?project=rail-tpus&pli=1)
 3. Check free TPUs at http://tpus.kevin.black
-4. Login into a TPU with gcloud alpha compute tpus tpu-vm ssh [insert_tpu_name] --zone=[insert_tpu_location]
+4. Login into a TPU with ```gcloud alpha compute tpus tpu-vm ssh [insert_tpu_name] --zone=[insert_tpu_location]```
 5. Create personal bucket on the same region to store checkpoints
 6. ```python train.py --config config.py:transformer_bc_bridge --name=orca_bridge --config.dataset_kwargs.data_kwargs_list[0].data_dir=gs://your_dataset --config.save_dir=gs://your_bucket```
 
