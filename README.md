@@ -61,6 +61,7 @@ If you encounter an error of ```TpuStatesManager::GetOrCreate(): no tpu system e
 4. For central1 location ```sudo mount -o rw,intr 10.244.23.202:/nfs1 /nfs/nfs1``` and for central2 ```sudo mount -o rw,intr 10.30.175.26:/nfs2 /nfs/nfs2```
 
 If you get an error ```tensorflow.python.framework.errors_impl.PermissionDeniedError: Error executing an HTTP request: HTTP response code 403 with body``` you might need to authenticate with ```gcloud auth application-default login```
+
 Also, remember that the dataset, bucket and TPU need to be in the same region.
 
 ## Code Structure
