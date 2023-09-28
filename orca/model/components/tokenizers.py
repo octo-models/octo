@@ -216,7 +216,6 @@ TOKENIZERS = {
 
 
 if __name__ == "__main__":
-    import jax
     import numpy as np
 
     action = np.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7])

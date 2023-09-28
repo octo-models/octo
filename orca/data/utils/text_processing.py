@@ -1,9 +1,9 @@
 from typing import Optional
 
+from flax.core import FrozenDict
 import jax.numpy as jnp
 import numpy as np
 import tensorflow as tf
-from flax.core import FrozenDict
 
 MULTI_MODULE = "https://tfhub.dev/google/universal-sentence-encoder-multilingual/3"
 
