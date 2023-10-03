@@ -43,9 +43,10 @@ please reach out to [pertsch@berkeley.edu](mailto:pertsch@berkeley.edu) or downl
 To train foundational ORCA policies, you can follow the example command below. You can modify hyperparameters like
 dataset, batch size etc. in [config.py](config.py).
 ```
-python train.py --config config.py:transformer_bc_bridge --name=orca_bridge --config.data_path=<...> --config.save_dir=<...>
+python train.py --config config.py:transformer_bc_bridge --name=orca_bridge --config.dataset_kwargs.data_kwargs_list[0].data_dir=<...> --config.save_dir=<...>
 ```
-
+### TPU Training
+See the documentation in [RAIL docs](docs/RAIL.md) for instructions on how to train on TPUs.
 
 ## Code Structure
 
