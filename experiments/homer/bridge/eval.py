@@ -274,7 +274,7 @@ def main(_):
     }
     env = BridgeDataRailRLPrivateWidowX(env_params, fixed_image_size=FLAGS.im_size)
 
-    task = {"image_0": None, "language_instruction": None}
+    task = {"image_0": jnp.zeros((FLAGS.im_size, FLAGS.im_size, 3), dtype=np.uint8), "language_instruction": None}
 
     # goal sampling loop
     while True:
@@ -342,6 +342,8 @@ def main(_):
                 env._reset_previous_qpos()
         except Exception as e:
             continue
+
+        input("start?")
 
         # do rollout
         obs = env.current_obs()
