@@ -274,7 +274,7 @@ def main(_):
     }
     env = BridgeDataRailRLPrivateWidowX(env_params, fixed_image_size=FLAGS.im_size)
 
-    task = {"image_0": jnp.zeros((FLAGS.im_size, FLAGS.im_size, 3), dtype=np.uint8), "language_instruction": None}
+    task = {"image_0": jnp.zeros((FLAGS.im_size, FLAGS.im_size, 3), dtype=np.uint8)}
 
     # goal sampling loop
     while True:
@@ -316,6 +316,11 @@ def main(_):
                 input("Press [Enter] when ready for taking the goal image. ")
                 obs = env.current_obs()
                 task = convert_obs(obs)
+
+                # create a dummy language input if this model also expects language
+                if text_processor is not None:
+                    task["language_instruction"] = text_processor.encode("")
+
         else:
             # ask for new instruction
             if task["language_instruction"] is None:
