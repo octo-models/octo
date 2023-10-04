@@ -80,7 +80,7 @@ def main(_):
         mode="disabled" if FLAGS.debug else None,
         **FLAGS.config.wandb,
     )
-    wandb.run.log_code(os.path.dirname(__file__)) # TODO: replace w/ codesave_library?
+    wandb.run.log_code(os.path.dirname(__file__))  # TODO: replace w/ codesave_library?
     if FLAGS.config.save_dir is not None:
         save_dir = tf.io.gfile.join(
             FLAGS.config.save_dir,
