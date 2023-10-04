@@ -211,10 +211,23 @@ def main(_):
         pretrained_loaders=pretrained_loaders,
     )
     if FLAGS.config.resume_path is not None:
-        train_state = checkpoints.restore_checkpoint(
-            FLAGS.config.resume_path, target=train_state
+        checkpoint_path = (
+            checkpoints.latest_checkpoint(FLAGS.config.resume_path)
+            or FLAGS.config.resume_path
         )
+        checkpoint_step = int(checkpoints._checkpoint_path_step(checkpoint_path) or 0)
 
+        train_state = checkpoints.restore_checkpoint(
+            checkpoint_path, target=train_state
+        )
+        logging.info("Restored checkpoint from %s", FLAGS.config.resume_path)
+        if FLAGS.config.start_step is not None:
+            start_step = FLAGS.config.start_step  # start_step overrides checkpoint
+        else:
+            start_step = checkpoint_step
+        logging.info("Starting training from step %d", start_step)
+    else:
+        start_step = FLAGS.config.start_step or 0
     # replicate agent across devices
     # need the jnp.array to avoid a bug where device_put doesn't recognize primitives
     train_state = jax.device_put(
@@ -280,7 +293,12 @@ def main(_):
         wandb.log(flatten_dict(info, sep="/"), step=step)
 
     timer = Timer()
-    for i in tqdm.tqdm(range(int(FLAGS.config.num_steps))):
+    for i in tqdm.tqdm(
+        range(start_step, int(FLAGS.config.num_steps)),
+        total=int(FLAGS.config.num_steps),
+        initial=start_step,
+        dynamic_ncols=True,
+    ):
         timer.tick("total")
 
         timer.tick("dataset")
