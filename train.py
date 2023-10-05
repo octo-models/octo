@@ -3,6 +3,7 @@ import datetime
 from functools import partial
 import json
 import os
+import os.path as osp
 
 from absl import app, flags, logging
 from flax.training import checkpoints
@@ -16,6 +17,7 @@ import tensorflow as tf
 import tqdm
 import wandb
 
+import orca
 from orca.data.dataset import make_dataset, make_interleaved_dataset
 from orca.data.utils.text_processing import text_processors
 from orca.model import create_model_def
@@ -80,7 +82,10 @@ def main(_):
         mode="disabled" if FLAGS.debug else None,
         **FLAGS.config.wandb,
     )
-    wandb.run.log_code(os.path.dirname(__file__))  # TODO: replace w/ codesave_library?
+
+    codebase_directory = osp.abspath(osp.join(osp.dirname(orca.__file__), ".."))
+    wandb.run.log_code(codebase_directory)  # TODO: replace w/ codesave_library?
+
     if FLAGS.config.save_dir is not None:
         save_dir = tf.io.gfile.join(
             FLAGS.config.save_dir,
@@ -211,15 +216,10 @@ def main(_):
         pretrained_loaders=pretrained_loaders,
     )
     if FLAGS.config.resume_path is not None:
-        checkpoint_path = (
-            checkpoints.latest_checkpoint(FLAGS.config.resume_path)
-            or FLAGS.config.resume_path
-        )
-        checkpoint_step = int(checkpoints._checkpoint_path_step(checkpoint_path) or 0)
-
         train_state = checkpoints.restore_checkpoint(
-            checkpoint_path, target=train_state
+            FLAGS.config.resume_path, target=train_state
         )
+        checkpoint_step = int(train_state.step)
         logging.info("Restored checkpoint from %s", FLAGS.config.resume_path)
         if FLAGS.config.start_step is not None:
             start_step = FLAGS.config.start_step  # start_step overrides checkpoint
