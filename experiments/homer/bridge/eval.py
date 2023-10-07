@@ -1,19 +1,22 @@
+#!/usr/bin/env python3
+
 import sys
 import os
 import time
-from datetime import datetime
-import traceback
-from collections import deque
 import json
-
+import traceback
+from datetime import datetime
 from absl import app, flags, logging
 
+import cv2
 import numpy as np
 import tensorflow as tf
+from pyquaternion import Quaternion
 
 import jax
 import jax.numpy as jnp
-from PIL import Image
+import optax
+
 import imageio
 from functools import partial
 
@@ -21,11 +24,10 @@ from flax.training import checkpoints
 from orca.model import create_model_def
 from orca.utils.train_utils import create_train_state
 from orca.data.utils.text_processing import text_processors
-import optax
 
 # bridge_data_robot imports
-from widowx_envs.widowx_env import BridgeDataRailRLPrivateWidowX
-from multicam_server.topic_utils import IMTopic
+from widowx_envs.widowx_env_service import WidowXClient, WidowXStatus
+
 
 np.set_printoptions(suppress=True)
 
@@ -46,10 +48,15 @@ flags.DEFINE_integer("im_size", None, "Image size", required=True)
 flags.DEFINE_string("video_save_path", None, "Path to save video")
 flags.DEFINE_integer("num_timesteps", 120, "num timesteps")
 flags.DEFINE_bool("blocking", False, "Use the blocking controller")
-flags.DEFINE_spaceseplist("goal_eep", None, "Goal position")
-flags.DEFINE_spaceseplist("initial_eep", None, "Initial position")
+flags.DEFINE_spaceseplist("goal_eep", [0.3, 0.0, 0.15], "Goal position")
+flags.DEFINE_spaceseplist("initial_eep", [0.3, 0.0, 0.15], "Initial position")
 flags.DEFINE_integer("act_exec_horizon", 1, "Action sequence length")
 flags.DEFINE_bool("deterministic", False, "Whether to sample action deterministically")
+flags.DEFINE_string("ip", "localhost", "IP address of the robot")
+flags.DEFINE_integer("port", 5556, "Port of the robot")
+
+# show image flag
+flags.DEFINE_bool("show_image", False, "Show image")
 
 ##############################################################################
 
@@ -57,8 +64,8 @@ STEP_DURATION = 0.2
 NO_PITCH_ROLL = False
 NO_YAW = False
 STICKY_GRIPPER_NUM_STEPS = 1
-WORKSPACE_BOUNDS = np.array([[0.1, -0.15, -0.1, -1.57, 0], [0.45, 0.25, 0.25, 1.57, 0]])
-CAMERA_TOPICS = [IMTopic("/blue/image_raw")]
+WORKSPACE_BOUNDS = [[0.1, -0.15, -0.1, -1.57, 0], [0.45, 0.25, 0.25, 1.57, 0]]
+CAMERA_TOPICS = [{"name": "/blue/image_raw"}]
 FIXED_STD = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
 
 ##############################################################################
@@ -98,6 +105,25 @@ def stack_and_pad_obs(fn, horizon):
         return fn(full_obs, *args, **kwargs)
 
     return wrapped_fn
+
+
+def state_to_eep(xyz_coor, zangle: float):
+    """
+    Implement the state to eep function.
+    Refered to `bridge_data_robot`'s `widowx_controller/widowx_controller.py`
+    return a 4x4 matrix
+    """
+    assert len(xyz_coor) == 3
+    DEFAULT_ROTATION = np.array([[0, 0, 1.0],
+                                 [0, 1.0, 0],
+                                 [-1.0, 0, 0]])
+    new_pose = np.eye(4)
+    new_pose[:3, -1] = xyz_coor
+    new_quat = Quaternion(axis=np.array([0.0, 0.0, 1.0]), angle=zangle) \
+        * Quaternion(matrix=DEFAULT_ROTATION)
+    new_pose[:3, :3] = new_quat.rotation_matrix
+    # yaw, pitch, roll = quat.yaw_pitch_roll
+    return new_pose
 
 
 def supply_rng(f, rng=jax.random.PRNGKey(0)):
@@ -227,6 +253,15 @@ def load_checkpoint(weights_path, config_path, metadata_path):
     return policy_fn, text_processor
 
 
+def wait_for_obs(widowx_client):
+    obs = widowx_client.get_observation()
+    while obs is None:
+        print("Waiting for observations...")
+        obs = widowx_client.get_observation()
+        time.sleep(1)
+    return obs
+
+
 def main(_):
     assert (
         len(FLAGS.checkpoint_weights_path)
@@ -268,11 +303,13 @@ def main(_):
         "override_workspace_boundaries": WORKSPACE_BOUNDS,
         "action_clipping": "xyz",
         "catch_environment_except": False,
-        "start_state": start_state,
+        "start_state": list(start_state),
         "return_full_image": False,
         "camera_topics": CAMERA_TOPICS,
     }
-    env = BridgeDataRailRLPrivateWidowX(env_params, fixed_image_size=FLAGS.im_size)
+
+    widowx_client = WidowXClient(FLAGS.ip, FLAGS.port)
+    widowx_client.init(env_params, image_size=FLAGS.im_size)
 
     task = {"image_0": jnp.zeros((FLAGS.im_size, FLAGS.im_size, 3), dtype=np.uint8)}
 
@@ -300,21 +337,15 @@ def main(_):
             else:
                 ch = input("Taking a new goal? [y/n]")
             if ch == "y":
-                if FLAGS.goal_eep is not None:
-                    assert isinstance(FLAGS.goal_eep, list)
-                    goal_eep = [float(e) for e in FLAGS.goal_eep]
-                else:
-                    low_bound = WORKSPACE_BOUNDS[0][:3] + 0.03
-                    high_bound = WORKSPACE_BOUNDS[1][:3] - 0.03
-                    goal_eep = np.random.uniform(low_bound, high_bound)
-                env.controller().open_gripper(True)
-                try:
-                    env.controller().move_to_state(goal_eep, 0, duration=1.5)
-                    env._reset_previous_qpos()
-                except Exception as e:
-                    continue
+                assert isinstance(FLAGS.goal_eep, list)
+                goal_eep = [float(e) for e in FLAGS.goal_eep]
+
+                move_status = None
+                while move_status != WidowXStatus.SUCCESS:
+                    move_status = widowx_client.move(goal_eep, duration=1.5)
+
                 input("Press [Enter] when ready for taking the goal image. ")
-                obs = env.current_obs()
+                obs = wait_for_obs(widowx_client)
                 task = convert_obs(obs)
 
                 # create a dummy language input if this model also expects language
@@ -332,28 +363,25 @@ def main(_):
                     input("Instruction?")
                 )
 
-        try:
-            env.reset()
-            env.start()
-        except Exception as e:
-            continue
+        # reset env
+        widowx_client.reset()
+        time.sleep(2.5)
 
         # move to initial position
-        try:
-            if FLAGS.initial_eep is not None:
-                assert isinstance(FLAGS.initial_eep, list)
-                initial_eep = [float(e) for e in FLAGS.initial_eep]
-                env.controller().move_to_state(initial_eep, 0, duration=1.5)
-                env._reset_previous_qpos()
-        except Exception as e:
-            continue
+        if FLAGS.initial_eep is not None:
+            assert isinstance(FLAGS.initial_eep, list)
+            initial_eep = [float(e) for e in FLAGS.initial_eep]
+            eep = state_to_eep(initial_eep, 0)
+
+            # retry move action until success
+            move_status = None
+            while move_status != WidowXStatus.SUCCESS:
+                move_status = widowx_client.move(eep, duration=1.5)
 
         input("start?")
 
         # do rollout
-        obs = env.current_obs()
-        obs = convert_obs(obs)
-        obs_hist = [obs]
+        obs_hist = []
         last_tstep = time.time()
         images = []
         goals = []
@@ -366,6 +394,15 @@ def main(_):
             while t < FLAGS.num_timesteps:
                 if time.time() > last_tstep + STEP_DURATION or FLAGS.blocking:
                     last_tstep = time.time()
+
+                    raw_obs = wait_for_obs(widowx_client)
+                    obs = convert_obs(raw_obs)
+                    obs_hist.append(obs)
+
+                    if FLAGS.show_image:
+                        bgr_img = cv2.cvtColor(raw_obs["full_image"], cv2.COLOR_RGB2BGR)
+                        cv2.imshow("img_view", bgr_img)
+                        cv2.waitKey(10)
 
                     actions = np.array(policy_fn(obs_hist, task))
                     assert len(actions) >= FLAGS.act_exec_horizon
@@ -398,11 +435,7 @@ def main(_):
                             action[5] = 0
 
                         # perform environment step
-                        obs, _, _, _ = env.step(
-                            action, last_tstep + STEP_DURATION, blocking=FLAGS.blocking
-                        )
-                        obs = convert_obs(obs)
-                        obs_hist.append(obs)
+                        widowx_client.step_action(action, blocking=FLAGS.blocking)
 
                         # save image
                         images.append(obs["image_0"])
