@@ -1,34 +1,18 @@
 from collections import defaultdict
 from contextlib import contextmanager
-import logging
 import time
 
 import flax
 from flax.training import train_state
 import jax
-from jax.experimental.compilation_cache import compilation_cache
 import numpy as np
 
+from orca.utils.jax_utils import shard_along_axis
 from orca.utils.typing import PRNGKey
 
 
 class TrainState(train_state.TrainState):
     rng: PRNGKey
-
-
-def shard_batch(batch, sharding):
-    """Shards a batch across devices along its first dimension.
-
-    Args:
-        batch: A pytree of arrays.
-        sharding: A jax Sharding object with shape (num_devices,).
-    """
-    return jax.tree_map(
-        lambda x: jax.device_put(
-            x, sharding.reshape(sharding.shape[0], *((1,) * (x.ndim - 1)))
-        ),
-        batch,
-    )
 
 
 def create_train_state(
@@ -38,11 +22,9 @@ def create_train_state(
     init_rng, state_rng = jax.random.split(rng)
 
     # Initializing the model in a jit avoids running the model on CPU
-    @jax.jit
-    def init(rng):
-        return model_def.init(rng, *init_args, **init_kwargs)
+    init_dict = jax.jit(model_def.init)(init_rng, *init_args, **init_kwargs)
 
-    ev, params = flax.core.pop(init(init_rng), "params")
+    ev, params = flax.core.pop(init_dict, "params")
     assert (
         len(ev) == 0
     ), "Are you forgetting to store some variables in the state? {}".format(ev.keys())
@@ -124,22 +106,12 @@ class Timer:
         return ret
 
 
-def initialize_compilation_cache(cache_dir="/tmp/jax_cache"):
-    compilation_cache.initialize_cache(cache_dir)
-
-    for logger in [logging.getLogger(name) for name in logging.root.manager.loggerDict]:
-        logger.addFilter(
-            lambda record: "Not writing persistent cache entry for"
-            not in record.getMessage()
-        )
-
-
-def batched_apply(fn, batch_size, sharding=None):
+def batched_apply(fn, batch_size, devices=None):
     """Turns a function that applies to a fixed batch size into one that applies to a variable batch size.
     Useful for passing variable batch sizes to jit-compiled functions.
 
-    Currently assumes that the first axis is the batch axis **for both inputs and outputs**
-    Pass in a sharding object to additionally shard the batch across devices.
+    Currently assumes that the first axis is the batch axis **for both inputs and outputs**.
+    Pass `devices` to optionally shard the batch across devices.
     """
 
     def pad_to_size(arr, size):
@@ -157,9 +129,9 @@ def batched_apply(fn, batch_size, sharding=None):
                 lambda arr: pad_to_size(arr[i : i + batch_size], batch_size),
                 (args, kwargs),
             )
-            if sharding is not None:
-                (step_args, step_kwargs) = shard_batch(
-                    (step_args, step_kwargs), sharding
+            if devices is not None:
+                step_args, step_kwargs = shard_along_axis(
+                    (step_args, step_kwargs), devices
                 )
             step_output = fn(*step_args, **step_kwargs)
             outputs.append(
