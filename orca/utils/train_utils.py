@@ -1,4 +1,5 @@
 from collections import defaultdict
+from contextlib import contextmanager
 import logging
 import time
 
@@ -74,8 +75,30 @@ def format_name_with_config(name, config):
 
 
 class Timer:
+    """
+    Timer utility. Usage:
+
+        timer = Timer()
+        with timer("foo"):
+            do_something()
+
+        timer.tick("bar")
+        do_something_else()
+        timer.tock("bar")
+
+        timer.get_average_times() -> {"foo": 0.1, "bar": 0.2}
+    """
+
     def __init__(self):
         self.reset()
+
+    @contextmanager
+    def __call__(self, key):
+        self.tick(key)
+        try:
+            yield None
+        finally:
+            self.tock(key)
 
     def reset(self):
         self.counts = defaultdict(int)
