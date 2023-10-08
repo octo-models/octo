@@ -301,13 +301,11 @@ def main(_):
     ):
         timer.tick("total")
 
-        timer.tick("dataset")
-        batch = next(train_data_iter)
-        timer.tock("dataset")
+        with timer("dataset"):
+            batch = next(train_data_iter)
 
-        timer.tick("train")
-        train_state, update_info = train_step(train_state, batch)
-        timer.tock("train")
+        with timer("train"):
+            train_state, update_info = train_step(train_state, batch)
 
         if (i + 1) % FLAGS.config.eval_interval == 0:
             logging.info("Evaluating...")
