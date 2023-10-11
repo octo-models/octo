@@ -168,7 +168,7 @@ class Visualizer:
                         images[np.linspace(0, len(images) - 1, 5).astype(int)], 1
                     )
                     visualizations[f"traj_{n}_{key}"] = wandb.Image(observation_slice)
-                self.visualized_trajs = True
+        self.visualized_trajs = True
         return visualizations
 
     def raw_evaluations(
