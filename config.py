@@ -27,6 +27,7 @@ def get_config(config_string):
         shuffle_buffer_size=1000,
         num_val_batches=8,
         num_steps=int(2e6),
+        start_step=placeholder(int),
         log_interval=100,
         eval_interval=5000,
         save_interval=5000,

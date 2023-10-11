@@ -3,6 +3,7 @@ import datetime
 from functools import partial
 import json
 import os
+import os.path as osp
 
 from absl import app, flags, logging
 from flax.training import checkpoints
@@ -16,6 +17,7 @@ import tensorflow as tf
 import tqdm
 import wandb
 
+import orca
 from orca.data.dataset import make_dataset, make_interleaved_dataset
 from orca.data.utils.text_processing import text_processors
 from orca.model import create_model_def
@@ -80,6 +82,10 @@ def main(_):
         mode="disabled" if FLAGS.debug else None,
         **FLAGS.config.wandb,
     )
+
+    codebase_directory = osp.abspath(osp.join(osp.dirname(orca.__file__), ".."))
+    wandb.run.log_code(codebase_directory)  # TODO: replace w/ codesave_library?
+
     if FLAGS.config.save_dir is not None:
         save_dir = tf.io.gfile.join(
             FLAGS.config.save_dir,
@@ -213,7 +219,15 @@ def main(_):
         train_state = checkpoints.restore_checkpoint(
             FLAGS.config.resume_path, target=train_state
         )
-
+        checkpoint_step = int(train_state.step)
+        logging.info("Restored checkpoint from %s", FLAGS.config.resume_path)
+        if FLAGS.config.start_step is not None:
+            start_step = FLAGS.config.start_step  # start_step overrides checkpoint
+        else:
+            start_step = checkpoint_step
+        logging.info("Starting training from step %d", start_step)
+    else:
+        start_step = FLAGS.config.start_step or 0
     # replicate agent across devices
     # need the jnp.array to avoid a bug where device_put doesn't recognize primitives
     train_state = jax.device_put(
@@ -279,7 +293,12 @@ def main(_):
         wandb.log(flatten_dict(info, sep="/"), step=step)
 
     timer = Timer()
-    for i in tqdm.tqdm(range(int(FLAGS.config.num_steps))):
+    for i in tqdm.tqdm(
+        range(start_step, int(FLAGS.config.num_steps)),
+        total=int(FLAGS.config.num_steps),
+        initial=start_step,
+        dynamic_ncols=True,
+    ):
         timer.tick("total")
 
         timer.tick("dataset")
