@@ -3,20 +3,20 @@
 import sys
 import os
 import time
-import json
-import traceback
 from datetime import datetime
+import traceback
+from collections import deque
+import json
+
 from absl import app, flags, logging
 
-import cv2
 import numpy as np
 import tensorflow as tf
 from pyquaternion import Quaternion
 
 import jax
 import jax.numpy as jnp
-import optax
-
+from PIL import Image
 import imageio
 from functools import partial
 
@@ -24,6 +24,8 @@ from flax.training import checkpoints
 from orca.model import create_model_def
 from orca.utils.train_utils import create_train_state
 from orca.data.utils.text_processing import text_processors
+import optax
+import cv2
 
 # bridge_data_robot imports
 from widowx_envs.widowx_env_service import WidowXClient, WidowXStatus
@@ -114,13 +116,12 @@ def state_to_eep(xyz_coor, zangle: float):
     return a 4x4 matrix
     """
     assert len(xyz_coor) == 3
-    DEFAULT_ROTATION = np.array([[0, 0, 1.0],
-                                 [0, 1.0, 0],
-                                 [-1.0, 0, 0]])
+    DEFAULT_ROTATION = np.array([[0, 0, 1.0], [0, 1.0, 0], [-1.0, 0, 0]])
     new_pose = np.eye(4)
     new_pose[:3, -1] = xyz_coor
-    new_quat = Quaternion(axis=np.array([0.0, 0.0, 1.0]), angle=zangle) \
-        * Quaternion(matrix=DEFAULT_ROTATION)
+    new_quat = Quaternion(axis=np.array([0.0, 0.0, 1.0]), angle=zangle) * Quaternion(
+        matrix=DEFAULT_ROTATION
+    )
     new_pose[:3, :3] = new_quat.rotation_matrix
     # yaw, pitch, roll = quat.yaw_pitch_roll
     return new_pose
@@ -311,14 +312,16 @@ def main(_):
     widowx_client = WidowXClient(FLAGS.ip, FLAGS.port)
     widowx_client.init(env_params, image_size=FLAGS.im_size)
 
-    task = {"image_0": jnp.zeros((FLAGS.im_size, FLAGS.im_size, 3), dtype=np.uint8)}
+    task = {
+        "image_0": jnp.zeros((FLAGS.im_size, FLAGS.im_size, 3), dtype=np.uint8),
+    }
 
     # goal sampling loop
     while True:
         # ask for which policy to use
         if len(policies) == 1:
             policy_idx = 0
-            input("Press [Enter] to start.")
+            print("Use default policy 1: ", list(policies.keys())[policy_idx])
         else:
             print("policies:")
             for i, name in enumerate(policies.keys()):
@@ -338,7 +341,8 @@ def main(_):
                 ch = input("Taking a new goal? [y/n]")
             if ch == "y":
                 assert isinstance(FLAGS.goal_eep, list)
-                goal_eep = [float(e) for e in FLAGS.goal_eep]
+                _eep = [float(e) for e in FLAGS.goal_eep]
+                goal_eep = state_to_eep(_eep, 0)
 
                 move_status = None
                 while move_status != WidowXStatus.SUCCESS:
@@ -354,7 +358,7 @@ def main(_):
 
         else:
             # ask for new instruction
-            if task["language_instruction"] is None:
+            if "language_instruction" not in task or ["language_instruction"] is None:
                 ch = "y"
             else:
                 ch = input("New instruction? [y/n]")
