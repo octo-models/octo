@@ -158,7 +158,7 @@ class ORCAPolicy(nn.Module):
         # only use first horizon timesteps from the window
         observations = jax.tree_map(lambda x: x[:, : self.horizon], observations)
 
-        # output is (batch, num_tokens, token_embedding_size)
+        # output is (batch, total_tokens, token_embedding_size)
         output = self.transformer_call(
             observations,
             tasks,
@@ -290,6 +290,13 @@ class ORCAPolicy(nn.Module):
         Concatenate obs and action tokens.
         Fold horizon dim into token sequence dim.
         Prepend task tokens.
+
+        Inputs:
+            task_tokens: (batch, tokens_per_task, token_embedding_size)
+            obs_tokens: (batch, horizon, tokens_per_obs, token_embedding_size)
+            action_tokens: (batch, horizon, tokens_per_action, token_embedding_size)
+        Returns:
+            tokens: (batch, total_tokens, token_embedding_size)
         """
 
         # (batch, horizon, tokens_per_time_step, token_embedding_size)
@@ -305,7 +312,7 @@ class ORCAPolicy(nn.Module):
     def extract_action_embeddings(self, transformer_output):
         """
         Args:
-            transformer_output: (batch, num_tokens, token_embedding_size)
+            transformer_output: (batch, total_tokens, token_embedding_size)
         Returns:
             action_embeddings: (batch, horizon, self.tokens_per_action, token_embedding_size)
         """

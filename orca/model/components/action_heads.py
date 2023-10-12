@@ -69,13 +69,8 @@ class DiscretizedActionHead(nn.Module):
             # Attend to all timesteps at same or earlier timestep
             return 1 if description_j[1] <= description_i[1] else 0
         elif description_j[0] == "action":
-            # Only attend to same action (same timestep, same pred horizon)
-            return (
-                1
-                if (description_j[1] == description_i[1])
-                and (description_j[2][0] == description_i[2][0])
-                else 0
-            )
+            # Don't attend to other action tokens
+            return 0
         return 0
 
     def setup(self):
