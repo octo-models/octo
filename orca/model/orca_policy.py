@@ -208,7 +208,7 @@ class ORCAPolicy(nn.Module):
 
         Args:
             observations: A dictionary containing observation data for a batch of trajectory windows.
-                Each entry has shape (batch, window_size, *).
+                Each entry has shape (batch, horizon, *).
             tasks: A dictionary containing task data for the trajectory windows.
                 Each entry has shape (batch, *).
             train: Whether this is a training call.
@@ -218,6 +218,9 @@ class ORCAPolicy(nn.Module):
             temperature: The temperature to use when sampling the action distribution.
         Returns:
             The predicted actions given the provided observation history and task.
+            shape (*sample_shape, batch, pred_horizon, action_dim)
+            actions[..., i, :] is the prediction for i timesteps after the last observation.
+            Use actions[..., 0, :] to get the prediction for the current timestep.
         """
 
         assert all(
