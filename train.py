@@ -247,8 +247,10 @@ def main(_):
 
     @partial(
         jax.jit,
+        # state is replicated, batch is data-parallel
         in_shardings=(replicated_sharding, dp_sharding),
         out_shardings=(replicated_sharding, replicated_sharding),
+        # allows jax to modify `state` in-place, saving a lot of memory
         donate_argnums=0,
     )
     def train_step(state, batch):
@@ -261,6 +263,7 @@ def main(_):
 
     @partial(
         jax.jit,
+        # state is replicated, batch is data-parallel
         in_shardings=(replicated_sharding, dp_sharding),
         out_shardings=replicated_sharding,
     )
