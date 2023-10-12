@@ -268,7 +268,7 @@ def main(_):
     @partial(jax.jit, static_argnames=("argmax", "n"))
     def get_policy_sampled_actions(state, observations, tasks, *, argmax=False, n=1):
         # only use first horizon timesteps as input to predict_action
-        observations = jax.tree_map(lambda x: x[:, :horizon], observations)
+        observations = jax.tree_map(lambda x: x[:, -horizon:], observations)
         actions = state.apply_fn(
             {"params": state.params},
             observations,
@@ -280,6 +280,8 @@ def main(_):
             method="predict_action",
             rngs={"dropout": state.rng},
         )
+        # actions is (n, batch_size, pred_horizon, action_dim)
+        # where actions[:, :, i] predicts the action at timestep "window_size + i"
         actions = actions[..., 0, :]
 
         # viz expects (batch_size, n_samples, action_dim)
