@@ -96,7 +96,6 @@ class ORCAPolicy(nn.Module):
 
         # If pred_horizon>1, we don't use the timesteps in the trajectory window where
         # we can't predict a full action chunk (i.e the last (pred_horizon-1) timesteps)
-        # TODO(dibya): I feel like self.horizon should be in action_head, but I'm not sure
         self.horizon = self.window_size - self.pred_horizon + 1
 
         self.action_head = DiscretizedActionHead(
@@ -276,7 +275,7 @@ class ORCAPolicy(nn.Module):
                 self.tokens_per_action,
                 self.token_embedding_size,
             )
-        )  # TODO: maybe put this in action_head?
+        )
 
         return task_tokens, obs_tokens, action_tokens
 
