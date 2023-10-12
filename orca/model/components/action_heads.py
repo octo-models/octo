@@ -11,40 +11,62 @@ from orca.utils.typing import PRNGKey, Sequence
 
 
 class DiscretizedActionHead(nn.Module):
+    """Action head with discretized action prediction and action chunking.
+
+    At each timestep, we have separate action tokens
+    for each action dimension and each prediction horizon
+    (num_tokens=action_dim*pred_horizon).
+
+    o_tok1, ..., o_tokN, a_tok1, a_token2, ..., a_tok{num_tokens}
+
+    a_tok{k} is tasked with predicting the (k % action_dim)th action dimension, (k // action_dim) timesteps in the future.
+
+
+    We discretize the action space into a fixed binning, and use
+    a categorical loss to predict the bin index for each action dimension.
+    Action tokens attend only to task tokens and previous observation tokens.
+
+
+    """
+
     horizon: int
     token_embedding_size: int
     window_size: int = 1
     pred_horizon: int = 1
     action_dim: int = 7
+    vocab_size: int = 256
     normalization_type: str = "bounds"
 
     @property
+    @nn.nowrap
     def num_tokens(self):
+        """Number of transformer tokens used to represent an action in each timestep."""
         return self.action_dim * self.pred_horizon
 
     @nn.nowrap
-    def get_token_description(self, i: int):
-        """
+    def token_metadata(self, i: int):
+        """Any extra metadata needed to determine action mask.
+
         Args:
             i: int between 0 and self.num_tokens
-        Returns:
+        Returns: Some extra metadata about the token
             (which_pred_horizon, which_action_dim)
         """
         return (i // self.action_dim, i * self.action_dim)
 
-    def should_attend_to(self, description_i, description_j):
-        """
+    @nn.nowrap
+    def attention_mask_ij(self, description_i, description_j):
+        """Should token i attend to token j?
         Args:
             description_i: (token_type, token_timestep, extra_metadata)
             description_j: (token_type, token_timestep, extra_metadata)
-
-            i is the token attending, and j is the token being attended to.
+        Returns: 0 or 1
         """
         assert description_i[0] == "action"
         if description_j[0] == "task":
-            return 1
+            return 1  # Attend to all task tokens
         elif description_j[0] == "obs":
-            # Attend to all timesteps before
+            # Attend to all timesteps at same or earlier timestep
             return 1 if description_j[1] <= description_i[1] else 0
         elif description_j[0] == "action":
             # Only attend to same action (same timestep, same pred horizon)
@@ -67,21 +89,10 @@ class DiscretizedActionHead(nn.Module):
             normalization_type=self.normalization_type,
         )
 
-    def get_input_tokens_per_step(self, actions):
-        # (batch_size, horizon, self.num_tokens, )
-        return jnp.zeros(
-            (
-                actions.shape[0],
-                self.horizon,
-                self.num_tokens,
-                self.token_embedding_size,
-            )
-        )
-
     def loss(self, action_embedding, actions, pad_mask):
         """
         Args:
-            embeddings: jnp.ndarray w/ shape (batch_size, horizon, self.num_tokens, self.token_embedding_size)
+            action_embedding: jnp.ndarray w/ shape (batch_size, horizon, self.num_tokens, self.token_embedding_size)
             actions: jnp.ndarray w/ shape (batch_size, window_size, action_dim)
         Returns:
             loss: float
@@ -109,7 +120,7 @@ class DiscretizedActionHead(nn.Module):
         action_logprob = jax.nn.log_softmax(action_logits, axis=-1)
 
         # chunk the target actions to match the predicted actions
-        actions_chunked = self.chunk_actions(actions)
+        actions_chunked = self._chunk_actions(actions)
 
         # only use first horizon timesteps from the window
         actions_chunked = actions_chunked[:, : self.horizon]
@@ -179,7 +190,7 @@ class DiscretizedActionHead(nn.Module):
             )
         return self.action_tokenizer(action_tokens, mode="detokenize")
 
-    def chunk_actions(self, actions):
+    def _chunk_actions(self, actions):
         """
         Chunk actions into `pred_horizon` size chunks.
         The resulting actions have shape (batch, window_size, pred_horizon, action_dim)
