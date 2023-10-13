@@ -7,24 +7,15 @@ import mujoco_manipulation
 import tensorflow as tf
 from .wrappers.dmcgym import DMCGYM
 from .wrappers.mujoco import GCMujocoWrapper
-from .wrappers.norm import UnnormalizeActionProprio
+from orca.utils.eval_utils import (
+    UnnormalizeActionProprio,
+    HistoryWrapper,
+    RHCWrapper,
+    TemporalEnsembleWrapper,
+)
 from .wrappers.video_recorder import VideoRecorder
 import wandb
 import imageio
-
-
-def wrap_mujoco_gc_env(
-    env,
-    max_episode_steps: int,
-    action_proprio_metadata: dict,
-    normalization_type: str,
-    goal_sampler: Union[np.ndarray, Callable],
-):
-    env = DMCGYM(env)
-    env = GCMujocoWrapper(env, goal_sampler)
-    env = UnnormalizeActionProprio(env, action_proprio_metadata, normalization_type)
-    env = gym.wrappers.TimeLimit(env, max_episode_steps=max_episode_steps)
-    return env
 
 
 def make_mujoco_gc_env(
@@ -36,12 +27,18 @@ def make_mujoco_gc_env(
     save_video_dir: str,
     save_video_prefix: str,
     goals: Union[np.ndarray, Callable],
+    horizon: int,
+    pred_horizon: int,
+    exec_horizon: int,
 ):
     env = mujoco_manipulation.load(env_name)
-    env = wrap_mujoco_gc_env(
-        env, max_episode_steps, action_proprio_metadata, normalization_type, goals
-    )
-
+    env = DMCGYM(env)
+    env = GCMujocoWrapper(env, goals)
+    env = UnnormalizeActionProprio(env, action_proprio_metadata, normalization_type)
+    env = HistoryWrapper(env, horizon, pred_horizon)
+    env = TemporalEnsembleWrapper(env, horizon, pred_horizon)
+    # env = RHCWrapper(env, horizon, pred_horizon, exec_horizon)
+    env = gym.wrappers.TimeLimit(env, max_episode_steps=max_episode_steps)
     if save_video:
         env = VideoRecorder(
             env,

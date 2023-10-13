@@ -24,7 +24,7 @@ from orca.utils.train_utils import (
     shard_batch,
 )
 
-from sim.evaluation import evaluate_gc, supply_rng, stack_and_pad_obs
+from sim.evaluation import evaluate_gc, supply_rng
 from sim.utils import make_mujoco_gc_env, load_recorded_video
 from sim.dataset import make_sim_dataset
 
@@ -106,6 +106,12 @@ def main(_):
     ) as f:
         eval_goals = np.load(f, allow_pickle=True).item()
 
+    horizon = (
+        FLAGS.config.dataset_kwargs.window_size
+        - FLAGS.config.model.policy_kwargs.pred_horizon
+        + 1
+    )
+
     # create sim environment
     eval_env = make_mujoco_gc_env(
         env_name=FLAGS.config.env_name,
@@ -116,6 +122,9 @@ def main(_):
         save_video_dir=tf.io.gfile.join(save_dir, "videos"),
         save_video_prefix="eval",
         goals=eval_goals,
+        horizon=horizon,
+        pred_horizon=FLAGS.config.model.policy_kwargs.pred_horizon,
+        exec_horizon=FLAGS.config.exec_horizon,
     )
 
     # load datasets
@@ -247,8 +256,6 @@ def main(_):
     def wandb_log(info, step):
         wandb.log(flatten_dict(info, sep="/"), step=step)
 
-    horizon = FLAGS.config.dataset_kwargs.window_size - FLAGS.config.model.policy_kwargs.pred_horizon + 1
-
     timer = Timer()
     for i in tqdm.tqdm(range(int(FLAGS.config.num_steps))):
         timer.tick("total")
@@ -272,16 +279,13 @@ def main(_):
             timer.tock("val")
 
             rng, policy_key = jax.random.split(rng)
-            policy_fn = stack_and_pad_obs(
-                supply_rng(
-                    partial(
-                        sample_actions,
-                        state=train_state,
-                        argmax=FLAGS.config.deterministic_eval,
-                    ),
-                    rng=policy_key,
+            policy_fn = supply_rng(
+                partial(
+                    sample_actions,
+                    state=train_state,
+                    argmax=FLAGS.config.deterministic_eval,
                 ),
-                horizon=horizon,
+                rng=policy_key,
             )
 
             logging.info("Evaluating...")
@@ -293,7 +297,6 @@ def main(_):
             eval_info = evaluate_gc(
                 policy_fn,
                 eval_env,
-                action_exec_horizon=FLAGS.config.action_exec_horizon,
                 num_episodes=FLAGS.config.eval_episodes,
             )
             wandb_log({f"evaluation": eval_info}, step=i)
