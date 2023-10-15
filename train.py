@@ -133,6 +133,7 @@ def main(_):
             FLAGS.config.dataset_kwargs["data_kwargs_list"],
             train=True,
             sample_weights=sample_weights,
+            shuffle_buffer_size=FLAGS.config.shuffle_buffer_size,
         )
         .repeat()
         .batch(FLAGS.config.batch_size)
