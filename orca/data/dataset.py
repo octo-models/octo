@@ -15,6 +15,13 @@ import tqdm
 
 from orca.data.dataset_transforms import RLDS_TRAJECTORY_MAP_TRANSFORMS
 from orca.data.utils import bc_goal_relabeling, task_augmentation
+from orca.data.utils.data_utils import maybe_decode_depth_images, pprint_data_mixture
+from orca.utils.typing import (
+    ActionEncoding,
+    ActionEncodingType,
+    StateEncoding,
+    StateEncodingType,
+)
 
 
 def get_action_proprio_stats(
@@ -179,8 +186,9 @@ def apply_common_transforms(
             )
         )
 
-    # decodes string keys with name "image", resizes "image" and "depth"
+    # decodes string keys with names "image" & "depth", resizes "image" and "depth"
     dataset = dataset.frame_map(dl.transforms.decode_images)
+    dataset = dataset.frame_map(maybe_decode_depth_images)
     if resize_size:
         dataset = dataset.frame_map(
             partial(dl.transforms.resize_images, size=resize_size)
@@ -237,6 +245,8 @@ def make_dataset(
     state_obs_keys: Union[str, List[str]] = [],
     action_proprio_metadata: Optional[dict] = None,
     resize_size: Optional[Tuple[int, int]] = None,
+    state_encoding: Optional[StateEncodingType] = None,
+    action_encoding: Optional[ActionEncodingType] = None,
     **kwargs,
 ) -> tf.data.Dataset:
     """Creates a dataset from the RLDS format.
@@ -255,6 +265,8 @@ def make_dataset(
         action_proprio_metadata (dict, optional): dict with min/max/mean/std for action and proprio normalization.
             If not provided, will get computed on the fly.
         resize_size (tuple, optional): target (height, width) for all RGB and depth images, default to no resize.
+        state_encoding (StateEncodingType, optional): type of state encoding used, e.g. joint angles vs EEF pose.
+        action_encoding (ActionEncodingType, optional): type of action encoding used, e.g. joint delta vs EEF delta.
         **kwargs: Additional keyword arguments to pass to `apply_common_transforms`.
     Returns:
         Dataset of trajectories where each step has the following fields:
@@ -290,6 +302,17 @@ def make_dataset(
         if name in RLDS_TRAJECTORY_MAP_TRANSFORMS:
             traj = RLDS_TRAJECTORY_MAP_TRANSFORMS[name](traj)
 
+        # remove unused keys
+        keep_keys = [
+            "observation",
+            "action",
+            "language_instruction",
+            "is_terminal",
+            "is_last",
+            "_traj_index",
+        ]
+        traj = {k: v for k, v in traj.items() if k in keep_keys}
+
         # extracts RGB images, depth images and proprio based on provided keys, pad for all None keys
         orig_obs = traj.pop("observation")
         traj_len = tf.shape(traj["action"])[0]
@@ -323,8 +346,16 @@ def make_dataset(
                     proprio.append(tf.zeros((traj_len, 1), dtype=tf.float32))
                 else:
                     proprio.append(tf.cast(orig_obs[key], tf.float32))
+            # pre-pend info which state encoding is used
+            proprio = [
+                tf.ones_like(proprio[0][:, :1]) * float(state_encoding)
+            ] + proprio
             traj["observation"]["proprio"] = tf.concat(proprio, axis=-1)
 
+        # TODO: support other action encodings as well
+        assert (
+            action_encoding == ActionEncoding.EEF_POS
+        ), "Only support EEF pose delta actions for now."
         traj["action"] = tf.cast(traj["action"], tf.float32)
 
         # check that all other keys are present
@@ -360,7 +391,7 @@ def make_interleaved_dataset(
     dataset_kwargs_list: List[dict],
     train: bool,
     sample_weights: Optional[List[float]] = None,
-    shuffle_buffer_size: int = 100,
+    shuffle_buffer_size: int = 1000,
 ):
     """Creates an interleaved dataset from list of dataset kwargs.
 
@@ -369,24 +400,21 @@ def make_interleaved_dataset(
         dataset_kwargs_list: list of kwargs, each element is passed to 'make_dataset' for individual datasets.
         train: whether this is a training or validation dataset.
         sample_weights: sampling weights for each dataset in list, values need to be >= 1.
-        shuffle_buffer_size: base size of the dataset shuffle buffer for each dataset,
-            gets multiplied by sampling weight.
+        shuffle_buffer_size: base size of the dataset shuffle buffer for each dataset.
     """
     # update dataset kwargs & create datasets
     if not sample_weights:
         sample_weights = [1.0] * len(dataset_kwargs_list)
     assert len(sample_weights) == len(dataset_kwargs_list)
-    assert (
-        min(sample_weights) >= 1.0
-    )  # convention to ensure sufficient shuffle buffer size
+    pprint_data_mixture(dataset_kwargs_list, sample_weights)
 
     datasets = []
-    for i, data_kwargs in enumerate(dataset_kwargs_list):
+    for i, data_kwargs in enumerate(tqdm.tqdm(dataset_kwargs_list)):
         data_kwargs.update(**common_dataset_args)
         datasets.append(
             make_dataset(**data_kwargs, train=train)
             .unbatch()
-            .shuffle(int(shuffle_buffer_size * sample_weights[i]))
+            .shuffle(int(shuffle_buffer_size))
             .repeat()
         )
 
