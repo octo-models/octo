@@ -13,9 +13,10 @@ def get_config(config_string):
 
     base_config = dict(
         batch_size=256,
-        shuffle_buffer_size=1000,
+        shuffle_buffer_size=100,
         num_val_batches=8,
         num_steps=int(2e6),
+        start_step=placeholder(int),
         log_interval=100,
         eval_interval=5000,
         save_interval=5000,
@@ -64,7 +65,6 @@ def get_config(config_string):
             dropout_rate=0.1,
             normalization_type=normalization_type,
             pred_horizon=1,
-            action_loss_weight=0.0,  # train pure reward functions
         )
     )
 

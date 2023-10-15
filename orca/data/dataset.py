@@ -285,7 +285,7 @@ def make_dataset(
     else:
         split = "train" if train else "val"
 
-    dataset = dl.DLataset.from_rlds(builder, split=split, shuffle=shuffle)
+    dataset = dl.DLataset.from_rlds(builder, split=split, shuffle=shuffle, num_parallel_reads=1)
 
     image_obs_keys = (
         [image_obs_keys] if not isinstance(image_obs_keys, Sequence) else image_obs_keys
