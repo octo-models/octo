@@ -37,3 +37,13 @@ def maybe_decode_depth_images(
             ..., 0
         ],
     )
+
+
+def set_ram_budget(dataset, ram_budget):
+    """Sets the RAM budget used by tf.data.AUTOTUNE."""
+    autotune_options = tf.data.experimental.AutotuneOptions()
+    autotune_options.ram_budget = ram_budget * 1024 * 1024 * 1024  # GB --> Bytes
+
+    options = tf.data.Options()
+    options.autotune = autotune_options
+    return dataset.with_options(options)

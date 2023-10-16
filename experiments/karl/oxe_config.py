@@ -106,6 +106,7 @@ def get_config(config_string):
                     "common_kwargs": update_config(
                         base_data_config,
                         resize_size=(256, 256),
+                        ram_budget=3,       # limit RAM per dataset
                     ),
                     "data_kwargs_list": dataset_kwargs_list,
                     "sample_weights": dataset_sampling_weights,

@@ -15,7 +15,11 @@ import tqdm
 
 from orca.data.dataset_transforms import RLDS_TRAJECTORY_MAP_TRANSFORMS
 from orca.data.utils import bc_goal_relabeling, task_augmentation
-from orca.data.utils.data_utils import maybe_decode_depth_images, pprint_data_mixture
+from orca.data.utils.data_utils import (
+    maybe_decode_depth_images,
+    pprint_data_mixture,
+    set_ram_budget,
+)
 from orca.utils.typing import (
     ActionEncoding,
     ActionEncodingType,
@@ -247,6 +251,7 @@ def make_dataset(
     resize_size: Optional[Tuple[int, int]] = None,
     state_encoding: Optional[StateEncodingType] = None,
     action_encoding: Optional[ActionEncodingType] = None,
+    ram_budget: Optional[int] = None,
     **kwargs,
 ) -> tf.data.Dataset:
     """Creates a dataset from the RLDS format.
@@ -267,6 +272,7 @@ def make_dataset(
         resize_size (tuple, optional): target (height, width) for all RGB and depth images, default to no resize.
         state_encoding (StateEncodingType, optional): type of state encoding used, e.g. joint angles vs EEF pose.
         action_encoding (ActionEncodingType, optional): type of action encoding used, e.g. joint delta vs EEF delta.
+        ram_budget (int, optional): limits the RAM used by tf.data.AUTOTUNE, unit: GB, forwarded to AutotuneOptions.
         **kwargs: Additional keyword arguments to pass to `apply_common_transforms`.
     Returns:
         Dataset of trajectories where each step has the following fields:
@@ -285,12 +291,11 @@ def make_dataset(
     else:
         split = "train" if train else "val"
 
-    dataset = dl.DLataset.from_rlds(builder, split=split, shuffle=shuffle, num_parallel_reads=1)
-    options = tf.data.Options()
-    autotune_options = tf.data.experimental.AutotuneOptions()
-    autotune_options.ram_budget = 3 * 1024 * 1024 * 1024   # 10 GB
-    options.autotune = autotune_options
-    dataset = dataset.with_options(options)
+    dataset = dl.DLataset.from_rlds(
+        builder, split=split, shuffle=shuffle, num_parallel_reads=1
+    )
+    if ram_budget:
+        dataset = set_ram_budget(dataset, ram_budget)
 
     image_obs_keys = (
         [image_obs_keys] if not isinstance(image_obs_keys, Sequence) else image_obs_keys
@@ -416,16 +421,11 @@ def make_interleaved_dataset(
     datasets = []
     for i, data_kwargs in enumerate(tqdm.tqdm(dataset_kwargs_list)):
         data_kwargs.update(**common_dataset_args)
-        #options = tf.data.Options()
-        #autotune_options = tf.data.experimental.AutotuneOptions()
-        #autotune_options.cpu_budget = 5
-        #options.autotune = autotune_options
         datasets.append(
             make_dataset(**data_kwargs, train=train)
             .unbatch()
             .shuffle(int(shuffle_buffer_size))
             .repeat()
-            #.with_options(options)
         )
 
     # interleave datasets with sampling weights
