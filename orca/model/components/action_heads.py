@@ -5,9 +5,9 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
+from orca.model.components import TokenMetadata
 from orca.model.components.tokenizers import ActionTokenizer
-from orca.model.components.transformer import Transformer
-from orca.utils.typing import PRNGKey, Sequence
+from orca.utils.typing import PRNGKey
 
 
 class DiscretizedActionHead(nn.Module):
@@ -49,26 +49,28 @@ class DiscretizedActionHead(nn.Module):
 
         Args:
             i: int between 0 and self.num_tokens
-        Returns: Some extra metadata about the token
+        Returns: Dict with extra metadata about the token
             (which_pred_horizon, which_action_dim)
         """
-        return (i // self.action_dim, i * self.action_dim)
+        return dict(horizon=i // self.action_dim, action_dim=i % self.action_dim)
 
     @nn.nowrap
-    def attention_mask_ij(self, description_i, description_j):
+    def attention_mask_ij(
+        self, description_i: TokenMetadata, description_j: TokenMetadata
+    ):
         """Should token i attend to token j?
         Args:
             description_i: (token_type, token_timestep, extra_metadata)
             description_j: (token_type, token_timestep, extra_metadata)
         Returns: 0 or 1
         """
-        assert description_i[0] == "action"
-        if description_j[0] == "task":
+        assert description_i.name == "action"
+        if description_j.name == "task":
             return 1  # Attend to all task tokens
-        elif description_j[0] == "obs":
+        elif description_j.name == "obs":
             # Attend to all timesteps at same or earlier timestep
-            return 1 if description_j[1] <= description_i[1] else 0
-        elif description_j[0] == "action":
+            return 1 if description_j.timestep <= description_i.timestep else 0
+        elif description_j.name == "action":
             # Don't attend to other action tokens
             return 0
         return 0
