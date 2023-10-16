@@ -10,6 +10,7 @@ from flax.training import checkpoints
 from flax.traverse_util import flatten_dict
 import jax
 import jax.numpy as jnp
+from jax.sharding import Mesh, NamedSharding, PartitionSpec
 from ml_collections import config_flags
 import numpy as np
 import optax
@@ -22,12 +23,11 @@ from orca.data.dataset import make_dataset, make_interleaved_dataset
 from orca.data.utils.text_processing import text_processors
 from orca.model import create_model_def
 from orca.model.components.hf_weight_loaders import weights_loaders
+from orca.utils.jax_utils import initialize_compilation_cache
 from orca.utils.train_utils import (
     batched_apply,
     create_train_state,
     format_name_with_config,
-    initialize_compilation_cache,
-    shard_batch,
     Timer,
 )
 from orca.utils.visualization_lib import Visualizer
@@ -52,16 +52,20 @@ config_flags.DEFINE_config_file(
     lock_config=False,
 )
 
+NUM_ACTIONS_FOR_VIS = 8
+
 
 def main(_):
     initialize_compilation_cache()
-    devices = jax.local_devices()
-    num_devices = len(devices)
-    assert FLAGS.config.batch_size % num_devices == 0
 
-    # we shard the leading dimension (batch dimension) across all devices evenly
-    sharding = jax.sharding.PositionalSharding(devices)
-    shard_fn = partial(shard_batch, sharding=sharding)
+    assert FLAGS.config.batch_size % jax.device_count() == 0
+
+    # create a 1D mesh with a single axis named "batch"
+    mesh = Mesh(jax.devices(), axis_names="batch")
+    # replicated sharding -- does not shard arrays
+    replicated_sharding = NamedSharding(mesh, PartitionSpec())
+    # data-parallel sharding -- shards arrays along the first axis
+    dp_sharding = NamedSharding(mesh, PartitionSpec("batch"))
 
     # prevent tensorflow from using GPUs
     tf.config.set_visible_devices([], "GPU")
@@ -172,17 +176,18 @@ def main(_):
                     f,
                 )
 
-    train_data_iter = map(shard_fn, map(process_text, train_data.as_numpy_iterator()))
-    val_data_iters = [
-        map(shard_fn, map(process_text, val_data.iterator())) for val_data in val_datas
-    ]
+    train_data_iter = map(process_text, train_data.iterator())
+    val_data_iters = [map(process_text, val_data.iterator()) for val_data in val_datas]
 
     example_batch = next(train_data_iter)
     logging.info(f"Batch size: {example_batch['action'].shape[0]}")
-    logging.info(f"Number of devices: {num_devices}")
+    logging.info(f"Number of devices: {jax.device_count()}")
     logging.info(
-        f"Batch size per device: {example_batch['action'].shape[0] // num_devices}"
+        f"Batch size per device: {example_batch['action'].shape[0] // jax.device_count()}"
     )
+
+    # truncate batch size for faster init
+    example_batch = jax.tree_map(lambda x: x[:1], example_batch)
 
     # set up model, optimizer, loss
     model_def = create_model_def(
@@ -229,11 +234,6 @@ def main(_):
         logging.info("Starting training from step %d", start_step)
     else:
         start_step = FLAGS.config.start_step or 0
-    # replicate agent across devices
-    # need the jnp.array to avoid a bug where device_put doesn't recognize primitives
-    train_state = jax.device_put(
-        jax.tree_map(jnp.array, train_state), sharding.replicate()
-    )
 
     def loss_fn(params, state, batch, rng, train=True):
         info = state.apply_fn(
@@ -246,7 +246,14 @@ def main(_):
         )
         return info["loss"], info
 
-    @jax.jit
+    @partial(
+        jax.jit,
+        # state is replicated, batch is data-parallel
+        in_shardings=(replicated_sharding, dp_sharding),
+        out_shardings=(replicated_sharding, replicated_sharding),
+        # allows jax to modify `state` in-place, saving a lot of memory
+        donate_argnums=0,
+    )
     def train_step(state, batch):
         rng, dropout_rng = jax.random.split(state.rng)
         (loss, info), grads = jax.value_and_grad(loss_fn, has_aux=True)(
@@ -255,7 +262,12 @@ def main(_):
         new_state = state.apply_gradients(grads=grads, rng=rng)
         return new_state, info
 
-    @jax.jit
+    @partial(
+        jax.jit,
+        # state is replicated, batch is data-parallel
+        in_shardings=(replicated_sharding, dp_sharding),
+        out_shardings=replicated_sharding,
+    )
     def eval_step(state, batch):
         loss, info = loss_fn(state.params, state, batch, state.rng, train=False)
         return info
@@ -266,8 +278,12 @@ def main(_):
         + 1
     )
 
-    @partial(jax.jit, static_argnames=("argmax", "n"))
-    def get_policy_sampled_actions(state, observations, tasks, *, argmax=False, n=1):
+    @partial(
+        jax.jit,
+        in_shardings=(replicated_sharding, dp_sharding, dp_sharding),
+        out_shardings=dp_sharding,
+    )
+    def get_policy_sampled_actions(state, observations, tasks):
         # only use first horizon timesteps as input to predict_action
         observations = jax.tree_map(lambda x: x[:, -horizon:], observations)
         actions = state.apply_fn(
@@ -275,8 +291,8 @@ def main(_):
             observations,
             tasks,
             train=False,
-            argmax=argmax,
-            sample_shape=(n,),
+            argmax=False,
+            sample_shape=(NUM_ACTIONS_FOR_VIS,),
             rng=state.rng,
             method="predict_action",
             rngs={"dropout": state.rng},
@@ -286,10 +302,7 @@ def main(_):
         actions = actions[..., 0, :]
 
         # viz expects (batch_size, n_samples, action_dim)
-        if argmax:
-            actions = actions[:, None]
-        else:
-            actions = jnp.moveaxis(actions, 0, 1)
+        actions = jnp.moveaxis(actions, 0, 1)
         return actions
 
     def wandb_log(info, step):
@@ -304,13 +317,11 @@ def main(_):
     ):
         timer.tick("total")
 
-        timer.tick("dataset")
-        batch = next(train_data_iter)
-        timer.tock("dataset")
+        with timer("dataset"):
+            batch = next(train_data_iter)
 
-        timer.tick("train")
-        train_state, update_info = train_step(train_state, batch)
-        timer.tock("train")
+        with timer("train"):
+            train_state, update_info = train_step(train_state, batch)
 
         if (i + 1) % FLAGS.config.eval_interval == 0:
             logging.info("Evaluating...")
@@ -348,9 +359,8 @@ def main(_):
             logging.info("Visualizing...")
             timer.tick("visualize")
             policy_fn = batched_apply(
-                partial(get_policy_sampled_actions, train_state, argmax=False, n=8),
+                partial(get_policy_sampled_actions, train_state),
                 FLAGS.config.batch_size,
-                sharding=sharding,
             )
             for data_kwargs, visualizer in zip(
                 FLAGS.config.dataset_kwargs["data_kwargs_list"], visualizers
