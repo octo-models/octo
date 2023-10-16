@@ -1,12 +1,11 @@
 # adapted from https://github.com/google-research/robotics_transformer/blob/master/transformer_network.py
-import distrax
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
 import numpy as np
 
+from orca.model.components import TokenMetadata
 from orca.model.components.action_heads import DiscretizedActionHead
-from orca.model.components.tokenizers import ActionTokenizer
 from orca.model.components.transformer import Transformer
 from orca.utils.typing import PRNGKey, Sequence
 
@@ -335,26 +334,29 @@ class ORCAPolicy(nn.Module):
     def _get_token_description(self, i: int):
         """Description of what token i in the transformer is
         Args: i: index of token in transformer (0 <= i < total_tokens)
-        Returns: (token_type, token_timestep, extra_metadata)
+        Returns: TokenMetadata(token_type, token_timestep, extra_metadata)
+
+        Metadata is any extra information that might be necessary to determine the
+        attention mask.
         """
 
         # Is it a task token?
         if i < self.tokens_per_task:
-            return ("task", None, i)
+            return TokenMetadata("task", None)
 
         i = i - self.tokens_per_task
         timestep, position = divmod(i, self.tokens_per_time_step)
 
         # Observation token
         if position < self.tokens_per_obs:
-            return ("obs", timestep, position)
+            return TokenMetadata("obs", timestep)
 
         # Action token
         elif position < self.tokens_per_obs + self.tokens_per_action:  # Action token
-            return (
+            return TokenMetadata(
                 "action",
                 timestep,
-                self.action_head.token_metadata(position),
+                extra_metadata=self.action_head.token_metadata(position),
             )
         else:  # Value tokens coming soon?
             raise NotImplementedError()
@@ -391,19 +393,21 @@ class ORCAPolicy(nn.Module):
 
         for i in range(self.total_tokens):  # Token attending
             for j in range(self.total_tokens):  # Token being attended to
-                # description is a tuple (token_type, token_timestep, extra_info)
+                # description is a TokenMetadata(token_name, token_timestep, extra_info)
                 description_i = self._get_token_description(i)
                 description_j = self._get_token_description(j)
 
-                if description_i[0] == "task":
+                if description_i.name == "task":
                     # Only attend to other task tokens
-                    mask = 1 if description_j[0] == "task" else 0
-                elif description_i[0] == "obs":
+                    mask = 1 if description_j.name == "task" else 0
+                elif description_i.name == "obs":
                     # Only attend to observation tokens in the same timestep or before
-                    if description_j[0] == "task":
+                    if description_j.name == "task":
                         mask = 1
-                    elif description_j[0] == "obs":
-                        mask = 1 if description_j[1] <= description_i[1] else 0
+                    elif description_j.name == "obs":
+                        mask = (
+                            1 if description_j.timestep <= description_i.timestep else 0
+                        )
                     else:
                         mask = 0  # Don't attend to actions
                 else:
