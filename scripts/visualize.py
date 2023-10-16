@@ -26,12 +26,8 @@ import wandb
 from orca.data.utils.text_processing import text_processors
 from orca.model import create_model_def
 from orca.model.components.hf_weight_loaders import weights_loaders
-from orca.utils.train_utils import (
-    batched_apply,
-    create_train_state,
-    initialize_compilation_cache,
-    shard_batch,
-)
+from orca.utils.jax_utils import initialize_compilation_cache
+from orca.utils.train_utils import batched_apply, create_train_state
 from orca.utils.visualization_lib import Visualizer
 
 FLAGS = flags.FLAGS
@@ -93,9 +89,7 @@ def main(_):
         return dummy_main(_)
 
     initialize_compilation_cache()
-    devices = jax.local_devices()
-    sharding = jax.sharding.PositionalSharding(devices)
-    shard_fn = partial(shard_batch, sharding=sharding)
+
     # prevent tensorflow from using GPUs
     tf.config.set_visible_devices([], "GPU")
     if FLAGS.config.text_processor is None:
@@ -135,7 +129,7 @@ def main(_):
         return batch
 
     val_data = visualizer.dataset.unbatch().batch(FLAGS.config.batch_size)
-    val_data_iter = map(shard_fn, map(process_text, val_data.iterator()))
+    val_data_iter = map(process_text, val_data.iterator())
     example_batch = next(val_data_iter)
 
     model_def = create_model_def(
@@ -213,7 +207,7 @@ def main(_):
         policy_fn = batched_apply(
             partial(get_policy_sampled_actions, train_state, argmax=False, n=8),
             FLAGS.config.batch_size,
-            sharding=sharding,
+            devices=jax.devices(),
         )
         for mode in FLAGS.modes:
             images = visualizer.visualize_for_wandb(policy_fn, max_trajs=3)

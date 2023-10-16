@@ -399,7 +399,14 @@ def get_config(config_string):
                         },
                     ],
                 },
-                **update_config(base_config, batch_size=2, num_steps=20),
+                **update_config(
+                    base_config,
+                    batch_size=2,
+                    num_steps=20,
+                    eval_interval=10,
+                    save_interval=10,
+                    log_interval=10,
+                ),
             )
         ),
     }
