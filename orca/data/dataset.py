@@ -286,6 +286,11 @@ def make_dataset(
         split = "train" if train else "val"
 
     dataset = dl.DLataset.from_rlds(builder, split=split, shuffle=shuffle, num_parallel_reads=1)
+    options = tf.data.Options()
+    autotune_options = tf.data.experimental.AutotuneOptions()
+    autotune_options.ram_budget = 3 * 1024 * 1024 * 1024   # 10 GB
+    options.autotune = autotune_options
+    dataset = dataset.with_options(options)
 
     image_obs_keys = (
         [image_obs_keys] if not isinstance(image_obs_keys, Sequence) else image_obs_keys
@@ -411,11 +416,16 @@ def make_interleaved_dataset(
     datasets = []
     for i, data_kwargs in enumerate(tqdm.tqdm(dataset_kwargs_list)):
         data_kwargs.update(**common_dataset_args)
+        #options = tf.data.Options()
+        #autotune_options = tf.data.experimental.AutotuneOptions()
+        #autotune_options.cpu_budget = 5
+        #options.autotune = autotune_options
         datasets.append(
             make_dataset(**data_kwargs, train=train)
             .unbatch()
             .shuffle(int(shuffle_buffer_size))
             .repeat()
+            #.with_options(options)
         )
 
     # interleave datasets with sampling weights
