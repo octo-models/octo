@@ -45,8 +45,6 @@ dataset, batch size etc. in [config.py](config.py).
 ```
 python train.py --config config.py:transformer_bc_bridge --name=orca_bridge --config.dataset_kwargs.data_kwargs_list[0].data_dir=<...> --config.save_dir=<...>
 ```
-### TPU Training
-See the documentation in [RAIL docs](docs/RAIL.md) for instructions on how to train on TPUs.
 
 ## Code Structure
 
