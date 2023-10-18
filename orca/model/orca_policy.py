@@ -1,11 +1,11 @@
 # adapted from https://github.com/google-research/robotics_transformer/blob/master/transformer_network.py
-import distrax
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
 import numpy as np
 
-from orca.model.components.tokenizers import ActionTokenizer
+from orca.model.components import TokenMetadata, TokenType
+from orca.model.components.action_heads import DiscretizedActionHead
 from orca.model.components.transformer import Transformer
 from orca.utils.typing import PRNGKey, Sequence
 
@@ -18,14 +18,29 @@ class ORCAPolicy(nn.Module):
 
     With no action chunking (`pred_horizon=1`) the token sequence looks like:
 
-    [task, o_0, a_0, o_1, a_1, ..., o_n, a_n]
+    [
+        task,
+        o_0, <placeholder a_0>,
+        o_1, <placeholder a_1>,
+        ...,
+        o_n, <placeholder a_n>
+     ]
 
     With action chunking (`pred_horizon>1`), the actions in the chunk are packed between
     the observations. For example, if `pred_horizon=3`, the sequence looks like:
 
-    [task, o_0, a_0, a_1, a_2, o_1, a_1, a_2, a_3, o_2, ..., o_n, a_n, a_n+1, a_n+2]
+    [
+        task,
+        o_0, <placeholder a_0>, <placeholder a_1>, <placeholder a_2>,
+        o_1, <placeholder a_1>, <placeholder a_2>, <placeholder a_3>,
+        ...,
+        o_n, <placeholder a_n>, <placeholder a_n+1>, <placeholder a_n+2>
+    ]
 
-    In both cases, a causal mask ensures that each token can only attend to past tokens.
+        (See `DiscretizedActionHead` for more details on the action placeholders.)
+
+    In both cases, we use a causal mask to ensures that action token
+    prediction can only attend to *past* observation and task tokens.
 
     At test time, we predict actions non-autoregressively (i.e we predict all the tokens
     of all the actions in a chunk in one forward pass). We do this by using mask/padding tokens
@@ -55,12 +70,14 @@ class ORCAPolicy(nn.Module):
 
     observation_tokenizers: Sequence[nn.Module]
     task_tokenizers: Sequence[nn.Module]
-    vocab_size: int = 256
-    token_embedding_size: int = 512
     window_size: int = 1
+    # Forwarded to action head
+    vocab_size: int = 256
     pred_horizon: int = 1
     action_dim: int = 7
     normalization_type: str = "bounds"
+    # Forwarded to Transformer
+    token_embedding_size: int = 512
     num_layers: int = 4
     mlp_dim: int = 1024
     num_heads: int = 8
@@ -76,26 +93,28 @@ class ORCAPolicy(nn.Module):
             attention_dropout_rate=self.attention_dropout_rate,
         )
 
-        self.action_tokenizer = ActionTokenizer(
-            vocab_size=self.vocab_size,
-            normalization_type=self.normalization_type,
-        )
-
-        assert (
-            self.window_size >= self.pred_horizon
-        ), "Trajectory must contain enough actions to predict a full chunk."
         # If pred_horizon>1, we don't use the timesteps in the trajectory window where
         # we can't predict a full action chunk (i.e the last (pred_horizon-1) timesteps)
         self.horizon = self.window_size - self.pred_horizon + 1
 
-        self.tokens_per_action = self.action_dim * self.pred_horizon
+        self.action_head = DiscretizedActionHead(
+            horizon=self.horizon,
+            token_embedding_size=self.token_embedding_size,
+            window_size=self.window_size,
+            pred_horizon=self.pred_horizon,
+            action_dim=self.action_dim,
+            vocab_size=self.vocab_size,
+            normalization_type=self.normalization_type,
+        )  # TODO: should we make action_head an argument?
+
+        self.tokens_per_action = self.action_head.num_tokens
         self.tokens_per_obs = sum(tok.num_tokens for tok in self.observation_tokenizers)
         self.tokens_per_task = sum(tok.num_tokens for tok in self.task_tokenizers)
         self.tokens_per_time_step = self.tokens_per_obs + self.tokens_per_action
+
         self.total_tokens = (
             self.tokens_per_task + self.tokens_per_time_step * self.horizon
         )
-        self.vocab_proj = nn.Dense(self.vocab_size)
         self.obs_proj = [
             nn.Dense(self.token_embedding_size)
             for _ in range(len(self.observation_tokenizers))
@@ -122,6 +141,8 @@ class ORCAPolicy(nn.Module):
         Args:
             observations: A dictionary containing observation data for a batch of trajectory windows.
                 Each entry has shape (batch, window_size, *).
+                observations['pad_mask'] is a boolean array (batch, window_size) which is True if
+                the timestep is not a padding timestep.
             tasks: A dictionary containing task data for the trajectory windows.
                 Each entry has shape (batch, *).
             actions: The actions in the trajectory windows with shape (batch, window_size, action_dim).
@@ -137,64 +158,20 @@ class ORCAPolicy(nn.Module):
         # only use first horizon timesteps from the window
         observations = jax.tree_map(lambda x: x[:, : self.horizon], observations)
 
-        # output is (batch, horizon, tokens_per_time_step, token_embedding_size)
+        # output is (batch, total_tokens, token_embedding_size)
         output = self.transformer_call(
             observations,
             tasks,
             train=train,
         )
 
-        # get the logits for all the actions by taking the action tokens of each timestep,
-        # unfolding the pred_horizon dim, and projecting to the vocab size
-        # (batch, horizon, tokens_per_action, token_embedding_size)
-        action_embedding = output[:, :, -self.tokens_per_action :]
-        # (batch, horizon, pred_horizon, action_dim, token_embedding_size)
-        action_embedding = jnp.reshape(
-            action_embedding,
-            (
-                *action_embedding.shape[:2],
-                self.pred_horizon,
-                self.action_dim,
-                self.token_embedding_size,
-            ),
+        # Extract the action embeddings from the transformer output
+        # and passes to the action head for loss computation
+        action_embedding = self.extract_action_embeddings(output)
+        loss, metrics = self.action_head.loss(
+            action_embedding, actions, observations["pad_mask"]
         )
-        # (batch, horizon, pred_horizon, action_dim, vocab_size)
-        action_logits = self.vocab_proj(action_embedding)
-
-        # compute log probabilities for predicted actions
-        action_logprob = jax.nn.log_softmax(action_logits, axis=-1)
-
-        # chunk the target actions to match the predicted actions
-        actions_chunked = self.chunk_actions(actions)
-
-        # only use first horizon timesteps from the window
-        actions_chunked = actions_chunked[:, : self.horizon]
-
-        # tokenize the target actions and convert them to one hot vectors
-        action_labels = self.action_tokenizer(actions_chunked, mode="tokenize")
-        action_labels_one_hot = jax.nn.one_hot(action_labels, self.vocab_size)
-
-        # compute the CE loss using the log probabilities and target actions
-        action_loss = -jnp.sum(action_logprob * action_labels_one_hot, axis=-1)
-        # mask the loss with the pad mask to avoid supervising padding
-        action_loss = (action_loss * observations["pad_mask"][:, :, None, None]).mean()
-
-        # take the highest probability actions as the predicted actions
-        action_pred = jnp.argmax(action_logits, axis=-1)
-
-        # compute accuracy between predicted actions and target actions
-        accuracy = action_pred == action_labels
-        # mask the accuracy with the pad mask to remove the contribution of padding
-        accuracy = (accuracy * observations["pad_mask"][:, :, None, None]).mean()
-
-        # detokenize the predicted actions
-        action_values = self.action_tokenizer(action_pred, mode="detokenize")
-        # compute the mean squared error between predicted actions and target actions
-        action_mse = jnp.square(actions_chunked - action_values).sum(axis=-1)
-        # mask the mse with the pad mask to remove the contribution of padding
-        action_mse = (action_mse * observations["pad_mask"][:, :, None]).mean()
-
-        return {"loss": action_loss, "mse": action_mse, "accuracy": accuracy}
+        return {**metrics, "loss": loss}
 
     def transformer_call(
         self,
@@ -215,20 +192,7 @@ class ORCAPolicy(nn.Module):
         input_tokens = self.assemble_input_tokens(
             task_tokens, obs_tokens, action_tokens
         )
-        output = self.transformer(input_tokens, attention_mask, train=train)
-        # remove output corresponding to task
-        output = output[:, self.tokens_per_task :]
-
-        # unfold horizon length from token sequence length
-        return jnp.reshape(
-            output,
-            (
-                output.shape[0],
-                self.horizon,
-                self.tokens_per_time_step,
-                self.token_embedding_size,
-            ),
-        )
+        return self.transformer(input_tokens, attention_mask, train=train)
 
     def predict_action(
         self,
@@ -269,32 +233,15 @@ class ORCAPolicy(nn.Module):
             tasks,
             train=train,
         )
-
-        # get the logits for the last action by taking the action tokens of the last timestep,
-        # unfolding the pred_horizon dim, and projecting to the vocab size
-        # (batch, tokens_per_action, token_embedding_size)
-        action_embedding = output[:, -1, -self.tokens_per_action :]
-        # (batch, pred_horizon, action_dim, token_embedding_size)
-        action_embedding = jnp.reshape(
+        action_embedding = self.extract_action_embeddings(output)
+        return self.action_head.predict_action(
             action_embedding,
-            (
-                action_embedding.shape[0],
-                self.pred_horizon,
-                self.action_dim,
-                self.token_embedding_size,
-            ),
+            train=train,
+            argmax=argmax,
+            sample_shape=sample_shape,
+            rng=rng,
+            temperature=temperature,
         )
-        # (batch, pred_horizon, action_dim, vocab_size)
-        action_logits = self.vocab_proj(action_embedding)
-
-        if argmax:
-            action_tokens = jnp.argmax(action_logits, axis=-1).astype(jnp.int32)
-        else:
-            dist = distrax.Categorical(logits=action_logits / temperature)
-            action_tokens = dist.sample(seed=rng, sample_shape=sample_shape).astype(
-                jnp.int32
-            )
-        return self.action_tokenizer(action_tokens, mode="detokenize")
 
     def get_tokens(self, observations, tasks, train: bool = False):
         """
@@ -346,6 +293,13 @@ class ORCAPolicy(nn.Module):
         Concatenate obs and action tokens.
         Fold horizon dim into token sequence dim.
         Prepend task tokens.
+
+        Inputs:
+            task_tokens: (batch, tokens_per_task, token_embedding_size)
+            obs_tokens: (batch, horizon, tokens_per_obs, token_embedding_size)
+            action_tokens: (batch, horizon, tokens_per_action, token_embedding_size)
+        Returns:
+            tokens: (batch, total_tokens, token_embedding_size)
         """
 
         # (batch, horizon, tokens_per_time_step, token_embedding_size)
@@ -357,6 +311,57 @@ class ORCAPolicy(nn.Module):
         # (batch, tokens_per_task + horizon * tokens_per_time_step, token_embedding_size)
         tokens = jnp.concatenate([task_tokens, tokens], axis=1)
         return tokens
+
+    def extract_action_embeddings(self, transformer_output):
+        """
+        Args:
+            transformer_output: (batch, total_tokens, token_embedding_size)
+        Returns:
+            action_embeddings: (batch, horizon, self.tokens_per_action, token_embedding_size)
+        """
+
+        embeddings = transformer_output[:, self.tokens_per_task :]
+        embeddings = jnp.reshape(
+            embeddings,
+            (
+                embeddings.shape[0],
+                self.horizon,
+                self.tokens_per_time_step,
+                self.token_embedding_size,
+            ),
+        )
+        action_embeddings = embeddings[:, :, self.tokens_per_obs :]
+        return action_embeddings
+
+    def _get_token_description(self, i: int):
+        """Description of what token i in the transformer is
+        Args: i: index of token in transformer (0 <= i < total_tokens)
+        Returns: TokenMetadata(token_type, token_timestep, extra_metadata)
+
+        Metadata is any extra information that might be necessary to determine the
+        attention mask.
+        """
+
+        # Is it a task token?
+        if i < self.tokens_per_task:
+            return TokenMetadata(TokenType.TASK, None)
+
+        i = i - self.tokens_per_task
+        timestep, position = divmod(i, self.tokens_per_time_step)
+
+        # Observation token
+        if position < self.tokens_per_obs:
+            return TokenMetadata(TokenType.OBS, timestep)
+
+        # Action token
+        elif position < self.tokens_per_obs + self.tokens_per_action:  # Action token
+            return TokenMetadata(
+                TokenType.ACTION,
+                timestep,
+                extra_metadata=self.action_head.token_metadata(position),
+            )
+        else:  # Value tokens coming soon?
+            raise NotImplementedError()
 
     def generate_default_attention_mask(self):
         """
@@ -388,28 +393,30 @@ class ORCAPolicy(nn.Module):
 
         attention_mask = np.zeros((self.total_tokens, self.total_tokens), dtype=int)
 
-        # mask for obs-action sequence
-        for i in range(self.tokens_per_time_step * self.horizon):
-            for j in range(self.tokens_per_time_step * self.horizon):
-                # get the index in the time sequence given the token index
-                index_i = int(i / self.tokens_per_time_step)
-                index_j = int(j / self.tokens_per_time_step)
-                # determine whether this token represents an action or observation
-                is_action_j = j % self.tokens_per_time_step >= self.tokens_per_obs
+        for i in range(self.total_tokens):  # Token attending
+            for j in range(self.total_tokens):  # Token being attended to
+                # description is a TokenMetadata(token_name, token_timestep, extra_info)
+                description_i = self._get_token_description(i)
+                description_j = self._get_token_description(j)
 
-                mask = 1
-                # don't attend to future timesteps
-                if index_j > index_i:
-                    mask = 0
-                # don't attend to actions
-                if is_action_j:
-                    mask = 0
-                attention_mask[
-                    self.tokens_per_task + i, self.tokens_per_task + j
-                ] = mask
-
-        # add mask for task tokens
-        attention_mask[:, : self.tokens_per_task] = 1
+                if description_i.kind == TokenType.TASK:
+                    # Only attend to other task tokens
+                    mask = 1 if description_j.kind == TokenType.TASK else 0
+                elif description_i.kind == TokenType.OBS:
+                    # Only attend to observation tokens in the same timestep or before
+                    if description_j.kind == TokenType.TASK:
+                        mask = 1
+                    elif description_j.kind == TokenType.OBS:
+                        mask = (
+                            1 if description_j.timestep <= description_i.timestep else 0
+                        )
+                    else:
+                        mask = 0  # Don't attend to actions
+                else:
+                    mask = self.action_head.attention_mask_ij(
+                        description_i, description_j
+                    )
+                attention_mask[i, j] = mask
 
         return attention_mask
 
@@ -434,18 +441,3 @@ class ORCAPolicy(nn.Module):
             ),
         )
         return full_mask
-
-    def chunk_actions(self, actions):
-        """
-        Chunk actions into `pred_horizon` size chunks.
-        The resulting actions have shape (batch, window_size, pred_horizon, action_dim)
-        """
-
-        chunk_indices = jnp.broadcast_to(
-            jnp.arange(self.pred_horizon), [self.window_size, self.pred_horizon]
-        ) + jnp.broadcast_to(
-            jnp.arange(self.window_size)[:, None],
-            [self.window_size, self.pred_horizon],
-        )
-        chunk_indices = jnp.minimum(chunk_indices, self.window_size - 1)
-        return actions[:, chunk_indices]
