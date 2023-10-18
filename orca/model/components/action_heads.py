@@ -5,7 +5,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from orca.model.components import TokenMetadata
+from orca.model.components import TokenMetadata, TokenType
 from orca.model.components.tokenizers import ActionTokenizer
 from orca.utils.typing import PRNGKey
 
@@ -64,13 +64,14 @@ class DiscretizedActionHead(nn.Module):
             description_j: (token_type, token_timestep, extra_metadata)
         Returns: 0 or 1
         """
-        assert description_i.name == "action"
-        if description_j.name == "task":
+        assert description_i.kind == TokenType.ACTION
+
+        if description_j.kind == TokenType.TASK:
             return 1  # Attend to all task tokens
-        elif description_j.name == "obs":
+        elif description_j.kind == TokenType.OBS:
             # Attend to all timesteps at same or earlier timestep
             return 1 if description_j.timestep <= description_i.timestep else 0
-        elif description_j.name == "action":
+        else:
             # Don't attend to other action tokens
             return 0
         return 0
@@ -91,6 +92,8 @@ class DiscretizedActionHead(nn.Module):
         Args:
             action_embedding: jnp.ndarray w/ shape (batch_size, horizon, self.num_tokens, self.token_embedding_size)
             actions: jnp.ndarray w/ shape (batch_size, window_size, action_dim)
+            pad_mask: boolean array (batch, window_size) which is True if the timestep is not a padding timestep.
+
         Returns:
             loss: float
             metrics: dict

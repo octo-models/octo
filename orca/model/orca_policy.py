@@ -4,7 +4,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from orca.model.components import TokenMetadata
+from orca.model.components import TokenMetadata, TokenType
 from orca.model.components.action_heads import DiscretizedActionHead
 from orca.model.components.transformer import Transformer
 from orca.utils.typing import PRNGKey, Sequence
@@ -141,6 +141,8 @@ class ORCAPolicy(nn.Module):
         Args:
             observations: A dictionary containing observation data for a batch of trajectory windows.
                 Each entry has shape (batch, window_size, *).
+                observations['pad_mask'] is a boolean array (batch, window_size) which is True if
+                the timestep is not a padding timestep.
             tasks: A dictionary containing task data for the trajectory windows.
                 Each entry has shape (batch, *).
             actions: The actions in the trajectory windows with shape (batch, window_size, action_dim).
@@ -342,19 +344,19 @@ class ORCAPolicy(nn.Module):
 
         # Is it a task token?
         if i < self.tokens_per_task:
-            return TokenMetadata("task", None)
+            return TokenMetadata(TokenType.TASK, None)
 
         i = i - self.tokens_per_task
         timestep, position = divmod(i, self.tokens_per_time_step)
 
         # Observation token
         if position < self.tokens_per_obs:
-            return TokenMetadata("obs", timestep)
+            return TokenMetadata(TokenType.OBS, timestep)
 
         # Action token
         elif position < self.tokens_per_obs + self.tokens_per_action:  # Action token
             return TokenMetadata(
-                "action",
+                TokenType.ACTION,
                 timestep,
                 extra_metadata=self.action_head.token_metadata(position),
             )
@@ -397,14 +399,14 @@ class ORCAPolicy(nn.Module):
                 description_i = self._get_token_description(i)
                 description_j = self._get_token_description(j)
 
-                if description_i.name == "task":
+                if description_i.kind == TokenType.TASK:
                     # Only attend to other task tokens
-                    mask = 1 if description_j.name == "task" else 0
-                elif description_i.name == "obs":
+                    mask = 1 if description_j.kind == TokenType.TASK else 0
+                elif description_i.kind == TokenType.OBS:
                     # Only attend to observation tokens in the same timestep or before
-                    if description_j.name == "task":
+                    if description_j.kind == TokenType.TASK:
                         mask = 1
-                    elif description_j.name == "obs":
+                    elif description_j.kind == TokenType.OBS:
                         mask = (
                             1 if description_j.timestep <= description_i.timestep else 0
                         )
