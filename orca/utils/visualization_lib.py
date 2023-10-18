@@ -57,8 +57,8 @@ def run_policy_on_trajectory(policy_fn, traj, *, text_processor=None):
     return {
         "n": np.array(len_traj),
         "pred_actions": actions,
-        "actions": traj["action"][:, 0, :],
-        "proprio": traj["observation"]["proprio"][:, 0],
+        "actions": traj["action"][:, -1, :],
+        "proprio": traj["observation"]["proprio"][:, -1],
     }
 
 
