@@ -110,9 +110,8 @@ def get_config(config_string):
     )
 
     possible_structures = {
-        "transformer_bc_bridge": ConfigDict(
+        "gc_bridge": ConfigDict(
             dict(
-                agent="transformer_bc",
                 model=update_config(
                     base_model_config,
                     observation_tokenizers=[
@@ -128,9 +127,8 @@ def get_config(config_string):
                 **base_config,
             )
         ),
-        "transformer_bc_r2d2": ConfigDict(
+        "gc_r2d2": ConfigDict(
             dict(
-                agent="transformer_bc",
                 model=update_config(
                     base_model_config,
                     observation_tokenizers=[
@@ -160,9 +158,8 @@ def get_config(config_string):
                 **base_config,
             )
         ),
-        "transformer_bc_bridge_r2d2": ConfigDict(
+        "gc_bridge_r2d2": ConfigDict(
             dict(
-                agent="transformer_bc",
                 model=update_config(
                     base_model_config,
                     observation_tokenizers=[
@@ -201,9 +198,8 @@ def get_config(config_string):
                 **base_config,
             )
         ),
-        "transformer_bc_bridge_film_lang": ConfigDict(
+        "lc_film_bridge": ConfigDict(
             dict(
-                agent="transformer_bc",
                 model=update_config(
                     base_model_config,
                     observation_tokenizers=[
@@ -221,12 +217,14 @@ def get_config(config_string):
                 ),
                 optimizer=base_optimizer_config,
                 dataset_kwargs=base_bridge_data_config,
-                **base_config,
+                **update_config(
+                    base_config,
+                    text_processor="muse_embedding",
+                ),
             )
         ),
-        "transformer_bc_bridge_lang": ConfigDict(
+        "lc_bridge": ConfigDict(
             dict(
-                agent="transformer_bc",
                 model=update_config(
                     base_model_config,
                     observation_tokenizers=[
@@ -245,12 +243,118 @@ def get_config(config_string):
                 ),
                 optimizer=base_optimizer_config,
                 dataset_kwargs=base_bridge_data_config,
-                **base_config,
+                **update_config(
+                    base_config,
+                    text_processor="muse_embedding",
+                ),
+            )
+        ),
+        "lc_distilbert_bridge": ConfigDict(
+            dict(
+                model=update_config(
+                    base_model_config,
+                    observation_tokenizers=[
+                        (
+                            "image_tokenizer",
+                            update_config(
+                                base_tokenizer_kwargs,
+                                num_tokens=64,
+                                task_stack_keys=[],
+                            ),
+                        ),
+                    ],
+                    task_tokenizers=[
+                        (
+                            "language_tokenizer",
+                            {
+                                "num_tokens": 64,
+                                "projection_dim": 512,
+                                "encoder": "distilbert-base-uncased",
+                            },
+                        ),
+                    ],
+                ),
+                optimizer=base_optimizer_config,
+                dataset_kwargs=base_bridge_data_config,
+                **update_config(
+                    base_config,
+                    text_processor="hf_tokenizer",
+                    text_processor_kwargs=dict(
+                        tokenizer_name="distilbert-base-uncased",
+                        encode_with_model=False,
+                    ),
+                    pretrained_weights=["distilbert"],
+                ),
+            )
+        ),
+        "multimodal_independent_bridge": ConfigDict(
+            dict(
+                model=update_config(
+                    base_model_config,
+                    observation_tokenizers=[
+                        (
+                            "image_tokenizer",
+                            update_config(
+                                base_tokenizer_kwargs,
+                                num_tokens=64,
+                                task_stack_keys=["image_.*"],
+                                task_film_keys=["language_instruction"],
+                            ),
+                        ),
+                    ],
+                    task_tokenizers=[],
+                ),
+                optimizer=base_optimizer_config,
+                dataset_kwargs=update_config(
+                    base_bridge_data_config,
+                    common_kwargs=dict(
+                        **base_task_augmentation_kwargs,
+                    ),
+                ),
+                **update_config(
+                    base_config,
+                    text_processor="muse_embedding",
+                ),
+            )
+        ),
+        "multimodal_switch_bridge": ConfigDict(
+            dict(
+                model=update_config(
+                    base_model_config,
+                    observation_tokenizers=[
+                        (
+                            "image_tokenizer",
+                            update_config(
+                                base_tokenizer_kwargs,
+                                num_tokens=64,
+                                task_stack_keys=["image_.*"],
+                                task_film_keys=["language_instruction"],
+                            ),
+                        ),
+                    ],
+                    task_tokenizers=[],
+                ),
+                optimizer=base_optimizer_config,
+                dataset_kwargs=update_config(
+                    base_bridge_data_config,
+                    common_kwargs=dict(
+                        task_augmentation_strategy="switch_keys",
+                        task_augmentation_kwargs=dict(
+                            switch_key_groups_probs=[
+                                (["image_0"], 0.5),
+                                (["language_instruction"], 0.5),
+                            ],
+                        ),
+                    ),
+                ),
+                **update_config(
+                    base_config,
+                    text_processor="muse_embedding",
+                ),
             )
         ),
         "ci_debug_dataset": ConfigDict(
             dict(
-                agent="minimal_transformer",
                 model=dict(
                     policy_kwargs=dict(
                         num_layers=1,
@@ -295,113 +399,13 @@ def get_config(config_string):
                         },
                     ],
                 },
-                **update_config(base_config, batch_size=2, num_steps=20),
-            )
-        ),
-        "transformer_bc_bridge_distilbert": ConfigDict(
-            dict(
-                agent="transformer_bc",
-                model=update_config(
-                    base_model_config,
-                    observation_tokenizers=[
-                        (
-                            "image_tokenizer",
-                            update_config(
-                                base_tokenizer_kwargs,
-                                num_tokens=64,
-                                task_stack_keys=[],
-                            ),
-                        ),
-                    ],
-                    task_tokenizers=[
-                        (
-                            "language_tokenizer",
-                            {
-                                "num_tokens": 64,
-                                "projection_dim": 512,
-                                "encoder": "distilbert-base-uncased",
-                            },
-                        ),
-                    ],
-                ),
-                optimizer=base_optimizer_config,
-                dataset_kwargs=base_bridge_data_config,
                 **update_config(
                     base_config,
-                    text_processor="hf_tokenizer",
-                    text_processor_kwargs=dict(
-                        tokenizer_name="distilbert-base-uncased",
-                        encode_with_model=False,
-                    ),
-                    pretrained_weights=["distilbert"],
-                ),
-            )
-        ),
-        "transformer_bc_bridge_multimodal": ConfigDict(
-            dict(
-                agent="transformer_bc",
-                model=update_config(
-                    base_model_config,
-                    observation_tokenizers=[
-                        (
-                            "image_tokenizer",
-                            update_config(
-                                base_tokenizer_kwargs,
-                                num_tokens=64,
-                                task_stack_keys=["image_.*"],
-                                task_film_keys=["language_instruction"],
-                            ),
-                        ),
-                    ],
-                    task_tokenizers=[],
-                ),
-                optimizer=base_optimizer_config,
-                dataset_kwargs=update_config(
-                    base_bridge_data_config,
-                    common_kwargs=dict(
-                        **base_task_augmentation_kwargs,
-                    ),
-                ),
-                **update_config(
-                    base_config,
-                    text_processor="muse_embedding",
-                ),
-            )
-        ),
-        "transformer_bc_bridge_multimodal_switch": ConfigDict(
-            dict(
-                agent="transformer_bc",
-                model=update_config(
-                    base_model_config,
-                    observation_tokenizers=[
-                        (
-                            "image_tokenizer",
-                            update_config(
-                                base_tokenizer_kwargs,
-                                num_tokens=64,
-                                task_stack_keys=["image_.*"],
-                                task_film_keys=["language_instruction"],
-                            ),
-                        ),
-                    ],
-                    task_tokenizers=[],
-                ),
-                optimizer=base_optimizer_config,
-                dataset_kwargs=update_config(
-                    base_bridge_data_config,
-                    common_kwargs=dict(
-                        task_augmentation_strategy="switch_keys",
-                        task_augmentation_kwargs=dict(
-                            switch_key_groups_probs=[
-                                (["image_0"], 0.5),
-                                (["language_instruction"], 0.5),
-                            ],
-                        ),
-                    ),
-                ),
-                **update_config(
-                    base_config,
-                    text_processor="muse_embedding",
+                    batch_size=2,
+                    num_steps=20,
+                    eval_interval=10,
+                    save_interval=10,
+                    log_interval=10,
                 ),
             )
         ),
