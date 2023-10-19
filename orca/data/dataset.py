@@ -391,5 +391,5 @@ def make_interleaved_dataset(
         )
 
     # interleave datasets with sampling weights
-    dataset = tf.data.Dataset.sample_from_datasets(datasets, sample_weights)
+    dataset = dl.DLataset.sample_from_datasets(datasets, sample_weights)
     return dataset
