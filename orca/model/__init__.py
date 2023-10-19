@@ -3,8 +3,7 @@ import logging
 from orca.model.components.computation_groups import ComputationPlaceholder
 from orca.model.components.heads import HEADS
 from orca.model.components.tokenizers import TOKENIZERS
-
-from .orca_model import OrcaModel, ORCATransformer
+from orca.model.orca_model import OrcaModel, ORCATransformer
 
 
 def create_model_def(
@@ -16,6 +15,22 @@ def create_model_def(
     head_kwargs,
     **kwargs,
 ):
+    """
+    Args:
+        observation_tokenizers: list of (tokenizer_name, tokenizer_kwargs) tuples
+        task_tokenizers: list of (tokenizer_name, tokenizer_kwargs) tuples
+        computation_placeholders: dict of {placeholder_name: n_tokens_for_placeholder}
+        max_horizon: int
+        transformer_kwargs: dict of kwargs for ORCATransformer
+        head_kwargs: dict of {
+            head_name: {
+                'name': str, # which head in HEADS
+                'computation_group': str, # which computation group to use for this head
+                'kwargs': dict # kwargs for the head
+            }
+        }
+
+    """
     if len(kwargs) > 0:
         logging.warn(f"Extra kwargs passed into create_model_def: {kwargs}")
 
