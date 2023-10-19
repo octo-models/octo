@@ -210,7 +210,7 @@ def main(_):
     def init_fn(model: OrcaModel, observations, tasks):
         # initialize transformer
         transformer_embeddings = model.orca_transformer(
-            observations, tasks, observations["pad_mask"], train=False
+            observations, tasks, observations["pad_mask"], train=False, verbose=True
         )
 
         for head_name, head in model.heads.items():
@@ -314,7 +314,10 @@ def main(_):
 
         def get_actions(model, observations, tasks, train):
             transformer_embeddings = model.orca_transformer(
-                observations, tasks, observations["pad_mask"], train=train
+                observations,
+                tasks,
+                observations["pad_mask"],
+                train=train,
             )
             action_readout_key = model.heads["action"].readout_key
             embeddings = transformer_embeddings[action_readout_key]

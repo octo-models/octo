@@ -14,6 +14,8 @@ from orca.utils.typing import Dict, PRNGKey, Sequence
 
 @dataclass
 class PrefixGroup:
+    """A group of tokens that will be at the beginning of the token sequence."""
+
     name: str
     tokens: jnp.ndarray  # with shape (batch, n_tokens, token_embedding_size)
     attends_to: Sequence[str]
@@ -24,9 +26,12 @@ class PrefixGroup:
 
 @dataclass
 class TimestepGroup:
+    """A group of tokens that is repeated for each timestep."""
+
     name: str
     tokens: jnp.ndarray  # with shape (batch, horizon, n_tokens, token_embedding_size)
     attends_to: Sequence[str]
+    attends_to_past: Sequence[str] = tuple()
 
     def __post_init__(self):
         assert self.tokens.ndim == 4
@@ -39,6 +44,7 @@ class TokenMetadata:
     group_name: str
     timestep: int  # -1 for prefix tokens
     attends_to: Sequence[str]
+    attends_to_past: Sequence[str] = tuple()
 
 
 def split_tokens(ary, n_tokens_per_group, axis):
@@ -59,28 +65,18 @@ class BlockTransformer(nn.Module):
         prefix_groups: Sequence[PrefixGroup],
         timestep_groups: Sequence[TimestepGroup],
         timestep_pad_mask: jnp.ndarray,
-        train: bool = False,
+        train: bool,
+        verbose: bool = False,
     ):
         """
-        Performs a forward pass of the network with certain computation groups and returns the corresponding embeddings
-
-        Note: By construction, computation groups are independent of one another! The following two calls are equivalent:
-        ```
-        transformer_embeddings1 = model(observations, tasks,
-            computation_groups={"actions": action_tokens})
-        transformer_embeddings2 = model(observations, tasks,
-            computation_groups={"actions": action_tokens, "value": value_tokens})
-        transformer_embeddings1["action"] == transformer_embeddings2["action"]
-        ```
-
         Args:
-            observations: A dictionary containing observation data for a batch of trajectory windows.
-                Each entry has shape (batch, horizon, *).
-            tasks: A dictionary containing task data for the trajectory windows.
-                Each entry has shape (batch, *).
-            computation_groups: A dictionary {string: transformer_inputs} where transformer_inputs
-                has shape (batch, horizon, n_tokens, token_embedding_size)
-                (n_tokens may vary between different computation groups)
+            prefix_groups: A list of PrefixGroup objects.
+                Each group has tokens with shape (batch, n_tokens, token_embedding_size)
+                Each group also dictates which other groups it will attend to.
+            timestep_groups: A list of TimestepGroup objects.
+                Each group has tokens with shape (batch, horizon, n_tokens, token_embedding_size)
+                Each group also dictates which other groups it will attend to.
+            timestep_pad_mask: A boolean mask of shape (batch, horizon) indicating which timesteps are padding.
             train: Whether to use dropout.
 
         Returns:
@@ -92,22 +88,8 @@ class BlockTransformer(nn.Module):
 
         Note: Horizon can be anything <= max_horizon.
         """
-        logging.warning("Prefix groups:")
-        for prefix_group in prefix_groups:
-            logging.warning(
-                "PrefixGroup(name=%s, shape=%s, attends_to=%s)",
-                prefix_group.name,
-                prefix_group.tokens.shape,
-                prefix_group.attends_to,
-            )
-        logging.warning("Timestep groups:")
-        for timestep_group in timestep_groups:
-            logging.warning(
-                "TimestepGroup(name=%s, shape=%s, attends_to=%s)",
-                timestep_group.name,
-                timestep_group.tokens.shape,
-                timestep_group.attends_to,
-            )
+        if verbose:
+            self.pretty_print_attention_mask(prefix_groups, timestep_groups)
 
         horizon = timestep_groups[0].tokens.shape[1]
         assert all([group.tokens.shape[1] == horizon for group in timestep_groups])
@@ -115,7 +97,10 @@ class BlockTransformer(nn.Module):
         attention_mask = self.generate_attention_mask(
             prefix_groups, timestep_groups, timestep_pad_mask
         )
+        self.sow("intermediates", "attention_mask", attention_mask)
+
         input_tokens = self.assemble_input_tokens(prefix_groups, timestep_groups)
+        self.sow("intermediates", "input_tokens", input_tokens)
 
         transformer = Transformer(
             num_layers=self.num_layers,
@@ -251,24 +236,26 @@ class BlockTransformer(nn.Module):
         def get_token_description(i):
             if i < tokens_for_prefix:
                 position = _get_position(i, tokens_per_prefix_group)
-                group = prefix_groups[position]
-                return TokenMetadata(group.name, -1, group.attends_to)
+                group: PrefixGroup = prefix_groups[position]
+                return TokenMetadata(group.name, -1, group.attends_to, tuple())
+
             i -= tokens_for_prefix
             timestep, i = divmod(i, tokens_per_time_step)
             position = _get_position(i, tokens_per_timestep_group)
-            group = timestep_groups[position]
-            return TokenMetadata(group.name, timestep, group.attends_to)
+            group: TimestepGroup = timestep_groups[position]
+            return TokenMetadata(
+                group.name, timestep, group.attends_to, group.attends_to_past
+            )
 
         for i in range(total_tokens):  # Token attending
             for j in range(total_tokens):  # Token being attended to
                 # description is a TokenMetadata(token_name, token_timestep, extra_info)
                 description_i = get_token_description(i)
                 description_j = get_token_description(j)
-
-                if description_i.group_name == description_j.group_name:
-                    mask = int(description_i.timestep <= description_j.timestep)
-                elif description_j.group_name in description_i.attends_to:
-                    mask = int(description_i.timestep <= description_j.timestep)
+                if description_j.group_name in description_i.attends_to:
+                    mask = int(description_i.timestep >= description_j.timestep)
+                elif description_j.group_name in description_i.attends_to_past:
+                    mask = int(description_i.timestep > description_j.timestep)
                 else:
                     mask = 0
 
@@ -304,3 +291,77 @@ class BlockTransformer(nn.Module):
             ),
         )
         return full_mask
+
+    def pretty_print_attention_mask(
+        self,
+        prefix_groups: Sequence[PrefixGroup],
+        timestep_groups: Sequence[TimestepGroup],
+    ):
+        logging.warning("Prefix groups:")
+        for prefix_group in prefix_groups:
+            logging.warning(
+                "PrefixGroup(name=%s, shape=%s, attends_to=%s)",
+                prefix_group.name,
+                prefix_group.tokens.shape,
+                prefix_group.attends_to,
+            )
+        logging.warning("Timestep groups:")
+        for timestep_group in timestep_groups:
+            logging.warning(
+                "TimestepGroup(name=%s, shape=%s, attends_to=%s)",
+                timestep_group.name,
+                timestep_group.tokens.shape,
+                timestep_group.attends_to,
+            )
+
+        import rich
+
+        horizon = timestep_groups[0].tokens.shape[1]
+
+        all_metadatas: Sequence[TokenMetadata] = []
+        column_names = []
+
+        for prefix_group in prefix_groups:
+            column_names.append(
+                f"{prefix_group.name} ({prefix_group.tokens.shape[1]} tokens)"
+            )
+            all_metadatas.append(
+                TokenMetadata(prefix_group.name, -1, prefix_group.attends_to, tuple())
+            )
+
+        for ts in range(horizon):
+            for timestep_group in timestep_groups:
+                column_names.append(
+                    f"t={ts} {timestep_group.name} ({timestep_group.tokens.shape[2]} tokens) "
+                )
+                all_metadatas.append(
+                    TokenMetadata(
+                        timestep_group.name,
+                        ts,
+                        timestep_group.attends_to,
+                        timestep_group.attends_to_past,
+                    )
+                )
+
+        rows = []
+        for j in range(len(all_metadatas)):  # Token being attended to
+            row = [column_names[j]]
+            for i in range(len(all_metadatas)):  # Token attending
+                description_i = all_metadatas[i]
+                description_j = all_metadatas[j]
+
+                if description_j.group_name in description_i.attends_to:
+                    mask = int(description_i.timestep >= description_j.timestep)
+                elif description_j.group_name in description_i.attends_to_past:
+                    mask = int(description_i.timestep > description_j.timestep)
+                else:
+                    mask = 0
+                row.append("x" if mask else " ")
+            rows.append(row)
+
+        table = rich.table.Table(
+            "", *column_names, title="Attention Mask", show_header=True
+        )
+        for row in rows:
+            table.add_row(*row)
+        rich.print(table)

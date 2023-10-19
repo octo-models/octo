@@ -25,12 +25,11 @@ class OrcaTransformer(nn.Module):
 
         [task, observation 0, observation 1, observation 2, ...]
 
-    but with additional groups of tokens (computational groups) that provide
+    but with additional groups of tokens ("readouts") that provide
     a way of "reading out" the information in the transformer.
 
-    For example, we may have a "action" computational group that reads out
-    transformer embeddings that are useful for predicting actions, and a "value"
-    computational group that reads out transformer embeddings that are useful for
+    For example, we may have a "action" readout that provides embeddings that are
+    useful for predicting actions, and a "value" readout with embeddings that are useful for
     predicting values.
 
 
@@ -40,18 +39,17 @@ class OrcaTransformer(nn.Module):
 
         [
         task,
-        <observation ts0 tokens>, < ts0 tokens>, <readout_group2 ts0 tokens>, ...
-        <observation ts1 tokens>, <readout_group1 ts1 tokens>, <readout_group2 ts1 tokens>, ...
+        <observation ts0 tokens>, <readout1 ts0 tokens>, <readout2 ts0 tokens>, ...
+        <observation ts1 tokens>, <readout1 ts1 tokens>, <readout2 ts1 tokens>, ...
         ...
     ]
 
     The observation tokens attend to the task prefix, and to all observation tokens in the same or previous timesteps.
-    Computation group tokens attend to everything observation tokens do, as well as computation group tokens in the same group and same timestep.
+    Computation group tokens attend to everything observation tokens do, as well as readout tokens with the same name and same timestep.
 
-    By this design, each computational group does not influence the computation
-    happening in the task or observation tokens, and each group is **independent* of one another**.
-    This allows us to hot-swap in different computational groups at any time (e.g. we can run
-    with the action computational group or the value computational group or both at the same time).
+    By this design, each readout does not influence the computation happening in the task or observation tokens,
+    and each readout is **independent* of one another**. This allows us to hot-swap in different
+    readouts at any time (e.g. we can run with the action readout or the value readout or both at the same time).
 
 
     Args:
@@ -59,13 +57,11 @@ class OrcaTransformer(nn.Module):
             The output of each tokenizer is concatenated to form the observation tokens.
         task_tokenizers (Sequence[nn.Module]): List of flax modules for tokenizing the task.
             The output of each tokenizer is concatenated to form the task token prefix.
+        readouts (Dict[str, int]): Dictionary of {readout_name: n_tokens_for_readout}
         token_embedding_size (int): Dimension of the token embeddings (default: 512)
         max_horizon (int): Number of timesteps in the trajectory window.
-        num_layers (int): Number of layers in transformer.
-        mlp_dim (int): MLP dim of transformer.
-        num_heads (int): Number of attention heads in transformer.
-        dropout_rate (float): Dropout rate for transformer
-        attention_dropout_rate (float): Dropout in self-attention."""
+        transformer_kwargs (Dict): Dictionary of kwargs to forward to BlockTransformer.
+    """
 
     observation_tokenizers: Sequence[nn.Module]
     task_tokenizers: Sequence[nn.Module]
@@ -82,34 +78,21 @@ class OrcaTransformer(nn.Module):
         pad_mask,
         readouts: Sequence[str] = None,
         train: bool = False,
+        verbose: bool = False,
     ):
         """
-        Performs a forward pass of the network with certain computation groups and returns the corresponding embeddings
-
-        Note: By construction, computation groups are independent of one another! The following two calls are equivalent:
-        ```
-        transformer_embeddings1 = model(observations, tasks,
-            readout_groups={"actions": action_tokens})
-        transformer_embeddings2 = model(observations, tasks,
-            readout_groups={"actions": action_tokens, "value": value_tokens})
-        transformer_embeddings1["action"] == transformer_embeddings2["action"]
-        ```
-
         Args:
             observations: A dictionary containing observation data for a batch of trajectory windows.
                 Each entry has shape (batch, horizon, *).
             tasks: A dictionary containing task data for the trajectory windows.
                 Each entry has shape (batch, *).
-            readout_groups: A dictionary {string: transformer_inputs} where transformer_inputs
-                has shape (batch, horizon, n_tokens, token_embedding_size)
-                (n_tokens may vary between different computation groups)
+            readouts: A list of readouts to compute. If None, defaults to all readouts. Must be a subset of the readouts specified in the model config.
             train: Whether to use dropout.
 
         Returns:
             embedding_dict: A dictionary {
-                    "task": task_embeddings, # shape (batch, tokens_per_task, token_embedding_size)
-                    "obs": obs_embeddings, # shape (batch, horizon, tokens_per_obs, token_embedding_size)
-                    **{k: embedding for k in readout_groups} # shape (batch, horizon, readout_groups[k].shape[-2], token_embedding_size)
+                    **{readout_name: embedding of shape (batch, horizon, n_tokens_for_readout, token_embedding_size)for k in readouts},
+                    also includes the outputs corresponding to the task and observation tokens (although this probably isn't as useful)
                 }
 
         Note: Horizon can be anything <= max_horizon.
@@ -136,10 +119,8 @@ class OrcaTransformer(nn.Module):
         for k, tok in enumerate(self.task_tokenizers):
             task_tokens = tok(observations, tasks, train=train)
             task_tokens = nn.Dense(self.token_embedding_size)(task_tokens)
-            task_pos_embedding = self.param(
-                f"task{k}_pos_embedding",
-                posemb_init,
-                (1, task_tokens.shape[1], self.token_embedding_size),
+            task_pos_embedding = self._create_positional_embedding(
+                f"task{k}", 1, task_tokens.shape[1], prefix=True
             )
             task_tokens += task_pos_embedding
             all_prefix_groups.append(
@@ -150,10 +131,8 @@ class OrcaTransformer(nn.Module):
         for k, tok in enumerate(self.observation_tokenizers):
             obs_tokens = tok(observations, tasks, train=train)
             obs_tokens = nn.Dense(self.token_embedding_size)(obs_tokens)
-            obs_pos_embedding = self.param(
-                f"obs{k}_pos_embedding",
-                posemb_init,
-                (1, self.max_horizon, obs_tokens.shape[2], self.token_embedding_size),
+            obs_pos_embedding = self._create_positional_embedding(
+                f"obs{k}", obs_tokens.shape[2], prefix=False
             )
             obs_tokens += obs_pos_embedding[:, :horizon, :, :]
 
@@ -165,37 +144,54 @@ class OrcaTransformer(nn.Module):
 
         for readout_name in readouts:
             n_tokens_for_readout = self.readouts[readout_name]
-            readout_embeddings = self.param(
-                f"readout_{readout_name}_embedding",
-                posemb_init,
-                (1, self.max_horizon, n_tokens_for_readout, self.token_embedding_size),
+            readout_pos_embedding = self._create_positional_embedding(
+                f"readout_{readout_name}", n_tokens_for_readout, prefix=False
             )
-            readout_embeddings = jnp.broadcast_to(
-                readout_embeddings[:, :horizon, :, :],
+            readout_pos_embedding = jnp.broadcast_to(
+                readout_pos_embedding[:, :horizon, :, :],
                 (batch_size, horizon, n_tokens_for_readout, self.token_embedding_size),
             )
+            attends_to = all_task_names + all_obs_names + [f"readout_{readout_name}"]
             all_timestep_groups.append(
                 TimestepGroup(
-                    readout_name,
-                    readout_embeddings,
-                    attends_to=all_task_names + all_obs_names,
+                    f"readout_{readout_name}",
+                    readout_pos_embedding,
+                    attends_to=attends_to,
                 )
             )
 
         prefix_outputs, timestep_outputs = BlockTransformer(**self.transformer_kwargs)(
-            all_prefix_groups, all_timestep_groups, pad_mask, train=train
+            all_prefix_groups,
+            all_timestep_groups,
+            pad_mask,
+            train=train,
+            verbose=verbose,
         )
 
         return {
             **{group.name: group.tokens for group in prefix_outputs},
-            **{group.name: group.tokens for group in timestep_outputs},
+            **{
+                group.name.removeprefix("readout_"): group.tokens
+                for group in timestep_outputs
+            },
         }
+
+    def _create_positional_embedding(self, name, n_tokens, prefix=False):
+        if prefix:
+            shape = (1, n_tokens, self.token_embedding_size)
+        else:
+            shape = (1, self.max_horizon, n_tokens, self.token_embedding_size)
+        return self.param(
+            f"{name}_pos_embedding",
+            posemb_init,
+            shape,
+        )
 
 
 class OrcaModel(nn.Module):
     """
-    Wrapper class for ORCATransformer that bundles computation placeholders
-    and heads with the base transformer (useful for keeping all parameters in one place).
+    Wrapper class for ORCATransformer that bundles heads with the base transformer
+    (useful for keeping all parameters in one place).
     """
 
     orca_transformer: OrcaTransformer
@@ -211,7 +207,7 @@ class OrcaModel(nn.Module):
         pad_mask,
         *head_method_args,
         head_name: str,
-        readout_name: str,
+        readout_name: str = None,
         head_method_name: str = "__call__",
         train=True,
         **head_method_kwargs,
@@ -219,7 +215,7 @@ class OrcaModel(nn.Module):
         """A convenience utility to run the transformer and a single head after.
 
         Not recommended if you want to run multiple heads on the transformer or run the transformer without any heads.
-        (See train.py for an example of how to do this.)
+        (See train.py for a better workflow.)
 
         Args:
             observations: A dictionary containing observation data
@@ -230,7 +226,8 @@ class OrcaModel(nn.Module):
             train: Whether model is being trained.
 
             head_name: Name of head to run.
-            readout_group_name: Which transformer embedding to pass to head.
+            readout_name: Which transformer embedding to pass to head. If None, assumes that head can
+                handle a dictionary of embeddings.
             head_method_name: Name of method to run on head. Defaults to "__call__".
             *args: Additional arguments to pass to method.
             **kwargs: Keyword arguments to pass to method.
@@ -241,7 +238,10 @@ class OrcaModel(nn.Module):
         )
 
         # Extract relevant embeddings for the head
-        embeddings = transformer_embeddings[readout_name]
+        if readout_name is None:
+            embeddings = transformer_embeddings
+        else:
+            embeddings = transformer_embeddings[readout_name]
 
         # Run the head!
         head = self.heads[head_name]

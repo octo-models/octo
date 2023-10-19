@@ -89,15 +89,15 @@ def get_config(config_string):
             num_attention_heads=8,
             dropout_rate=0.1,
         ),
-        head_kwargs=dict(
+        heads=dict(
             action=dict(
-                name="token_per_dim_action_head",
-                computation_group="action",
+                cls_name="token_per_dim_action_head",
                 kwargs=dict(
                     pred_horizon=1,
                     action_dim=7,
                     vocab_size=256,
                     normalization_type=normalization_type,
+                    readout_key="action",
                 ),
             )
         ),
