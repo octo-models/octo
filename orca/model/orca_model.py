@@ -24,7 +24,6 @@ class ORCATransformer(nn.Module):
     but with additional groups of tokens (computational groups) that provide
     a way of "reading out" the information in the transformer.
 
-    This allows us to hot-swap in different computational groups at any time.
     For example, we may have a "action" computational group that reads out
     transformer embeddings that are useful for predicting actions, and a "value"
     computational group that reads out transformer embeddings that are useful for
@@ -47,6 +46,8 @@ class ORCATransformer(nn.Module):
 
     By this design, each computational group does not influence the computation
     happening in the task or observation tokens, and each group is **independent* of one another**.
+    This allows us to hot-swap in different computational groups at any time (e.g. we can run
+    with the action computational group or the value computational group or both at the same time).
 
 
     Args:
