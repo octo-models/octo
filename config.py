@@ -80,15 +80,28 @@ def get_config(config_string):
     )
 
     base_model_config = dict(
-        policy_kwargs=dict(
+        transformer_kwargs=dict(
+            token_embedding_size=256,
             num_layers=4,
             mlp_dim=1024,
-            vocab_size=256,
             num_heads=8,
             dropout_rate=0.1,
-            normalization_type=normalization_type,
-            pred_horizon=1,
-        )
+        ),
+        computation_placeholders=dict(
+            action=7,
+        ),
+        head_kwargs=dict(
+            action=dict(
+                name="token_per_dim_action_head",
+                computation_group="action",
+                kwargs=dict(
+                    pred_horizon=1,
+                    action_dim=7,
+                    vocab_size=256,
+                    normalization_type=normalization_type,
+                ),
+            )
+        ),
     )
 
     base_tokenizer_kwargs = dict(
@@ -356,14 +369,27 @@ def get_config(config_string):
         "ci_debug_dataset": ConfigDict(
             dict(
                 model=dict(
-                    policy_kwargs=dict(
+                    transformer_kwargs=dict(
                         num_layers=1,
                         mlp_dim=128,
-                        vocab_size=256,
                         num_heads=1,
                         dropout_rate=0.1,
-                        normalization_type=normalization_type,
-                        pred_horizon=1,
+                        token_embedding_size=128,
+                    ),
+                    computation_placeholders=dict(
+                        action=7,
+                    ),
+                    head_kwargs=dict(
+                        action=dict(
+                            name="token_per_dim_action_head",
+                            computation_group="action",
+                            kwargs=dict(
+                                pred_horizon=1,
+                                action_dim=7,
+                                vocab_size=256,
+                                normalization_type=normalization_type,
+                            ),
+                        )
                     ),
                     observation_tokenizers=[
                         (

@@ -1,11 +1,11 @@
+import time
 from collections import defaultdict
 from contextlib import contextmanager
-import time
 
 import flax
-from flax.training import train_state
 import jax
 import numpy as np
+from flax.training import train_state
 
 from orca.utils.jax_utils import shard_along_axis
 from orca.utils.typing import PRNGKey
@@ -16,13 +16,23 @@ class TrainState(train_state.TrainState):
 
 
 def create_train_state(
-    rng, model_def, tx, init_args=(), init_kwargs=dict(), pretrained_loaders=tuple()
+    rng,
+    model_def,
+    tx,
+    init_args=(),
+    init_kwargs=dict(),
+    pretrained_loaders=tuple(),
+    init_method=None,
 ):
     """Utility to create a TrainState."""
     init_rng, state_rng = jax.random.split(rng)
 
     # Initializing the model in a jit avoids running the model on CPU
-    init_dict = jax.jit(model_def.init)(init_rng, *init_args, **init_kwargs)
+    @jax.jit
+    def _init():
+        return model_def.init(init_rng, *init_args, **init_kwargs, method=init_method)
+
+    init_dict = _init()
 
     ev, params = flax.core.pop(init_dict, "params")
     assert (
