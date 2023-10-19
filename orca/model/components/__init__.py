@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from enum import Enum, auto
+from enum import auto, Enum
 
 from orca.model.components.resnet_v1 import resnetv1_configs
 
