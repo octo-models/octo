@@ -1,34 +1,34 @@
 import copy
 import datetime
-from functools import partial
 import json
 import os
 import os.path as osp
+from functools import partial
 
-from absl import app, flags, logging
-from flax.training import checkpoints
-from flax.traverse_util import flatten_dict
 import jax
 import jax.numpy as jnp
-from jax.sharding import Mesh, NamedSharding, PartitionSpec
-from ml_collections import config_flags
 import numpy as np
 import optax
 import tensorflow as tf
 import tqdm
 import wandb
+from absl import app, flags, logging
+from flax.training import checkpoints
+from flax.traverse_util import flatten_dict
+from jax.sharding import Mesh, NamedSharding, PartitionSpec
+from ml_collections import config_flags
 
 import orca
 from orca.data.dataset import make_dataset, make_interleaved_dataset
 from orca.data.utils.text_processing import text_processors
-from orca.model import create_model_def
+from orca.model import OrcaModel, create_model_def
 from orca.model.components.hf_weight_loaders import weights_loaders
 from orca.utils.jax_utils import initialize_compilation_cache
 from orca.utils.train_utils import (
+    Timer,
     batched_apply,
     create_train_state,
     format_name_with_config,
-    Timer,
 )
 from orca.utils.visualization_lib import Visualizer
 
@@ -190,8 +190,9 @@ def main(_):
 
     # set up model, optimizer, loss
     model_def = create_model_def(
-        action_dim=example_batch["action"].shape[-1],
-        window_size=example_batch["observation"]["image_0"].shape[1],
+        max_horizon=example_batch["observation"]["image_0"].shape[
+            1
+        ],  # TODO: decide a more sane
         **FLAGS.config.model.to_dict(),
     )
 
@@ -209,6 +210,13 @@ def main(_):
     rng = jax.random.PRNGKey(FLAGS.config.seed)
     rng, construct_rng = jax.random.split(rng)
 
+    def init_fn(model: OrcaModel, observations, tasks):
+        transformer_embeddings = model(observations, tasks, train=False)
+        for head_name, head_info in FLAGS.config.model.head_kwargs.items():
+            model.heads[head_name](
+                transformer_embeddings[head_info["computation_group"]], train=False
+            )
+
     train_state = create_train_state(
         construct_rng,
         model_def,
@@ -216,9 +224,9 @@ def main(_):
         init_args=(
             example_batch["observation"],
             example_batch["tasks"],
-            example_batch["action"],
         ),
         pretrained_loaders=pretrained_loaders,
+        init_method=init_fn,
     )
     if FLAGS.config.resume_path is not None:
         train_state = checkpoints.restore_checkpoint(
@@ -234,16 +242,39 @@ def main(_):
     else:
         start_step = FLAGS.config.start_step or 0
 
+    horizon = (
+        FLAGS.config.dataset_kwargs.common_kwargs.window_size
+        - FLAGS.config.model.head_kwargs["action"]["kwargs"]["pred_horizon"]
+        + 1
+    )
+
     def loss_fn(params, state, batch, rng, train=True):
-        info = state.apply_fn(
+        def get_loss(model, observations, tasks, actions, train):
+            # only use first horizon timesteps as input to transformer
+            observations = jax.tree_map(lambda x: x[:, :horizon], observations)
+            transformer_embeddings = model(observations, tasks, train=train)
+
+            action_computation_group = FLAGS.config.model.head_kwargs["action"][
+                "computation_group"
+            ]
+            action_loss, action_metrics = model.heads["action"].loss(
+                transformer_embeddings[action_computation_group],
+                actions,
+                pad_mask=observations["pad_mask"],
+                train=train,
+            )
+
+            return action_loss, action_metrics
+
+        return state.apply_fn(
             {"params": params},
             batch["observation"],
             batch["tasks"],
             batch["action"],
             train=train,
             rngs={"dropout": rng},
+            method=get_loss,
         )
-        return info["loss"], info
 
     @partial(
         jax.jit,
@@ -271,12 +302,6 @@ def main(_):
         loss, info = loss_fn(state.params, state, batch, state.rng, train=False)
         return info
 
-    horizon = (
-        FLAGS.config.dataset_kwargs.common_kwargs.window_size
-        - FLAGS.config.model.policy_kwargs.pred_horizon
-        + 1
-    )
-
     @partial(
         jax.jit,
         in_shardings=(replicated_sharding, dp_sharding, dp_sharding),
@@ -285,18 +310,31 @@ def main(_):
     def get_policy_sampled_actions(state, observations, tasks):
         # only use first horizon timesteps as input to predict_action
         observations = jax.tree_map(lambda x: x[:, -horizon:], observations)
+
+        def get_actions(model, observations, tasks, train):
+            transformer_embeddings = model(observations, tasks, train=train)
+            computation_group = FLAGS.config.model.head_kwargs["action"][
+                "computation_group"
+            ]
+            embeddings = transformer_embeddings[computation_group]
+            actions = model.heads["action"].predict_action(
+                embeddings,
+                train=train,
+                argmax=False,
+                sample_shape=(NUM_ACTIONS_FOR_VIS,),
+                rng=state.rng,
+            )
+            return actions
+
         actions = state.apply_fn(
             {"params": state.params},
             observations,
             tasks,
             train=False,
-            argmax=False,
-            sample_shape=(NUM_ACTIONS_FOR_VIS,),
-            rng=state.rng,
-            method="predict_action",
+            method=get_actions,
             rngs={"dropout": state.rng},
         )
-        # actions is (n, batch_size, pred_horizon, action_dim)
+        # actions is (NUM_ACTIONS_FOR_VIS, batch_size, pred_horizon, action_dim)
         # where actions[:, :, i] predicts the action at timestep "window_size + i"
         actions = actions[..., 0, :]
 

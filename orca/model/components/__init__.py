@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from enum import auto, Enum
+from enum import Enum, auto
 
 from orca.model.components.resnet_v1 import resnetv1_configs
 
@@ -11,6 +11,7 @@ class TokenType(Enum):
     TASK = auto()
     OBS = auto()
     ACTION = auto()
+    MISC = auto()
 
 
 @dataclass
