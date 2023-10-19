@@ -336,7 +336,8 @@ def main(_):
             train=False,
             method=get_actions,
             rngs={"dropout": state.rng},
-        )
+        )  # We could also have used run_head here, but this is easier to read
+
         # actions is (NUM_ACTIONS_FOR_VIS, batch_size, pred_horizon, action_dim)
         # where actions[:, :, i] predicts the action at timestep "window_size + i"
         actions = actions[..., 0, :]

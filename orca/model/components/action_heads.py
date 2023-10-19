@@ -66,7 +66,7 @@ class BasicActionHead(nn.Module):
         """
         Args:
             embeddings: jnp.ndarray w/ shape (batch_size, horizon, num_tokens, embedding_size)
-            actions: jnp.ndarray w/ shape (batch_size, window_size, action_dim)
+            actions: jnp.ndarray w/ shape (batch_size, >= horizon + pred_horizon - 1, action_dim)
             pad_mask: boolean array (batch, window_size) which is True if the timestep is not a padding timestep.
 
         Returns:
@@ -164,6 +164,8 @@ class TokenPerDimActionHead(BasicActionHead):
     """
     Assumes that there is a separate embedding for each dimension of the action
     and each future prediction horizon.
+
+    E.g. that the input embedding has shape (batch_size, horizon, pred_horizon * action_dim, embedding_size)
 
     Supports predicting for multiple timesteps at once
     """
