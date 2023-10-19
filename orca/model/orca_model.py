@@ -15,18 +15,25 @@ TransformerInputs = jnp.ndarray
 
 class ORCATransformer(nn.Module):
     """
-    This transformer models a sequence of observations (of length `horizon`),
-    prefixed by a task.
+    This module forms the base of the ORCA model.
+
+    It runs a transformer on a sequence of observations (of length `horizon`),
+    prefixed by a task, with a flexible set of intermediate computation groups.
 
     [
         task,
-        o_0, <computation_group1>, <computation_group2>, ...
-        o_1, <computation_group1>, <computation_group2>, ...
+        <observation ts0 tokens>, <computation_group1 ts0 tokens>, <computation_group2 ts0 tokens>, ...
+        <observation ts1 tokens>, <computation_group1 ts1 tokens>, <computation_group2 ts1 tokens>, ...
         ...
     ]
 
-    A causal mask ensures that each token can only attend to past tokens.
-    TODO: add description
+    The transformer is a blockwise-causal transformer, where each timestep only attends to the same or previous timesteps.
+
+    Observation tokens attend to the task prefix, and to all observation tokens in the same or previous timesteps.
+    Computation group tokens attend to the same, as well as all computation group tokens in the same group and same timestep.
+
+    Because the computation in observation tokens do not depend in any way on the computation groups, we can hot-swap
+    in different computation groups at any time without changing the semantic interpretation of the observation tokens.
 
 
     Args:
@@ -34,6 +41,7 @@ class ORCATransformer(nn.Module):
             The output of each tokenizer is concatenated to form the observation tokens.
         task_tokenizers (Sequence[nn.Module]): List of flax modules for tokenizing the task.
             The output of each tokenizer is concatenated to form the task token prefix.
+        token_embedding_size (int): Dimension of the token embeddings (default: 512)
         max_horizon (int): Number of timesteps in the trajectory window.
         num_layers (int): Number of layers in transformer.
         mlp_dim (int): MLP dim of transformer.
@@ -58,7 +66,7 @@ class ORCATransformer(nn.Module):
             num_heads=self.num_heads,
             dropout_rate=self.dropout_rate,
             attention_dropout_rate=self.attention_dropout_rate,
-            add_position_embedding=False,
+            add_position_embedding=False,  # we add our own
         )
 
         self.tokens_per_obs = sum(tok.num_tokens for tok in self.observation_tokenizers)
@@ -95,7 +103,16 @@ class ORCATransformer(nn.Module):
         train: bool = False,
     ):
         """
-        Performs a forward pass of the network and returns the corresponding embeddings
+        Performs a forward pass of the network with certain computation groups and returns the corresponding embeddings
+
+        Note: By construction, computation groups are independent of one another! The following two calls are equivalent:
+        ```
+        transformer_embeddings1 = model(observations, tasks,
+            computation_groups={"actions": action_tokens})
+        transformer_embeddings2 = model(observations, tasks,
+            computation_groups={"actions": action_tokens, "value": value_tokens})
+        transformer_embeddings1["action"] == transformer_embeddings2["action"]
+        ```
 
         Args:
             observations: A dictionary containing observation data for a batch of trajectory windows.
@@ -104,10 +121,17 @@ class ORCATransformer(nn.Module):
                 Each entry has shape (batch, *).
             computation_groups: A dictionary {string: transformer_inputs} where transformer_inputs
                 has shape (batch, horizon, n_tokens, token_embedding_size)
-            train: Whether this is a training call.
+                (n_tokens may vary between different computation groups)
+            train: Whether to use dropout.
 
         Returns:
-            {k: embeddings} where embeddings has shape (batch, window_size, n_tokens, token_embedding_size)
+            embedding_dict: A dictionary {
+                    "task": task_embeddings, # shape (batch, tokens_per_task, token_embedding_size)
+                    "obs": obs_embeddings, # shape (batch, horizon, tokens_per_obs, token_embedding_size)
+                    **{k: embedding for k in computation_groups} # shape (batch, horizon, computation_groups[k].shape[-2], token_embedding_size)
+                }
+
+        Note: Horizon can be anything <= max_horizon.
         """
 
         horizon = next(iter(jax.tree_util.tree_leaves(observations))).shape[1]
@@ -119,30 +143,35 @@ class ORCATransformer(nn.Module):
             jax.tree_map(lambda x: x.shape[1] == horizon, computation_groups)
         ), "computation_groups must have the same horizon"
 
-        computation_group_keys = list(computation_groups.keys())
-
+        # tokens_per_group is {group_name: num_tokens_for_group for group_name in computation_groups}
         tokens_per_group = {k: v.shape[2] for k, v in computation_groups.items()}
         tokens_per_time_step = self.tokens_per_obs + sum(tokens_per_group.values())
 
         attention_mask = self.generate_attention_mask(
             tokens_per_group, horizon, observations["pad_mask"]
         )
+
+        # task_tokens has shape (batch, tokens_per_task, token_embedding_size)
+        # obs_tokens has shape (batch, horizon, tokens_per_obs, token_embedding_size)
         task_tokens, obs_tokens = self.tokenize_observations_and_tasks(
             observations, tasks, train=train
         )
 
+        # input_tokens has shape (batch, tokens_per_task + horizon * tokens_per_time_step, token_embedding_size)
         input_tokens = self.assemble_input_tokens(
             task_tokens, obs_tokens, computation_groups
         )
+
+        # Run the transformer! output has same shape as input_tokens
         output = self.transformer(input_tokens, attention_mask, train=train)
 
-        # remove output corresponding to task
         all_embeddings = {}
 
+        # first, we extract the embeddings corresponding to the task prefix
         all_embeddings["task"] = output[:, : self.tokens_per_task]
-
         output = output[:, self.tokens_per_task :]
-        # unfold horizon length from token sequence length
+
+        # The remaining embeddings are repeated per timestep, so we unfold horizon length from token sequence length
         output = jnp.reshape(
             output,
             (
@@ -152,19 +181,32 @@ class ORCATransformer(nn.Module):
                 self.token_embedding_size,
             ),
         )
+
+        # The first tokens_per_obs tokens are the observation tokens
         all_embeddings["obs"] = output[:, :, : self.tokens_per_obs]
         output = output[:, :, self.tokens_per_obs :]
 
-        output_per_group = jnp.split(
-            output, np.cumsum(list(tokens_per_group.values())), axis=2
-        )
-        for i, k in enumerate(computation_group_keys):
-            all_embeddings[k] = output_per_group[i]
+        # The remaining tokens are the computation group tokens
+
+        token_boundaries = np.cumsum(list(tokens_per_group.values()))
+        # get the embeddings for each computation group
+        output_per_group = jnp.split(output, token_boundaries, axis=2)
+
+        # Assign each group its corresponding name
+        for i, group_name in enumerate(tokens_per_group):
+            all_embeddings[group_name] = output_per_group[i]
         return all_embeddings
 
     def tokenize_observations_and_tasks(self, observations, tasks, train: bool = False):
         """
         Tokenize observation/action history and task (either goal image or language).
+
+        Args:
+            observations: A dictionary containing observation data for a batch of trajectory windows.
+                Each entry has shape (batch, horizon, *).
+            tasks: A dictionary containing task data for the trajectory windows.
+                Each entry has shape (batch, *).
+            train: Whether to use dropout.
         """
 
         # a list of (batch, horizon, tokens_per_obs_tokenizer, token_embedding_size)
@@ -174,8 +216,7 @@ class ORCATransformer(nn.Module):
         ]
         # (batch, horizon, tokens_per_obs, token_embedding_size)
         obs_tokens = jnp.concatenate(obs_tokens, axis=-2)
-        assert obs_tokens.shape[-2] == self.tokens_per_obs
-        # Add positional embedding
+        # Add positional embedding to obs tokens
         obs_tokens += self.obs_embedding[:, : obs_tokens.shape[1]]
 
         if len(self.task_tokenizers) > 0:
@@ -186,13 +227,15 @@ class ORCATransformer(nn.Module):
             ]
             # (batch, tokens_per_task, token_embedding_size)
             task_tokens = jnp.concatenate(task_tokens, axis=-2)
-            assert task_tokens.shape[-2] == self.tokens_per_task
         else:
             task_tokens = jnp.zeros(
                 (obs_tokens.shape[0], self.tokens_per_task, self.token_embedding_size)
             )
-        # Add positional embedding
+        # Add positional embedding to task tokens
         task_tokens += self.task_embedding[:, : task_tokens.shape[1]]
+
+        assert obs_tokens.shape[-2] == self.tokens_per_obs
+        assert task_tokens.shape[-2] == self.tokens_per_task
 
         return task_tokens, obs_tokens
 
@@ -203,7 +246,7 @@ class ORCATransformer(nn.Module):
         computation_groups: Dict[str, TransformerInputs],
     ):
         """
-        Concatenate obs and action tokens.
+        Concatenate obs and computation group tokens.
         Fold horizon dim into token sequence dim.
         Prepend task tokens.
         """
@@ -221,6 +264,14 @@ class ORCATransformer(nn.Module):
 
     def generate_attention_mask(self, tokens_per_group, horizon, pad_mask):
         """
+        TODO: Need to update this docstring
+        Args:
+            tokens_per_group: A dictionary {group_name: num_tokens_for_group for group_name in computation_groups}
+            horizon: Number of timesteps in the trajectory window.
+            pad_mask: A boolean mask of shape (batch, horizon) indicating which timesteps are padding.
+        Returns:
+            attention_mask: A boolean mask of shape (batch, num_heads, total_tokens, total_tokens)
+
         Generate default attention mask for transformer call. The default attention mask
         is causal (tokens cannot attend to future tokens) and masks attention to past action
         tokens (since attending to previous actions can hurt performance).
@@ -337,11 +388,33 @@ class ORCATransformer(nn.Module):
 
 
 class OrcaModel(nn.Module):
+    """
+    Wrapper class for ORCATransformer that bundles computation placeholders
+    and heads with the base transformer.
+    """
+
     computation_placeholders: Dict[str, ComputationPlaceholder]
     orca_transformer: ORCATransformer
     heads: Dict[str, nn.Module]
 
     def __call__(self, observations, tasks, computation_groups=None, *, train):
+        """Runs the base transformer (using default computation groups if not provided).
+
+        Args:
+            observations: A dictionary containing observation data
+                where each element has shape (batch, horizon, *).
+            tasks: A dictionary containing task data
+                where each element has shape (batch, *).
+            computation_groups: If not provided, uses the default computation placeholders
+                bundled in OrcaModel.
+            train: Whether model is being trained.
+        Returns:
+            transformer_embeddings: See ORCATransformer.__call__. Has elements: {
+                "task": task_embeddings, # shape (batch, tokens_per_task, token_embedding_size)
+                "obs": obs_embeddings, # shape (batch, horizon, tokens_per_obs, token_embedding_size)
+                **{k: embedding for k in computation_groups} # shape (batch, horizon, computation_groups[k].shape[-2], token_embedding_size)
+            }
+        """
         if computation_groups is None:
             computation_groups = self.get_default_computation_groups(
                 observations, tasks
@@ -360,6 +433,15 @@ class OrcaModel(nn.Module):
         }
         return computation_groups
 
-    def run_head(self, embeddings, head_name, method=None, **kwargs):
-        method = method or "__call__"
-        return getattr(self.heads[head_name], method)(embeddings, **kwargs)
+    def run_head(self, head_name, *args, method_name=None, **kwargs):
+        """Runs a head.
+
+        Args:
+            head_name: Name of head to run.
+            method_name: Name of method to run. Defaults to "__call__".
+            *args: Arguments to pass to method.
+            **kwargs: Keyword arguments to pass to method.
+        """
+
+        method_name = method_name or "__call__"
+        return getattr(self.heads[head_name], method_name)(*args, **kwargs)

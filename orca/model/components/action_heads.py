@@ -12,6 +12,17 @@ from orca.utils.typing import PRNGKey
 
 
 class BasicActionHead(nn.Module):
+    """
+    A basic action decoding head that predicts discretized actions using
+    an arbitrary group of token embeddings.
+
+    Pools all the token embeddings for a timestep together before predicting
+    logits for each action dimension and prediction horizon simultaneously
+    using a linear projection on a shared embedding.
+
+    Supports predicting for multiple timesteps at once.
+    """
+
     pred_horizon: int = 1
     action_dim: int = 7
     vocab_size: int = 256
@@ -150,6 +161,13 @@ class BasicActionHead(nn.Module):
 
 
 class TokenPerDimActionHead(BasicActionHead):
+    """
+    Assumes that there is a separate embedding for each dimension of the action
+    and each future prediction horizon.
+
+    Supports predicting for multiple timesteps at once
+    """
+
     def setup(self):
         self.vocab_proj = nn.Dense(self.vocab_size)
         self.action_tokenizer = ActionTokenizer(
@@ -164,9 +182,8 @@ class TokenPerDimActionHead(BasicActionHead):
         """
         batch_size, horizon, n_tokens, embedding_size = embeddings.shape
         assert n_tokens == self.pred_horizon * self.action_dim
-        logits = self.vocab_proj(
-            embeddings
-        )  # (batch_size, horizon, pred_horizon * action_dim, vocab_size)
+        # (batch_size, horizon, pred_horizon * action_dim, vocab_size)
+        logits = self.vocab_proj(embeddings)
         logits = jnp.reshape(
             logits,
             (

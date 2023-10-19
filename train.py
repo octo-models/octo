@@ -1,34 +1,34 @@
 import copy
 import datetime
+from functools import partial
 import json
 import os
 import os.path as osp
-from functools import partial
 
+from absl import app, flags, logging
+from flax.training import checkpoints
+from flax.traverse_util import flatten_dict
 import jax
 import jax.numpy as jnp
+from jax.sharding import Mesh, NamedSharding, PartitionSpec
+from ml_collections import config_flags
 import numpy as np
 import optax
 import tensorflow as tf
 import tqdm
 import wandb
-from absl import app, flags, logging
-from flax.training import checkpoints
-from flax.traverse_util import flatten_dict
-from jax.sharding import Mesh, NamedSharding, PartitionSpec
-from ml_collections import config_flags
 
 import orca
 from orca.data.dataset import make_dataset, make_interleaved_dataset
 from orca.data.utils.text_processing import text_processors
-from orca.model import OrcaModel, create_model_def
+from orca.model import create_model_def, OrcaModel
 from orca.model.components.hf_weight_loaders import weights_loaders
 from orca.utils.jax_utils import initialize_compilation_cache
 from orca.utils.train_utils import (
-    Timer,
     batched_apply,
     create_train_state,
     format_name_with_config,
+    Timer,
 )
 from orca.utils.visualization_lib import Visualizer
 
@@ -211,11 +211,14 @@ def main(_):
     rng, construct_rng = jax.random.split(rng)
 
     def init_fn(model: OrcaModel, observations, tasks):
+        # initialize transformer
         transformer_embeddings = model(observations, tasks, train=False)
+
         for head_name, head_info in FLAGS.config.model.head_kwargs.items():
-            model.heads[head_name](
-                transformer_embeddings[head_info["computation_group"]], train=False
-            )
+            # initialize each head
+            computation_group = head_info["computation_group"]
+            embedding = transformer_embeddings[computation_group]
+            model.heads[head_name](embedding, train=False)
 
     train_state = create_train_state(
         construct_rng,
@@ -246,7 +249,7 @@ def main(_):
         FLAGS.config.dataset_kwargs.common_kwargs.window_size
         - FLAGS.config.model.head_kwargs["action"]["kwargs"]["pred_horizon"]
         + 1
-    )
+    )  # Ensures that there is a full horizon of actions to predict for each timestep
 
     def loss_fn(params, state, batch, rng, train=True):
         def get_loss(model, observations, tasks, actions, train):
@@ -254,11 +257,11 @@ def main(_):
             observations = jax.tree_map(lambda x: x[:, :horizon], observations)
             transformer_embeddings = model(observations, tasks, train=train)
 
-            action_computation_group = FLAGS.config.model.head_kwargs["action"][
-                "computation_group"
-            ]
+            action_head_info = FLAGS.config.model.head_kwargs["action"]
+            action_computation_group = action_head_info["computation_group"]
+            action_embeddings = transformer_embeddings[action_computation_group]
             action_loss, action_metrics = model.heads["action"].loss(
-                transformer_embeddings[action_computation_group],
+                action_embeddings,
                 actions,
                 pad_mask=observations["pad_mask"],
                 train=train,
