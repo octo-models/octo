@@ -6,11 +6,14 @@ import jax
 import numpy as np
 
 
-def stack_and_pad(history, num_obs, horizon):
-    dict_list = {k: [dic[k] for dic in history] for k in history[0]}
-    full_obs = jax.tree_map(
-        lambda x: np.stack(x), dict_list, is_leaf=lambda x: type(x) is list
-    )
+def stack_and_pad(history: list, num_obs: int):
+    """
+    Converts a list of observation dictionaries (`history`) into a single observation dictionary
+    by stacking the values. Adds a padding mask to the observation that denotes which timesteps
+    represent padding based on the number of observations seen so far (`num_obs`).
+    """
+    horizon = len(history)
+    full_obs = {k: np.stack([dic[k] for dic in history]) for k in history[0]}
     pad_length = horizon - max(num_obs, horizon)
     pad_mask = np.ones(horizon)
     pad_mask[:pad_length] = 0
@@ -19,6 +22,11 @@ def stack_and_pad(history, num_obs, horizon):
 
 
 def space_stack(space: gym.Space, repeat: int):
+    """
+    Creates new Gym space that represents the original observation/action space
+    repeated `repeat` times.
+    """
+
     if isinstance(space, gym.spaces.Box):
         return gym.spaces.Box(
             low=np.repeat(space.low[None], repeat, axis=0),
@@ -32,7 +40,7 @@ def space_stack(space: gym.Space, repeat: int):
             {k: space_stack(v, repeat) for k, v in space.spaces.items()}
         )
     else:
-        raise TypeError()
+        raise ValueError(f"Space {space} is not supported by ORCA Gym wrappers.")
 
 
 class HistoryWrapper(gym.Wrapper):
@@ -57,7 +65,8 @@ class HistoryWrapper(gym.Wrapper):
         obs, reward, done, trunc, info = self.env.step(action)
         self.num_obs += 1
         self.history.append(obs)
-        full_obs = stack_and_pad(self.history, self.num_obs, self.horizon)
+        assert len(self.history) == self.horizon
+        full_obs = stack_and_pad(self.history, self.num_obs)
 
         return full_obs, reward, done, trunc, info
 
@@ -65,7 +74,7 @@ class HistoryWrapper(gym.Wrapper):
         obs, info = self.env.reset(**kwargs)
         self.num_obs = 1
         self.history.extend([obs] * self.horizon)
-        full_obs = stack_and_pad(self.history, self.num_obs, self.horizon)
+        full_obs = stack_and_pad(self.history, self.num_obs)
 
         return full_obs, info
 
@@ -88,11 +97,11 @@ class RHCWrapper(gym.Wrapper):
 
         self.action_space = space_stack(self.env.action_space, self.pred_horizon)
 
-    def step(self, actions, *args):
+    def step(self, actions):
         assert len(actions) == self.pred_horizon
 
         for i in range(self.exec_horizon):
-            obs, reward, done, trunc, info = self.env.step(actions[i], *args)
+            obs, reward, done, trunc, info = self.env.step(actions[i])
             if done or trunc:
                 break
 
@@ -112,32 +121,38 @@ class TemporalEnsembleWrapper(gym.Wrapper):
         super().__init__(env)
         self.horizon = horizon
         self.pred_horizon = pred_horizon
-        self.weights = np.exp(-exp_weight * np.arange(pred_horizon)) / pred_horizon
-        self.avg_actions = None
+        self.exp_weight = exp_weight
+
+        self.act_history = deque(maxlen=self.pred_horizon)
 
         self.action_space = space_stack(self.env.action_space, self.pred_horizon)
 
     def step(self, actions):
         assert len(actions) == self.pred_horizon
 
-        if self.avg_actions is None:
-            self.avg_actions = np.zeros_like(actions)
+        self.act_history.append(actions)
+        num_actions = len(self.act_history)
 
-        # shift the averaged actions to the left by one
-        shifted_actions = np.concatenate(
-            [self.avg_actions[1:], np.zeros_like(self.avg_actions[-1:])]
+        # select the predicted action for the current step from the history of action chunk predictions
+        curr_act_preds = np.stack(
+            [
+                pred_actions[i]
+                for (i, pred_actions) in zip(
+                    range(num_actions - 1, -1, -1), self.act_history
+                )
+            ]
         )
-        # weight the current predicted actions and add them to the averaged actions
-        self.avg_actions = shifted_actions + (self.weights[:, None] * actions)
 
-        # execute the first action
-        action = self.avg_actions[0]
-        obs, reward, done, trunc, info = self.env.step(action)
+        # more recent predictions get exponentially *less* weight than older predictions
+        weights = np.exp(-self.exp_weight * np.arange(num_actions)) / num_actions
 
-        return obs, reward, done, trunc, info
+        # compute the weighted average across all predictions for this timestep
+        action = np.sum(weights[:, None] * curr_act_preds, axis=0)
+
+        return self.env.step(action)
 
 
-class UnnormalizeActionProprio(gym.Wrapper):
+class UnnormalizeActionProprio(gym.ActionWrapper, gym.ObservationWrapper):
     """
     Un-normalizes the action and proprio.
     """
@@ -149,32 +164,21 @@ class UnnormalizeActionProprio(gym.Wrapper):
         self.normalization_type = normalization_type
         super().__init__(env)
 
-    def step(self, action, *args, **kwargs):
+    def unnormalize(self, data, metadata):
         if self.normalization_type == "normal":
-            action = (
-                action * self.action_proprio_metadata["action"]["std"]
-            ) + self.action_proprio_metadata["action"]["mean"]
-            obs, reward, done, trunc, info = self.env.step(action, *args, **kwargs)
-            obs["proprio"] = (
-                obs["proprio"] * self.action_proprio_metadata["proprio"]["std"]
-            ) + self.action_proprio_metadata["proprio"]["mean"]
+            return (data * metadata["std"]) + metadata["mean"]
         elif self.normalization_type == "bounds":
-            action = (
-                action
-                * (
-                    self.action_proprio_metadata["action"]["max"]
-                    - self.action_proprio_metadata["action"]["min"]
-                )
-            ) + self.action_proprio_metadata["action"]["min"]
-            obs, reward, done, trunc, info = self.env.step(action, *args, **kwargs)
-            obs["proprio"] = (
-                obs["proprio"]
-                * (
-                    self.action_proprio_metadata["proprio"]["max"]
-                    - self.action_proprio_metadata["proprio"]["min"]
-                )
-            ) + self.action_proprio_metadata["proprio"]["min"]
+            return (data * (metadata["max"] - metadata["min"])) + metadata["min"]
         else:
-            raise ValueError
+            raise ValueError(
+                f"Unknown action/proprio normalization type: {self.normalization_type}"
+            )
 
-        return obs, reward, done, trunc, info
+    def action(self, action):
+        return self.unnormalize(action, self.action_proprio_metadata["action"])
+
+    def observation(self, obs):
+        obs["proprio"] = self.unnormalize(
+            obs["proprio"], self.action_proprio_metadata["proprio"]
+        )
+        return obs

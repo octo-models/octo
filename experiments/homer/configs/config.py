@@ -24,6 +24,7 @@ def get_config(config_string):
     base_config = dict(
         batch_size=256,
         num_steps=int(2e6),
+        start_step=placeholder(int),
         log_interval=1000,
         eval_interval=5000,
         save_interval=int(2e6),
