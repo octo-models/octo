@@ -17,23 +17,36 @@ class ORCATransformer(nn.Module):
     """
     This module forms the base of the ORCA model.
 
-    It runs a transformer on a sequence of observations (of length `horizon`),
-    prefixed by a task, with a flexible set of intermediate computation groups.
+    The core idea is to run a causal transformer on the following sequence,
 
-    [
+        [task, observation 0, observation 1, observation 2, ...]
+
+    but with additional groups of tokens (computational groups) that provide
+    a way of "reading out" the information in the transformer.
+
+    This allows us to hot-swap in different computational groups at any time.
+    For example, we may have a "action" computational group that reads out
+    transformer embeddings that are useful for predicting actions, and a "value"
+    computational group that reads out transformer embeddings that are useful for
+    predicting values.
+
+
+    The transformer is a blockwise-causal transformer, where each timestep only attends to the same or previous timesteps.
+
+    When called, the module requests a set of computation groups, and performs a forward pass of the transformer on the following sequence:
+
+        [
         task,
         <observation ts0 tokens>, <computation_group1 ts0 tokens>, <computation_group2 ts0 tokens>, ...
         <observation ts1 tokens>, <computation_group1 ts1 tokens>, <computation_group2 ts1 tokens>, ...
         ...
     ]
 
-    The transformer is a blockwise-causal transformer, where each timestep only attends to the same or previous timesteps.
+    The observation tokens attend to the task prefix, and to all observation tokens in the same or previous timesteps.
+    Computation group tokens attend to everything observation tokens do, as well as computation group tokens in the same group and same timestep.
 
-    Observation tokens attend to the task prefix, and to all observation tokens in the same or previous timesteps.
-    Computation group tokens attend to the same, as well as all computation group tokens in the same group and same timestep.
-
-    Because the computation in observation tokens do not depend in any way on the computation groups, we can hot-swap
-    in different computation groups at any time without changing the semantic interpretation of the observation tokens.
+    By this design, each computational group does not influence the computation
+    happening in the task or observation tokens, and each group is **independent* of one another**.
 
 
     Args:
@@ -390,7 +403,7 @@ class ORCATransformer(nn.Module):
 class OrcaModel(nn.Module):
     """
     Wrapper class for ORCATransformer that bundles computation placeholders
-    and heads with the base transformer.
+    and heads with the base transformer (useful for keeping all parameters in one place).
     """
 
     computation_placeholders: Dict[str, ComputationPlaceholder]
@@ -424,24 +437,60 @@ class OrcaModel(nn.Module):
         )
 
     def get_default_computation_groups(self, observations, tasks):
-        batch_size, horizon = next(iter(jax.tree_util.tree_leaves(observations))).shape[
-            :2
-        ]
+        batch_size, horizon = jax.tree_util.tree_leaves(observations)[0].shape[:2]
         computation_groups = {
             k: placeholder(batch_size, horizon)
             for k, placeholder in self.computation_placeholders.items()
         }
         return computation_groups
 
-    def run_head(self, head_name, *args, method_name=None, **kwargs):
-        """Runs a head.
+    def run_head(
+        self,
+        observations,
+        tasks,
+        *args,
+        head_name: str,
+        computation_group_name: str,
+        head_method_name: str = "__call__",
+        computation_groups=None,
+        train=True,
+        **kwargs,
+    ):
+        """A convenience utility to run the transformer and a single head after.
+
+        Not recommended if you want to run multiple heads on the transformer or run the transformer without any heads.
+        (See train.py for an example of how to do this.)
 
         Args:
+            observations: A dictionary containing observation data
+                where each element has shape (batch, horizon, *).
+            tasks: A dictionary containing task data
+                where each element has shape (batch, *).
+            computation_groups: See __call__.
+            train: Whether model is being trained.
+
             head_name: Name of head to run.
-            method_name: Name of method to run. Defaults to "__call__".
-            *args: Arguments to pass to method.
+            computation_group_name: Which transformer embedding to pass to head.
+            head_method_name: Name of method to run on head. Defaults to "__call__".
+            *args: Additional arguments to pass to method.
             **kwargs: Keyword arguments to pass to method.
         """
+        if computation_groups is None:
+            computation_groups = self.get_default_computation_groups(
+                observations, tasks
+            )
+            # TODO: this can be made more efficient: you only actually ever
+            # have to pass in the computation group name that the head needs.
 
-        method_name = method_name or "__call__"
-        return getattr(self.heads[head_name], method_name)(*args, **kwargs)
+        # Run the transformer!
+        transformer_embeddings = self(
+            observations, tasks, computation_groups, train=train
+        )
+
+        # Extract relevant embeddings for the head
+        embeddings = transformer_embeddings[computation_group_name]
+
+        # Run the head!
+        head = self.heads[head_name]
+        head_method_name = head_method_name or "__call__"
+        return getattr(head, head_method_name)(embeddings, *args, train=train, **kwargs)
