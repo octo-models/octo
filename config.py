@@ -80,15 +80,14 @@ def get_config(config_string):
     )
 
     base_model_config = dict(
+        token_embedding_size=256,
+        max_horizon=10,
+        readouts=dict(action=7),
         transformer_kwargs=dict(
-            token_embedding_size=256,
             num_layers=4,
             mlp_dim=1024,
-            num_heads=8,
+            num_attention_heads=8,
             dropout_rate=0.1,
-        ),
-        computation_placeholders=dict(
-            action=7,
         ),
         head_kwargs=dict(
             action=dict(
@@ -369,25 +368,24 @@ def get_config(config_string):
         "ci_debug_dataset": ConfigDict(
             dict(
                 model=dict(
+                    token_embedding_size=256,
+                    max_horizon=10,
+                    readouts=dict(action=7),
                     transformer_kwargs=dict(
-                        num_layers=1,
-                        mlp_dim=128,
-                        num_heads=1,
+                        num_layers=4,
+                        mlp_dim=1024,
+                        num_attention_heads=8,
                         dropout_rate=0.1,
-                        token_embedding_size=128,
                     ),
-                    computation_placeholders=dict(
-                        action=7,
-                    ),
-                    head_kwargs=dict(
+                    heads=dict(
                         action=dict(
-                            name="token_per_dim_action_head",
-                            computation_group="action",
+                            cls_name="token_per_dim_action_head",
                             kwargs=dict(
                                 pred_horizon=1,
                                 action_dim=7,
                                 vocab_size=256,
                                 normalization_type=normalization_type,
+                                readout_key="action",
                             ),
                         )
                     ),

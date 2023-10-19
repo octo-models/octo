@@ -27,6 +27,7 @@ class BasicActionHead(nn.Module):
     action_dim: int = 7
     vocab_size: int = 256
     normalization_type: str = "bounds"
+    readout_key: str = None
 
     def setup(self):
         self.vocab_proj = nn.Dense(
@@ -42,6 +43,11 @@ class BasicActionHead(nn.Module):
         Args:
             embeddings: jnp.ndarray w/ shape (batch_size, horizon, n_tokens, embedding_size)
         """
+        if isinstance(embeddings, dict):
+            assert (
+                self.readout_key is not None
+            ), "Must specify readout_key if passing in a dictionary of OrcaTransformer embeddings"
+            embeddings = embeddings[self.readout_key]
         batch_size, horizon, n_tokens, embedding_size = embeddings.shape
 
         embeddings = embeddings.mean(
@@ -182,6 +188,12 @@ class TokenPerDimActionHead(BasicActionHead):
         Args:
             embeddings: jnp.ndarray w/ shape (batch_size, horizon, n_tokens, embedding_size)
         """
+        if isinstance(embeddings, dict):
+            assert (
+                self.readout_key is not None
+            ), "Must specify readout_key if passing in a dictionary of OrcaTransformer embeddings"
+            embeddings = embeddings[self.readout_key]
+
         batch_size, horizon, n_tokens, embedding_size = embeddings.shape
         assert n_tokens == self.pred_horizon * self.action_dim
         # (batch_size, horizon, pred_horizon * action_dim, vocab_size)

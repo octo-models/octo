@@ -190,9 +190,6 @@ def main(_):
 
     # set up model, optimizer, loss
     model_def = create_model_def(
-        max_horizon=example_batch["observation"]["image_0"].shape[
-            1
-        ],  # TODO: decide a more sane
         **FLAGS.config.model.to_dict(),
     )
 
@@ -212,13 +209,13 @@ def main(_):
 
     def init_fn(model: OrcaModel, observations, tasks):
         # initialize transformer
-        transformer_embeddings = model(observations, tasks, train=False)
+        transformer_embeddings = model.orca_transformer(
+            observations, tasks, observations["pad_mask"], train=False
+        )
 
-        for head_name, head_info in FLAGS.config.model.head_kwargs.items():
+        for head_name, head in model.heads.items():
             # initialize each head
-            computation_group = head_info["computation_group"]
-            embedding = transformer_embeddings[computation_group]
-            model.heads[head_name](embedding, train=False)
+            head(transformer_embeddings, train=False)
 
     train_state = create_train_state(
         construct_rng,
@@ -247,19 +244,20 @@ def main(_):
 
     horizon = (
         FLAGS.config.dataset_kwargs.common_kwargs.window_size
-        - FLAGS.config.model.head_kwargs["action"]["kwargs"]["pred_horizon"]
+        - FLAGS.config.model.heads["action"]["kwargs"]["pred_horizon"]
         + 1
     )  # Ensures that there is a full horizon of actions to predict for each timestep
 
     def loss_fn(params, state, batch, rng, train=True):
-        def get_loss(model, observations, tasks, actions, train):
+        def get_loss(model: OrcaModel, observations, tasks, actions, train):
             # only use first horizon timesteps as input to transformer
+            # to ensure that there is a full horizon of actions to predict for each timestep
             observations = jax.tree_map(lambda x: x[:, :horizon], observations)
-            transformer_embeddings = model(observations, tasks, train=train)
 
-            action_head_info = FLAGS.config.model.head_kwargs["action"]
-            action_computation_group = action_head_info["computation_group"]
-            action_embeddings = transformer_embeddings[action_computation_group]
+            transformer_embeddings = model.orca_transformer(
+                observations, tasks, observations["pad_mask"], train=train
+            )
+            action_embeddings = transformer_embeddings["action"]
             action_loss, action_metrics = model.heads["action"].loss(
                 action_embeddings,
                 actions,
@@ -315,11 +313,12 @@ def main(_):
         observations = jax.tree_map(lambda x: x[:, -horizon:], observations)
 
         def get_actions(model, observations, tasks, train):
-            transformer_embeddings = model(observations, tasks, train=train)
-            computation_group = FLAGS.config.model.head_kwargs["action"][
-                "computation_group"
-            ]
-            embeddings = transformer_embeddings[computation_group]
+            transformer_embeddings = model.orca_transformer(
+                observations, tasks, observations["pad_mask"], train=train
+            )
+            action_readout_key = model.heads["action"].readout_key
+            embeddings = transformer_embeddings[action_readout_key]
+
             actions = model.heads["action"].predict_action(
                 embeddings,
                 train=train,
