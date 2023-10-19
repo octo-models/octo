@@ -1,11 +1,11 @@
-import time
 from collections import defaultdict
 from contextlib import contextmanager
+import time
 
 import flax
+from flax.training import train_state
 import jax
 import numpy as np
-from flax.training import train_state
 
 from orca.utils.jax_utils import shard_along_axis
 from orca.utils.typing import PRNGKey
