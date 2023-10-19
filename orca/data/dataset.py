@@ -17,6 +17,18 @@ from orca.data.dataset_transforms import RLDS_TRAJECTORY_MAP_TRANSFORMS
 from orca.data.utils import bc_goal_relabeling, task_augmentation
 
 
+def load_action_proprio_stats(path: str) -> Dict[str, Dict[str, List[float]]]:
+    # get statistics from an arbitrary (user supplied) path
+    logging.info(f"Loading existing statistics for normalization from {path}.")
+    with tf.io.gfile.GFile(path, "r") as f:
+        metadata = json.load(f)
+
+    return {
+        k: {k2: tf.convert_to_tensor(v2, dtype=tf.float32) for k2, v2 in v.items()}
+        for k, v in metadata.items()
+    }
+
+
 def get_action_proprio_stats(
     builder: DatasetBuilder,
     dataset: tf.data.Dataset,
@@ -252,7 +264,7 @@ def make_dataset(
             Inserts padding image for each None key.
         state_obs_keys (str, List[str], optional): List of low-dim observation keys to be decoded.
             Get concatenated and mapped to "proprio". Inserts 1d padding for each None key.
-        action_proprio_metadata (dict, optional): dict with min/max/mean/std for action and proprio normalization.
+        action_proprio_metadata (dict, str, optional): dict (or path to json dict) with min/max/mean/std for action and proprio normalization.
             If not provided, will get computed on the fly.
         resize_size (tuple, optional): target (height, width) for all RGB and depth images, default to no resize.
         **kwargs: Additional keyword arguments to pass to `apply_common_transforms`.
@@ -287,8 +299,11 @@ def make_dataset(
 
     def restructure(traj):
         # apply any dataset-specific transforms
-        if name in RLDS_TRAJECTORY_MAP_TRANSFORMS:
-            traj = RLDS_TRAJECTORY_MAP_TRANSFORMS[name](traj)
+        rlds_transform = RLDS_TRAJECTORY_MAP_TRANSFORMS[name]
+
+        # skip None transforms
+        if rlds_transform is not None:
+            traj = rlds_transform(traj)
 
         # extracts RGB images, depth images and proprio based on provided keys, pad for all None keys
         orig_obs = traj.pop("observation")
@@ -342,6 +357,8 @@ def make_dataset(
             state_obs_keys,
             RLDS_TRAJECTORY_MAP_TRANSFORMS.get(name, None),
         )
+    elif isinstance(action_proprio_metadata, str):
+        action_proprio_metadata = load_action_proprio_stats(action_proprio_metadata)
 
     dataset = apply_common_transforms(
         dataset,
