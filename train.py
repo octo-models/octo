@@ -257,9 +257,8 @@ def main(_):
             transformer_embeddings = model.orca_transformer(
                 observations, tasks, observations["pad_mask"], train=train
             )
-            action_embeddings = transformer_embeddings["action"]
             action_loss, action_metrics = model.heads["action"].loss(
-                action_embeddings,
+                transformer_embeddings,  # Action head knows to pull out the action readout_key
                 actions,
                 pad_mask=observations["pad_mask"],
                 train=train,
@@ -319,11 +318,9 @@ def main(_):
                 observations["pad_mask"],
                 train=train,
             )
-            action_readout_key = model.heads["action"].readout_key
-            embeddings = transformer_embeddings[action_readout_key]
 
             actions = model.heads["action"].predict_action(
-                embeddings,
+                transformer_embeddings,  # Action head knows to pull out the action readout_key
                 train=train,
                 argmax=False,
                 sample_shape=(NUM_ACTIONS_FOR_VIS,),
