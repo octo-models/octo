@@ -1,5 +1,5 @@
 # Written by Dibya
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 import logging
 
 import einops
@@ -9,7 +9,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from orca.model.components.transformer import Transformer
-from orca.utils.typing import Dict, PRNGKey, Sequence
+from orca.utils.typing import Dict, PRNGKey, Sequence, Union
 
 
 @dataclass
@@ -18,7 +18,8 @@ class PrefixGroup:
 
     name: str
     tokens: jnp.ndarray  # with shape (batch, n_tokens, token_embedding_size)
-    attends_to: Sequence[str]
+    attends_to: Sequence[str]  # other prefix groups this will attend to
+    attends_to_self: bool = True  # whether this group attends to itself
 
     def __post_init__(self):
         assert self.tokens.ndim == 3
@@ -30,8 +31,9 @@ class TimestepGroup:
 
     name: str
     tokens: jnp.ndarray  # with shape (batch, horizon, n_tokens, token_embedding_size)
-    attends_to: Sequence[str]
-    attends_to_past: Sequence[str] = tuple()
+    attends_to: Sequence[str]  # other groups this will attend to with <= timestep
+    attends_to_past: Sequence[str] = tuple()  # attend to with < timestep. Rarely used.
+    attends_to_self: bool = True  # whether this group attends to itself
 
     def __post_init__(self):
         assert self.tokens.ndim == 4
@@ -41,10 +43,32 @@ class TimestepGroup:
 class TokenMetadata:
     """Useful metadata for computing attention masks"""
 
-    group_name: str
+    name: str
     timestep: int  # -1 for prefix tokens
     attends_to: Sequence[str]
     attends_to_past: Sequence[str] = tuple()
+    attends_to_self: bool = True
+
+    @classmethod
+    def create(cls, group: Union[PrefixGroup, TimestepGroup], timestep: int):
+        group_dict = asdict(group)
+        group_dict.pop("tokens")
+        return cls(
+            timestep=timestep,
+            **group_dict,
+        )
+
+    def should_attend_to(self, other_metadata: "TokenMetadata") -> bool:
+        if other_metadata.name in self.attends_to:
+            return self.timestep >= other_metadata.timestep
+        elif other_metadata.name in self.attends_to_past:
+            return self.timestep > other_metadata.timestep
+        elif self.name == other_metadata.name:
+            if self.timestep == other_metadata.timestep:
+                return self.attends_to_self
+            return False  # Otherwise, should have been caught by attends_to or attends_to_past
+        else:
+            return False
 
 
 def split_tokens(ary, n_tokens_per_group, axis):
@@ -236,29 +260,19 @@ class BlockTransformer(nn.Module):
         def get_token_description(i):
             if i < tokens_for_prefix:
                 position = _get_position(i, tokens_per_prefix_group)
-                group: PrefixGroup = prefix_groups[position]
-                return TokenMetadata(group.name, -1, group.attends_to, tuple())
+                return TokenMetadata.create(prefix_groups[position], timestep=-1)
 
             i -= tokens_for_prefix
             timestep, i = divmod(i, tokens_per_time_step)
             position = _get_position(i, tokens_per_timestep_group)
-            group: TimestepGroup = timestep_groups[position]
-            return TokenMetadata(
-                group.name, timestep, group.attends_to, group.attends_to_past
-            )
+            return TokenMetadata.create(timestep_groups[position], timestep)
 
         for i in range(total_tokens):  # Token attending
             for j in range(total_tokens):  # Token being attended to
                 # description is a TokenMetadata(token_name, token_timestep, extra_info)
                 description_i = get_token_description(i)
                 description_j = get_token_description(j)
-                if description_j.group_name in description_i.attends_to:
-                    mask = int(description_i.timestep >= description_j.timestep)
-                elif description_j.group_name in description_i.attends_to_past:
-                    mask = int(description_i.timestep > description_j.timestep)
-                else:
-                    mask = 0
-
+                mask = int(description_i.should_attend_to(description_j))
                 attention_mask[i, j] = mask
 
         pad_attention_mask = self.generate_pad_attention_mask(
@@ -325,23 +339,14 @@ class BlockTransformer(nn.Module):
             column_names.append(
                 f"{prefix_group.name} ({prefix_group.tokens.shape[1]} tokens)"
             )
-            all_metadatas.append(
-                TokenMetadata(prefix_group.name, -1, prefix_group.attends_to, tuple())
-            )
+            all_metadatas.append(TokenMetadata.create(prefix_group, timestep=-1))
 
         for ts in range(horizon):
             for timestep_group in timestep_groups:
                 column_names.append(
                     f"t={ts} {timestep_group.name} ({timestep_group.tokens.shape[2]} tokens) "
                 )
-                all_metadatas.append(
-                    TokenMetadata(
-                        timestep_group.name,
-                        ts,
-                        timestep_group.attends_to,
-                        timestep_group.attends_to_past,
-                    )
-                )
+                all_metadatas.append(TokenMetadata.create(timestep_group, timestep=ts))
 
         rows = []
         for j in range(len(all_metadatas)):  # Token being attended to
@@ -349,13 +354,7 @@ class BlockTransformer(nn.Module):
             for i in range(len(all_metadatas)):  # Token attending
                 description_i = all_metadatas[i]
                 description_j = all_metadatas[j]
-
-                if description_j.group_name in description_i.attends_to:
-                    mask = int(description_i.timestep >= description_j.timestep)
-                elif description_j.group_name in description_i.attends_to_past:
-                    mask = int(description_i.timestep > description_j.timestep)
-                else:
-                    mask = 0
+                mask = int(description_i.should_attend_to(description_j))
                 row.append("x" if mask else " ")
             rows.append(row)
 
