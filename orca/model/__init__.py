@@ -8,9 +8,9 @@ from orca.model.orca_model import OrcaModel, OrcaTransformer
 def create_model_def(
     observation_tokenizers,
     task_tokenizers,
+    readouts,
     token_embedding_size,
     max_horizon,
-    readouts,
     transformer_kwargs,
     heads,
     **kwargs,
@@ -19,14 +19,13 @@ def create_model_def(
     Args:
         observation_tokenizers: list of (tokenizer_name, tokenizer_kwargs) tuples
         task_tokenizers: list of (tokenizer_name, tokenizer_kwargs) tuples
-        computation_placeholders: dict of {placeholder_name: n_tokens_for_placeholder}
+        readouts: dict of {readout_name: n_tokens_for_readout}
         max_horizon: int
-        transformer_kwargs: dict of kwargs for ORCATransformer
+        transformer_kwargs: dict of kwargs for Transformer
         head_kwargs: dict of {
             head_name: {
-                'name': str, # which head in HEADS
-                'computation_group': str, # which computation group to use for this head
-                'kwargs': dict # kwargs for the head
+                'cls_name': str, # which head in HEADS
+                'kwargs': dict
             }
         }
 
