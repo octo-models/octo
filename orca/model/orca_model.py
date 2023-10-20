@@ -235,7 +235,6 @@ class OrcaModel(nn.Module):
         observations,
         tasks,
         pad_mask,
-        *head_method_args,
         head_name: str,
         readout_name: str = None,
         head_method_name: str = "__call__",
@@ -252,15 +251,15 @@ class OrcaModel(nn.Module):
                 where each element has shape (batch, horizon, *).
             tasks: A dictionary containing task data
                 where each element has shape (batch, *).
-            readout_groups: See __call__.
-            train: Whether model is being trained.
+            pad_mask: A boolean mask of shape (batch, horizon) where False indicates a padded timestep.
 
             head_name: Name of head to run.
             readout_name: Which transformer embedding to pass to head. If None, assumes that head can
                 handle a dictionary of embeddings.
             head_method_name: Name of method to run on head. Defaults to "__call__".
-            *args: Additional arguments to pass to method.
-            **kwargs: Keyword arguments to pass to method.
+            train: Whether model is being trained.
+
+            **head_method_kwargs: Keyword arguments to pass to method.
         """
 
         transformer_embeddings = self.orca_transformer(
@@ -276,4 +275,4 @@ class OrcaModel(nn.Module):
         # Run the head!
         head = self.heads[head_name]
         method = getattr(head, head_method_name)
-        return method(embeddings, *head_method_args, train=train, **head_method_kwargs)
+        return method(embeddings, train=train, **head_method_kwargs)
