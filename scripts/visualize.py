@@ -6,6 +6,7 @@
 #
 #############################################
 
+import copy
 import datetime
 from functools import partial
 import json
@@ -16,6 +17,7 @@ from flax.training import checkpoints
 from flax.traverse_util import flatten_dict
 import jax
 import jax.numpy as jnp
+from jax.sharding import Mesh, NamedSharding, PartitionSpec
 from ml_collections import config_flags, ConfigDict
 from ml_collections.config_dict import placeholder
 import numpy as np
@@ -23,6 +25,7 @@ import optax
 import tensorflow as tf
 import wandb
 
+from orca.data.dataset import make_dataset
 from orca.data.utils.text_processing import text_processors
 from orca.model import create_model_def
 from orca.model.components.hf_weight_loaders import weights_loaders
@@ -54,6 +57,8 @@ config_flags.DEFINE_config_file(
     "File path used to get the dataset kwargs.",
     lock_config=False,
 )
+
+flags.DEFINE_bool("run_eval", False, "If True, runs eval on all provided datasets.")
 
 wandb_config = ConfigDict(
     dict(
@@ -99,7 +104,19 @@ def main(_):
             **FLAGS.config.text_processor_kwargs
         )
 
-    visualizer = Visualizer(FLAGS.config.dataset_kwargs, text_processor=text_processor)
+    val_datas = []
+    visualizers = []
+    for dataset_kwargs in FLAGS.config.dataset_kwargs["data_kwargs_list"]:
+        val_data_kwargs = copy.deepcopy(dataset_kwargs)
+        val_data_kwargs.update(**FLAGS.config.dataset_kwargs["common_kwargs"])
+        val_dataset = make_dataset(**val_data_kwargs, train=False)
+        val_datas.append(
+            val_dataset.unbatch()
+            .shuffle(FLAGS.config.shuffle_buffer_size)
+            .repeat()
+            .batch(FLAGS.config.batch_size)
+        )
+        visualizers.append(Visualizer(val_data_kwargs, text_processor=text_processor))
 
     assert (FLAGS.checkpoint is None) ^ (
         FLAGS.checkpoints is None
@@ -128,9 +145,8 @@ def main(_):
             batch.pop("language_instruction")
         return batch
 
-    val_data = visualizer.dataset.unbatch().batch(FLAGS.config.batch_size)
-    val_data_iter = map(process_text, val_data.iterator())
-    example_batch = next(val_data_iter)
+    val_data_iters = [map(process_text, val_data.iterator()) for val_data in val_datas]
+    example_batch = next(val_data_iters[0])
 
     model_def = create_model_def(
         action_dim=example_batch["action"].shape[-1],
@@ -186,6 +202,35 @@ def main(_):
             actions = jnp.moveaxis(actions, 0, 1)
         return actions
 
+    if FLAGS.run_eval:
+        # create a 1D mesh with a single axis named "batch"
+        mesh = Mesh(jax.devices(), axis_names="batch")
+        # replicated sharding -- does not shard arrays
+        replicated_sharding = NamedSharding(mesh, PartitionSpec())
+        # data-parallel sharding -- shards arrays along the first axis
+        dp_sharding = NamedSharding(mesh, PartitionSpec("batch"))
+
+        def loss_fn(params, state, batch, rng, train=True):
+            info = state.apply_fn(
+                {"params": params},
+                batch["observation"],
+                batch["tasks"],
+                batch["action"],
+                train=train,
+                rngs={"dropout": rng},
+            )
+            return info["loss"], info
+
+        @partial(
+            jax.jit,
+            # state is replicated, batch is data-parallel
+            in_shardings=(replicated_sharding, dp_sharding),
+            out_shardings=replicated_sharding,
+        )
+        def eval_step(state, batch):
+            loss, info = loss_fn(state.params, state, batch, state.rng, train=False)
+            return info
+
     wandb_id = "{name}_{time}".format(
         name=FLAGS.wandb.name,
         time=datetime.datetime.now().strftime("%Y%m%d_%H%M%S"),
@@ -210,13 +255,24 @@ def main(_):
             devices=jax.devices(),
         )
         for mode in FLAGS.modes:
-            images = visualizer.visualize_for_wandb(policy_fn, max_trajs=3)
-            wandb_log({mode: images}, step=step)
+            for data_kwargs, visualizer in zip(
+                FLAGS.config.dataset_kwargs["data_kwargs_list"], visualizers
+            ):
+                images = visualizer.visualize_for_wandb(policy_fn, max_trajs=3)
+                wandb_log({f"{mode}_{data_kwargs['name']}": images}, step=step)
 
-            info = visualizer.raw_evaluations(policy_fn, max_trajs=100)
-            bridge_metrics = visualizer.metrics_for_wandb(info)
-            print(bridge_metrics)
-            wandb_log({mode: bridge_metrics}, step=step)
+                info = visualizer.raw_evaluations(policy_fn, max_trajs=100)
+                metrics = visualizer.metrics_for_wandb(info)
+                wandb_log({f"{mode}_{data_kwargs['name']}": metrics}, step=step)
+        if FLAGS.run_eval:
+            for data_kwargs, val_data_iter in zip(
+                FLAGS.config.dataset_kwargs["data_kwargs_list"], val_data_iters
+            ):
+                metrics = []
+                for _, batch in zip(range(FLAGS.config.num_val_batches), val_data_iter):
+                    metrics.append(eval_step(train_state, batch))
+                metrics = jax.tree_map(lambda *xs: np.mean(xs), *metrics)
+                wandb_log({f"validation_{data_kwargs['name']}": metrics}, step=step)
 
 
 if __name__ == "__main__":
