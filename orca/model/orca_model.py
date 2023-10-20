@@ -4,11 +4,12 @@ import jax
 import jax.numpy as jnp
 
 from orca.model.components.block_transformer import (
+    AttentionRule,
     BlockTransformer,
     PrefixGroup,
     TimestepGroup,
 )
-from orca.utils.typing import Dict, Sequence
+from orca.utils.typing import Data, Dict, Optional, Sequence
 
 posemb_init = nn.initializers.normal(stddev=0.02)
 
@@ -31,17 +32,17 @@ class OrcaTransformer(nn.Module):
 
     The transformer is a blockwise-causal transformer, where each timestep only attends to the same or previous timesteps.
 
-    When called, the module requests a set of computation groups, and performs a forward pass of the transformer on the following sequence:
+    When called, the module requests a set of readouts, and performs a forward pass of the transformer on the following sequence:
 
         [
-        task,
+        <task tokens>,
         <observation ts0 tokens>, <readout1 ts0 tokens>, <readout2 ts0 tokens>, ...
         <observation ts1 tokens>, <readout1 ts1 tokens>, <readout2 ts1 tokens>, ...
         ...
     ]
 
     The observation tokens attend to the task prefix, and to all observation tokens in the same or previous timesteps.
-    Computation group tokens attend to everything observation tokens do, as well as readout tokens with the same name and same timestep.
+    Readouts attend to everything observation tokens do, but are not attended to by observation or task tokens.
 
     By this design, each readout does not influence the computation happening in the task or observation tokens,
     and each readout is **independent* of one another**. This allows us to hot-swap in different
@@ -69,10 +70,10 @@ class OrcaTransformer(nn.Module):
     @nn.compact
     def __call__(
         self,
-        observations,
-        tasks,
-        pad_mask,
-        readouts: Sequence[str] = None,
+        observations: Data,
+        tasks: Data,
+        pad_mask: jax.Array,
+        readouts: Optional[Sequence[str]] = None,
         train: bool = False,
         verbose: bool = False,
     ):
@@ -82,8 +83,10 @@ class OrcaTransformer(nn.Module):
                 Each entry has shape (batch, horizon, *).
             tasks: A dictionary containing task data for the trajectory windows.
                 Each entry has shape (batch, *).
+            pad_mask: A boolean mask of shape (batch, horizon) where False indicates a padded timestep.
             readouts: A list of readouts to compute. If None, defaults to all readouts. Must be a subset of the readouts specified in the model config.
-            train: Whether to use dropout.
+            train: Whether model is being trained.
+            verbose: If True, prints out the transformer structure.
 
         Returns:
             embedding_dict: A dictionary {
@@ -96,9 +99,10 @@ class OrcaTransformer(nn.Module):
         if readouts is None:
             readouts = list(self.readouts.keys())
 
+        # Check that all inputs are valid
         assert set(readouts).issubset(
             set(self.readouts.keys())
-        ), "readout_groups must be a subset of the readouts specified in the model config"
+        ), "readouts must be a subset of those specified in the model config"
 
         batch_size, horizon = jax.tree_util.tree_leaves(observations)[0].shape[:2]
         assert horizon <= self.max_horizon, "horizon must be <= max_horizon"
@@ -106,57 +110,85 @@ class OrcaTransformer(nn.Module):
             jax.tree_map(lambda x: x.shape[1] == horizon, observations)
         ), "observations must have the same horizon"
 
-        all_task_names = [f"task{k}" for k in range(len(self.task_tokenizers))]
-        all_obs_names = [f"obs{k}" for k in range(len(self.observation_tokenizers))]
-
+        # Create inputs for the transformer
         all_prefix_groups = []
         all_timestep_groups = []
 
+        all_task_names = [f"task_{i}" for i in range(len(self.task_tokenizers))]
+        all_obs_names = [f"obs_{i}" for i in range(len(self.observation_tokenizers))]
+        all_readout_names = [f"readout_{name}" for name in readouts]
+
+        task_attention_rules = {
+            task_name: AttentionRule.CAUSAL for task_name in all_task_names
+        }  # Tasks attend to all other tasks
+
+        observation_attention_rules = {
+            name: AttentionRule.CAUSAL for name in all_task_names + all_obs_names
+        }  # Observations attend to all tasks and previous observations causally
+
         # First, add the task tokens
-        for k, tok in enumerate(self.task_tokenizers):
-            task_tokens = tok(observations, tasks, train=train)
+        for i, tok in enumerate(self.task_tokenizers):
+            # Receive inputs from tokenizer and cast to embedding size
+            task_tokens = tok(tasks, train=train)
             task_tokens = nn.Dense(self.token_embedding_size)(task_tokens)
+
+            # Add positional embedding
             task_pos_embedding = self._create_positional_embedding(
-                f"task{k}", 1, task_tokens.shape[1], prefix=True
+                f"task_{i}", 1, task_tokens.shape[1], prefix=True
             )
             task_tokens += task_pos_embedding
+
             all_prefix_groups.append(
-                PrefixGroup(f"task{k}", task_tokens, attends_to=all_task_names)
+                PrefixGroup(f"task_{i}", task_tokens, task_attention_rules)
             )
 
         # Next, add the observation tokens
-        for k, tok in enumerate(self.observation_tokenizers):
+        for i, tok in enumerate(self.observation_tokenizers):
+            # Receive inputs from tokenizer and cast to embedding size
             obs_tokens = tok(observations, tasks, train=train)
             obs_tokens = nn.Dense(self.token_embedding_size)(obs_tokens)
+
+            # Add positional embedding
             obs_pos_embedding = self._create_positional_embedding(
-                f"obs{k}", obs_tokens.shape[2], prefix=False
+                f"obs_{i}", obs_tokens.shape[2], prefix=False
             )
             obs_tokens += obs_pos_embedding[:, :horizon, :, :]
 
             all_timestep_groups.append(
-                TimestepGroup(
-                    f"obs{k}", obs_tokens, attends_to=all_task_names + all_obs_names
-                )
+                TimestepGroup(f"obs_{i}", obs_tokens, observation_attention_rules)
             )
 
         # Finally, add the readout tokens
         for readout_name in readouts:
+            # Readouts do not correspond to any inputs, so we just create a bunch of zeros
             n_tokens_for_readout = self.readouts[readout_name]
+            readout_tokens = jnp.zeros(
+                (batch_size, horizon, n_tokens_for_readout, self.token_embedding_size)
+            )
+
+            # Add positional embedding
             readout_pos_embedding = self._create_positional_embedding(
                 f"readout_{readout_name}", n_tokens_for_readout, prefix=False
             )
-            readout_pos_embedding = jnp.broadcast_to(
-                readout_pos_embedding[:, :horizon, :, :],
-                (batch_size, horizon, n_tokens_for_readout, self.token_embedding_size),
-            )
-            attends_to = all_task_names + all_obs_names + [f"readout_{readout_name}"]
+            readout_tokens += readout_pos_embedding[:, :horizon, :, :]
+
+            attention_rules = {
+                **observation_attention_rules,
+                f"readout_{readout_name}": AttentionRule.CAUSAL,
+            }  # Attend to your own readout tokens at all prior timesteps
+
             all_timestep_groups.append(
                 TimestepGroup(
                     f"readout_{readout_name}",
-                    readout_pos_embedding,
-                    attends_to=attends_to,
+                    readout_tokens,
+                    attention_rules,
                 )
             )
+
+        # Run the transformer!
+        assert (
+            self.transformer_kwargs.get("add_position_embedding", False) is False
+        ), "Already added positional embeddings to the tokens"
 
         prefix_outputs, timestep_outputs = BlockTransformer(**self.transformer_kwargs)(
             all_prefix_groups,
@@ -188,14 +220,14 @@ class OrcaTransformer(nn.Module):
 
 class OrcaModel(nn.Module):
     """
-    Wrapper class for ORCATransformer that bundles heads with the base transformer
-    (useful for keeping all parameters in one place).
+    Bundles OrcaTransformer with various heads (useful for keeping all parameters in one place).
     """
 
     orca_transformer: OrcaTransformer
     heads: Dict[str, nn.Module]
 
     def __call__(self, *args, **kwargs):
+        """See OrcaTransformer.__call__."""
         return self.orca_transformer(*args, **kwargs)
 
     def run_head(

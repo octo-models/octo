@@ -214,7 +214,7 @@ def main(_):
         )
 
         for head_name, head in model.heads.items():
-            # initialize each head
+            # initialize each head (make sure this initializes all head parameters!)
             head(transformer_embeddings, train=False)
 
     train_state = create_train_state(
