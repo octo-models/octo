@@ -132,9 +132,11 @@ class OrcaTransformer(nn.Module):
             task_tokens = tok(tasks, train=train)
             task_tokens = nn.Dense(self.token_embedding_size)(task_tokens)
 
+            # task_tokens shape is (batch, n_tokens, token_embedding_size)
+
             # Add positional embedding
             task_pos_embedding = self._create_positional_embedding(
-                f"task_{i}", 1, task_tokens.shape[1], prefix=True
+                f"task_{i}", task_tokens.shape[1], prefix=True
             )
             task_tokens += task_pos_embedding
 
@@ -147,6 +149,7 @@ class OrcaTransformer(nn.Module):
             # Receive inputs from tokenizer and cast to embedding size
             obs_tokens = tok(observations, tasks, train=train)
             obs_tokens = nn.Dense(self.token_embedding_size)(obs_tokens)
+            # obs_tokens shape is (batch, horizon, n_tokens, token_embedding_size)
 
             # Add positional embedding
             obs_pos_embedding = self._create_positional_embedding(
