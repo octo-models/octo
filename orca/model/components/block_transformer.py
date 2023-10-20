@@ -359,7 +359,11 @@ class BlockTransformer(nn.Module):
             rows.append(row)
 
         table = rich.table.Table(
-            "", *column_names, title="Attention Mask", show_header=True
+            rich.table.Column(no_wrap=True),
+            *column_names,
+            title="Attention Mask",
+            show_header=True,
+            show_lines=True,
         )
         for row in rows:
             table.add_row(*row)

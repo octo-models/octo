@@ -1,6 +1,5 @@
 import logging
 
-from orca.model.components.computation_groups import ComputationPlaceholder
 from orca.model.components.heads import HEADS
 from orca.model.components.tokenizers import TOKENIZERS
 from orca.model.orca_model import OrcaModel, OrcaTransformer
