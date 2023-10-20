@@ -2,17 +2,13 @@
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
-import numpy as np
 
 from orca.model.components.block_transformer import (
     BlockTransformer,
     PrefixGroup,
     TimestepGroup,
 )
-from orca.utils.typing import Dict, PRNGKey, Sequence
-
-# with shape (batch, horizon, n_tokens, token_embedding_size)
-TransformerInputs = jnp.ndarray
+from orca.utils.typing import Dict, Sequence
 
 posemb_init = nn.initializers.normal(stddev=0.02)
 
@@ -114,8 +110,9 @@ class OrcaTransformer(nn.Module):
         all_obs_names = [f"obs{k}" for k in range(len(self.observation_tokenizers))]
 
         all_prefix_groups = []
+        all_timestep_groups = []
 
-        # First, parse the tasks
+        # First, add the task tokens
         for k, tok in enumerate(self.task_tokenizers):
             task_tokens = tok(observations, tasks, train=train)
             task_tokens = nn.Dense(self.token_embedding_size)(task_tokens)
@@ -127,7 +124,7 @@ class OrcaTransformer(nn.Module):
                 PrefixGroup(f"task{k}", task_tokens, attends_to=all_task_names)
             )
 
-        all_timestep_groups = []
+        # Next, add the observation tokens
         for k, tok in enumerate(self.observation_tokenizers):
             obs_tokens = tok(observations, tasks, train=train)
             obs_tokens = nn.Dense(self.token_embedding_size)(obs_tokens)
@@ -142,6 +139,7 @@ class OrcaTransformer(nn.Module):
                 )
             )
 
+        # Finally, add the readout tokens
         for readout_name in readouts:
             n_tokens_for_readout = self.readouts[readout_name]
             readout_pos_embedding = self._create_positional_embedding(
