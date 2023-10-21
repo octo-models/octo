@@ -272,6 +272,9 @@ def stanford_hydra_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, An
     trajectory["observation"]["gripper_state"] = trajectory["observation"]["state"][
         :, -3:-2
     ]
+    # flip BGR channels to RGB
+    trajectory["observation"]["image"] = trajectory["observation"]["image"][..., ::-1]
+    trajectory["observation"]["wrist_image"] = trajectory["observation"]["wrist_image"][..., ::-1]
     return trajectory
 
 
@@ -528,6 +531,9 @@ def uiuc_d3field_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]
 
 def utaustin_mutex_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
     trajectory["observation"]["state"] = trajectory["observation"]["state"][:, :8]
+    # flip BGR channels back to RGB
+    trajectory["observation"]["image"] = trajectory["observation"]["image"][..., ::-1]
+    trajectory["observation"]["wrist_image"] = trajectory["observation"]["wrist_image"][..., ::-1]
     return trajectory
 
 
