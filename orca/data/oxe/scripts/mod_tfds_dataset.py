@@ -96,7 +96,8 @@ def mod_dataset(ds):
                             dl.utils.resize_image(step["observation"][key], size),
                             tf.uint8,
                         )
-            step.pop("language_embedding")
+            if "language_embedding" in step:
+                step.pop("language_embedding")
             return step
 
         traj["steps"] = traj["steps"].map(mod_step)
