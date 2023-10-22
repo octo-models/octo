@@ -1,9 +1,14 @@
 """Modifies TFDS dataset with a map function, updates the feature definition and stores new dataset."""
+from functools import partial
+
 from absl import app, flags
 import tensorflow as tf
 import tensorflow_datasets as tfds
 
 from orca.data.oxe.mod_tfds_dataset.utils.mod_functions import TFDS_MOD_FUNCTIONS
+from orca.data.oxe.mod_tfds_dataset.utils.multithreaded_adhoc_tfds_builder import (
+    MultiThreadedAdhocDatasetBuilder,
+)
 
 FLAGS = flags.FLAGS
 
@@ -26,11 +31,13 @@ def mod_features(features):
     return features
 
 
-def mod_dataset(ds):
+def mod_dataset_generator(builder, split, mods):
     """Modifies dataset features."""
-    for mod in FLAGS.mods:
+    ds = builder.as_dataset(split=split)
+    for mod in mods:
         ds = TFDS_MOD_FUNCTIONS[mod].mod_dataset(ds)
-    return ds
+    for episode in tfds.core.dataset_utils.as_numpy(ds):
+        yield episode
 
 
 def main(_):
@@ -41,17 +48,19 @@ def main(_):
     print(features)
     print("##############################################")
 
-    tfds.dataset_builders.store_as_tfds_dataset(
+    mod_dataset_builder = MultiThreadedAdhocDatasetBuilder(
         name=FLAGS.dataset,
         version=builder.version,
-        features=mod_features(builder.info.features),
-        split_datasets={
-            split: mod_dataset(builder.as_dataset(split=split))
-            for split in builder.info.splits
-        },
+        features=features,
+        split_datasets={split: None for split in builder.info.splits},
         config=builder.builder_config,
         data_dir=FLAGS.target_dir,
+        description=builder.info.description,
+        generator_fcn=partial(mod_dataset_generator, builder=builder, mods=FLAGS.mods),
+        n_workers=FLAGS.n_workers,
+        max_episodes_in_memory=FLAGS.max_episodes_in_memory,
     )
+    mod_dataset_builder.download_and_prepare()
 
 
 if __name__ == "__main__":
