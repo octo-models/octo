@@ -47,12 +47,13 @@ def main(_):
     print("############# Target features: ###############")
     print(features)
     print("##############################################")
+    assert FLAGS.data_dir != FLAGS.target_dir   # prevent overwriting original dataset
 
     mod_dataset_builder = MultiThreadedAdhocDatasetBuilder(
         name=FLAGS.dataset,
         version=builder.version,
         features=features,
-        split_datasets={split: None for split in builder.info.splits},
+        split_datasets={split: builder.info.splits[split] for split in builder.info.splits},
         config=builder.builder_config,
         data_dir=FLAGS.target_dir,
         description=builder.info.description,

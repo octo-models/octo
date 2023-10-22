@@ -45,7 +45,7 @@ class MultiThreadedAdhocDatasetBuilder(tfds.core.dataset_builders.AdhocBuilder):
             self._max_episodes_in_memory % self._n_workers == 0
         )  # need to divide max_episodes by workers
         split_builder = ParallelSplitBuilder(
-            split_dict=self.info.splits,
+            split_dict=self._split_datasets,
             features=self.info.features,
             dataset_size=self.info.dataset_size,
             max_examples_per_split=download_config.max_examples_per_split,
@@ -104,7 +104,7 @@ class MultiThreadedAdhocDatasetBuilder(tfds.core.dataset_builders.AdhocBuilder):
         def dummy_generator():
             yield None
 
-        return {split: dummy_generator() for split in self.info.splits}
+        return {split: dummy_generator() for split in self._split_datasets}
 
 
 class _SplitInfoFuture:
@@ -118,9 +118,11 @@ class _SplitInfoFuture:
 
 
 def parse_examples_from_generator(
-    episodes, fcn, split_name, total_num_examples, features, serializer
+    episodes, max_episodes, fcn, split_name, total_num_examples, features, serializer
 ):
-    generator = fcn(split=split_name + f"[{episodes[0]}:{episodes[-1] + 1}]")
+    upper = episodes[-1] + 1
+    upper_str = f'{upper}' if upper < max_episodes else ''
+    generator = fcn(split=split_name + f"[{episodes[0]}:{upper_str}]")
     outputs = []
     for key, sample in utils.tqdm(
         zip(episodes, generator),
@@ -196,6 +198,7 @@ class ParallelSplitBuilder(split_builder_lib.SplitBuilder):
                     total_num_examples=total_num_examples,
                     serializer=writer._serializer,
                     features=self._features,
+                    max_episodes=self._split_dict[split_name].num_examples,
                 ),
                 episodes,
             )
@@ -235,6 +238,6 @@ def chunks(l, n):
 def chunk_max(l, n, max_chunk_sum):
     out = []
     for _ in range(int(np.ceil(len(l) / max_chunk_sum))):
-        out.append(list(chunks(l[:max_chunk_sum], n)))
+        out.append([c for c in chunks(l[:max_chunk_sum], n) if c])
         l = l[max_chunk_sum:]
     return out
