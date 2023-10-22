@@ -45,6 +45,10 @@ def maybe_mod_obs_feature(feat, key):
 
 def mod_features(features):
     """Modifies feature dict."""
+    misc_features = {}
+    if "episode_metadata" in features:
+        misc_features["episode_metadata"] = features["episode_metadata"]
+
     return tfds.features.FeaturesDict(
         {
             "steps": tfds.features.Dataset(
@@ -64,7 +68,7 @@ def mod_features(features):
                     },
                 }
             ),
-            "episode_metadata": features["episode_metadata"],
+            **misc_features,
         }
     )
 
@@ -109,6 +113,12 @@ def mod_dataset(ds):
 
 def main(_):
     builder = tfds.builder(FLAGS.dataset, data_dir=FLAGS.data_dir)
+
+    features = mod_features(builder.info.features)
+    print("############# Target features: ###############")
+    print(features)
+    print("##############################################")
+
     tfds.dataset_builders.store_as_tfds_dataset(
         name=FLAGS.dataset,
         version=builder.version,
