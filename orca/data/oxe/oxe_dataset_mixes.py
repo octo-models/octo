@@ -11,7 +11,7 @@ from orca.utils.typing import ActionEncoding
 
 RT_X_MIX = [
     ("fractal20220817_data", 1.0),
-    # ('kuka', 1.),     --> contains a lot of failure data too (as opposed to RT-X train mix)
+    ('kuka', 0.1),
     ("bridge_dataset", 1.0),
     ("taco_play", 2.0),
     ("jaco_play", 4.0),
@@ -134,7 +134,7 @@ def make_oxe_dataset_kwargs_and_weights(
             continue
 
         # adjust loaded features in kwargs
-        dataset_kwargs["image_obs_keys"] = dataset_kwargs["image_obs_keys"][:n_cameras]
+        dataset_kwargs["image_obs_keys"] = dataset_kwargs["image_obs_keys"][:n_cameras] + dataset_kwargs["image_obs_keys"][-1:]
         dataset_kwargs["depth_obs_keys"] = dataset_kwargs["depth_obs_keys"][:n_cameras]
         if not load_depth:
             dataset_kwargs.pop("depth_obs_keys")

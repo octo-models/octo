@@ -152,6 +152,8 @@ def apply_common_transforms(
     window_size: int = 1,
     resize_size: Optional[Tuple[int, int]] = None,
     skip_unlabeled: bool = False,
+    action_proprio_normalization_type: Optional[str] = None,
+    ram_budget: Optional[int] = None,
 ):
     """Common transforms shared between all datasets.
 
@@ -238,7 +240,7 @@ def make_dataset(
     action_encoding: Optional[ActionEncodingType] = None,
     ram_budget: Optional[int] = None,
     action_proprio_normalization_type: Optional[str] = None,
-    apply_common_transforms: bool = True,
+    apply_transforms: bool = True,
     **kwargs,
 ) -> tf.data.Dataset:
     """Creates a dataset from the RLDS format.
@@ -323,7 +325,7 @@ def make_dataset(
                     if resize_size
                     else traj["observation"]["image_0"].shape
                 )
-                traj["observation"][f"image_{i}"] = tf.zeros(pad_shape, dtype=tf.uint8)
+                traj["observation"][f"image_{i}"] = tf.io.encode_png(tf.zeros(pad_shape, dtype=tf.uint8))
             else:
                 traj["observation"][f"image_{i}"] = orig_obs[key]
         for i, key in enumerate(depth_obs_keys):
@@ -379,9 +381,8 @@ def make_dataset(
                 normalization_type=action_proprio_normalization_type,
             )
         )
-    dataset.action_proprio_metadata = action_proprio_metadata
 
-    if apply_common_transforms:
+    if apply_transforms:
         dataset = apply_common_transforms(
             dataset,
             train=train,
@@ -389,6 +390,7 @@ def make_dataset(
             **kwargs,
         )
 
+    dataset.action_proprio_metadata = action_proprio_metadata
     return dataset
 
 
@@ -418,7 +420,7 @@ def make_interleaved_dataset(
     for i, data_kwargs in enumerate(tqdm.tqdm(dataset_kwargs_list)):
         data_kwargs.update(**common_dataset_args)
         datasets.append(
-            make_dataset(**data_kwargs, train=train, apply_common_transforms=False)
+            make_dataset(**data_kwargs, train=train, apply_transforms=False)
             # .unbatch()
             # .shuffle(int(shuffle_buffer_size))
             .repeat()
@@ -426,6 +428,9 @@ def make_interleaved_dataset(
 
     # interleave datasets with sampling weights
     dataset = dl.DLataset.sample_from_datasets(datasets, sample_weights)
+    #import copy
+    #filtered_common_args = copy.deepcopy(common_dataset_args)
+    #filtered_common_args.pop('action_proprio_normalization_type')
 
     dataset = apply_common_transforms(
         dataset,
