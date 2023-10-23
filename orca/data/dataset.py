@@ -152,8 +152,6 @@ def apply_common_transforms(
     window_size: int = 1,
     resize_size: Optional[Tuple[int, int]] = None,
     skip_unlabeled: bool = False,
-    action_proprio_metadata: Optional[dict] = None,
-    action_proprio_normalization_type: Optional[str] = None,
 ):
     """Common transforms shared between all datasets.
 
@@ -171,23 +169,10 @@ def apply_common_transforms(
         resize_size (tuple, optional): target (height, width) for all RGB and depth images, default to no resize.
         window_size (int, optional): The length of the snippets that trajectories are chunked into.
         skip_unlabeled (bool, optional): Whether to skip trajectories with no language labels.
-        action_proprio_metadata (Optional[dict], optional): A dictionary containing metadata about the action and
-            proprio statistics. If None, no normalization is performed.
-        action_proprio_normalization_type (Optional[str], optional): The type of normalization to perform on the action,
-            proprio, or both. Can be "normal" (mean 0, std 1) or "bounds" (normalized to [-1, 1]).
     """
     if skip_unlabeled:
         dataset = dataset.filter(
             lambda x: tf.math.reduce_any(x["language_instruction"] != "")
-        )
-
-    if action_proprio_metadata is not None:
-        dataset = dataset.map(
-            partial(
-                _normalize_action_and_proprio,
-                metadata=action_proprio_metadata,
-                normalization_type=action_proprio_normalization_type,
-            )
         )
 
     # decodes string keys with names "image" & "depth", resizes "image" and "depth"
@@ -252,6 +237,8 @@ def make_dataset(
     state_encoding: Optional[StateEncodingType] = None,
     action_encoding: Optional[ActionEncodingType] = None,
     ram_budget: Optional[int] = None,
+    action_proprio_normalization_type: Optional[str] = None,
+    apply_common_transforms: bool = True,
     **kwargs,
 ) -> tf.data.Dataset:
     """Creates a dataset from the RLDS format.
@@ -273,6 +260,8 @@ def make_dataset(
         state_encoding (StateEncodingType, optional): type of state encoding used, e.g. joint angles vs EEF pose.
         action_encoding (ActionEncodingType, optional): type of action encoding used, e.g. joint delta vs EEF delta.
         ram_budget (int, optional): limits the RAM used by tf.data.AUTOTUNE, unit: GB, forwarded to AutotuneOptions.
+        action_proprio_normalization_type (Optional[str], optional): The type of normalization to perform on the action,
+            proprio, or both. Can be "normal" (mean 0, std 1) or "bounds" (normalized to [-1, 1]).
         **kwargs: Additional keyword arguments to pass to `apply_common_transforms`.
     Returns:
         Dataset of trajectories where each step has the following fields:
@@ -383,15 +372,22 @@ def make_dataset(
             state_obs_keys,
             RLDS_TRAJECTORY_MAP_TRANSFORMS.get(name, None),
         )
-
-    dataset = apply_common_transforms(
-        dataset,
-        train=train,
-        action_proprio_metadata=action_proprio_metadata,
-        resize_size=resize_size,
-        **kwargs,
-    )
+        dataset = dataset.map(
+            partial(
+                _normalize_action_and_proprio,
+                metadata=action_proprio_metadata,
+                normalization_type=action_proprio_normalization_type,
+            )
+        )
     dataset.action_proprio_metadata = action_proprio_metadata
+
+    if apply_common_transforms:
+        dataset = apply_common_transforms(
+            dataset,
+            train=train,
+            resize_size=resize_size,
+            **kwargs,
+        )
 
     return dataset
 
@@ -422,12 +418,20 @@ def make_interleaved_dataset(
     for i, data_kwargs in enumerate(tqdm.tqdm(dataset_kwargs_list)):
         data_kwargs.update(**common_dataset_args)
         datasets.append(
-            make_dataset(**data_kwargs, train=train)
-            .unbatch()
-            .shuffle(int(shuffle_buffer_size))
+            make_dataset(**data_kwargs, train=train, apply_common_transforms=False)
+            # .unbatch()
+            # .shuffle(int(shuffle_buffer_size))
             .repeat()
         )
 
     # interleave datasets with sampling weights
     dataset = dl.DLataset.sample_from_datasets(datasets, sample_weights)
+
+    dataset = apply_common_transforms(
+        dataset,
+        train=train,
+        **common_dataset_args,
+    )
+
+    dataset = dataset.unbatch().shuffle(int(shuffle_buffer_size)).repeat()
     return dataset
