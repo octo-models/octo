@@ -13,7 +13,7 @@ def get_config(config_string):
 
     base_config = dict(
         batch_size=256,
-        shuffle_buffer_size=100,
+        shuffle_buffer_size=20000,
         num_val_batches=8,
         num_steps=int(2e6),
         start_step=placeholder(int),
@@ -81,7 +81,7 @@ def get_config(config_string):
 
     dataset_kwargs_list, dataset_sampling_weights = (
         make_oxe_dataset_kwargs_and_weights(
-            RT_X_MIX,
+            RT_X_MIX + OXE_FRANKA_MIX,
             data_dir='gs://rail-orca-central2',
             n_third_person_cameras=1,
             n_wrist_cameras=1,
@@ -98,7 +98,8 @@ def get_config(config_string):
                     observation_tokenizers=[
                         (
                             "image_tokenizer",
-                            {"num_tokens": 64, **base_tokenizer_kwargs},
+                            {"num_tokens": 64,
+                             "task_film_keys": ["language_instruction"], **base_tokenizer_kwargs},
                         ),
                     ],
                     task_tokenizers=[],
@@ -108,12 +109,22 @@ def get_config(config_string):
                     "common_kwargs": update_config(
                         base_data_config,
                         resize_size=(256, 256),
-                        # ram_budget=3,       # limit RAM per dataset
+                        ram_budget=1,       # limit RAM per dataset
+                        task_augmentation_strategy="switch_keys",
+                        task_augmentation_kwargs = dict(
+                            switch_key_groups_probs = [
+                                (["image_0"], 0.5),
+                                (["language_instruction"], 0.5),
+                            ],
+                        ),
                     ),
                     "data_kwargs_list": dataset_kwargs_list,
                     "sample_weights": dataset_sampling_weights,
                 },
-                **base_config,
+                **update_config(
+                    base_config,
+                    text_processor="muse_embedding",
+                ),
             )
         ),
     }
