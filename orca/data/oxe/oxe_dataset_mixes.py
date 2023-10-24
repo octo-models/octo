@@ -33,7 +33,7 @@ OXE_FRANKA_MIX = [
     ("austin_buds_dataset_converted_externally_to_rlds", 5.0),
     ("nyu_franka_play_dataset_converted_externally_to_rlds", 10.0),
     ("maniskill_dataset_converted_externally_to_rlds", 0.2),
-    # ("furniture_bench_dataset_converted_externally_to_rlds", 1.0),
+    ("furniture_bench_dataset_converted_externally_to_rlds", 1.0),
     ("cmu_franka_exploration_dataset_converted_externally_to_rlds", 5.0),
     ("austin_sailor_dataset_converted_externally_to_rlds", 5.0),
     ("austin_sirius_dataset_converted_externally_to_rlds", 5.0),
@@ -42,7 +42,7 @@ OXE_FRANKA_MIX = [
     ("stanford_robocook_converted_externally_to_rlds", 1.0),
     ("iamlab_cmu_pickup_insert_converted_externally_to_rlds", 1.0),
     ("utaustin_mutex", 2.0),
-    # ("cmu_food_manipulation", 1.0),
+    ("cmu_playing_with_food", 1.0),
     ("cmu_play_fusion", 4.0),
 ]
 
@@ -67,6 +67,7 @@ OXE_FULL_MIX = [
     ("austin_buds_dataset_converted_externally_to_rlds", 1.0),
     ("nyu_franka_play_dataset_converted_externally_to_rlds", 1.0),
     ("maniskill_dataset_converted_externally_to_rlds", 1.0),
+    ("furniture_bench_dataset_converted_externally_to_rlds", 1.0),
     ("cmu_franka_exploration_dataset_converted_externally_to_rlds", 1.0),
     ("ucsd_kitchen_dataset_converted_externally_to_rlds", 1.0),
     ("ucsd_pick_and_place_dataset_converted_externally_to_rlds", 1.0),
@@ -93,6 +94,7 @@ OXE_FULL_MIX = [
     ("uiuc_d3field", 1.0),
     ("utaustin_mutex", 1.0),
     ("berkeley_fanuc_manipulation", 1.0),
+    ("cmu_playing_with_food", 1.0),
     ("cmu_play_fusion", 1.0),
     ("cmu_stretch", 1.0),
     ("berkeley_gnm_recon", 1.0),
