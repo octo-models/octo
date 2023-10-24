@@ -20,13 +20,14 @@ def get_config(config_string):
         log_interval=100,
         eval_interval=10000,
         save_interval=10000,
-        save_dir="gs://karl-central-1", #placeholder(str),
+        save_dir='gs://karl-central-2',
         resume_path=placeholder(str),
         seed=42,
         text_processor=None,
         text_processor_kwargs=dict(),
         pretrained_weights=[],
         wandb=base_wandb_config,
+        eval_datasets=['bridge_dataset'],
     )
 
     # params that need to be specified multiple places
@@ -81,7 +82,7 @@ def get_config(config_string):
     dataset_kwargs_list, dataset_sampling_weights = (
         make_oxe_dataset_kwargs_and_weights(
             RT_X_MIX,
-            data_dir='gs://rail-orca-central1',
+            data_dir='gs://rail-orca-central2',
             n_third_person_cameras=1,
             n_wrist_cameras=1,
             load_depth=False,
