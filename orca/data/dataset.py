@@ -15,11 +15,7 @@ import tqdm
 
 from orca.data.dataset_transforms import RLDS_TRAJECTORY_MAP_TRANSFORMS
 from orca.data.utils import bc_goal_relabeling, task_augmentation
-from orca.data.utils.data_utils import (
-    maybe_decode_depth_images,
-    pprint_data_mixture,
-    set_ram_budget,
-)
+from orca.data.utils.data_utils import maybe_decode_depth_images, pprint_data_mixture
 from orca.utils.typing import (
     ActionEncoding,
     ActionEncodingType,
@@ -282,10 +278,10 @@ def make_dataset(
         split = "train" if train else "val"
 
     dataset = dl.DLataset.from_rlds(
-        builder, split=split, shuffle=shuffle, num_parallel_reads=1
+        builder, split=split, shuffle=shuffle, num_parallel_reads=8
     )
     if ram_budget:
-        dataset = set_ram_budget(dataset, ram_budget)
+        dataset = dataset.with_ram_budget(ram_budget)
 
     image_obs_keys = (
         [image_obs_keys] if not isinstance(image_obs_keys, Sequence) else image_obs_keys
@@ -435,5 +431,5 @@ def make_interleaved_dataset(
         **common_dataset_args,
     )
 
-    dataset = dataset.unbatch().shuffle(int(shuffle_buffer_size)).repeat()
+    dataset = dataset.flatten(num_parallel_calls=8).shuffle(shuffle_buffer_size)
     return dataset
