@@ -42,7 +42,7 @@ OXE_FRANKA_MIX = [
     ("stanford_robocook_converted_externally_to_rlds", 1.0),
     ("iamlab_cmu_pickup_insert_converted_externally_to_rlds", 1.0),
     ("utaustin_mutex", 2.0),
-    ("cmu_playing_with_food", 1.0),
+    #("cmu_playing_with_food", 1.0),
     ("cmu_play_fusion", 4.0),
 ]
 
@@ -185,7 +185,7 @@ def make_oxe_dataset_kwargs_and_weights(
         print("... Done!")
 
     # normalize weights to 1
-    weights = weights / np.sum(weights)
+    weights = list(weights / np.sum(weights))
     return data_kwargs_list, weights
 
 
