@@ -260,6 +260,23 @@ OXE_DATASET_KWARGS = {
         "state_encoding": StateEncoding.POS_QUAT,
         "action_encoding": ActionEncoding.EEF_POS,
     },
+    "furniture_bench_dataset_converted_externally_to_rlds": {
+        "image_obs_keys": [
+            "image",
+            None,
+            "wrist_image",
+        ],
+        "depth_obs_keys": [
+            None,
+            None,
+            None,
+        ],
+        "state_obs_keys": [
+            "state",
+        ],
+        "state_encoding": StateEncoding.POS_QUAT,
+        "action_encoding": ActionEncoding.EEF_POS,
+    },
     "cmu_franka_exploration_dataset_converted_externally_to_rlds": {
         "image_obs_keys": [
             "highres_image",
@@ -624,6 +641,21 @@ OXE_DATASET_KWARGS = {
         "depth_obs_keys": [None, None, None],
         "state_obs_keys": ["joint_state", None, "gripper_state"],
         "state_encoding": StateEncoding.JOINT,
+        "action_encoding": ActionEncoding.EEF_POS,
+    },
+    "cmu_playing_with_food": {
+        "image_obs_keys": [
+            "image",
+            None,
+            "finger_vision_1",
+        ],
+        "depth_obs_keys": [None, None, None],
+        "state_obs_keys": [
+            "state",
+            None,
+            None,
+        ],
+        "state_encoding": StateEncoding.POS_EULER,
         "action_encoding": ActionEncoding.EEF_POS,
     },
     "cmu_play_fusion": {

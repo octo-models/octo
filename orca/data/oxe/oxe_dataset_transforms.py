@@ -12,6 +12,7 @@ step = {
 }
 """
 
+import math
 from typing import Any, Dict
 
 import tensorflow as tf
@@ -274,7 +275,9 @@ def stanford_hydra_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, An
     ]
     # flip BGR channels to RGB
     trajectory["observation"]["image"] = trajectory["observation"]["image"][..., ::-1]
-    trajectory["observation"]["wrist_image"] = trajectory["observation"]["wrist_image"][..., ::-1]
+    trajectory["observation"]["wrist_image"] = trajectory["observation"]["wrist_image"][
+        ..., ::-1
+    ]
     return trajectory
 
 
@@ -299,6 +302,27 @@ def maniskill_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
     trajectory["observation"]["gripper_state"] = trajectory["observation"]["state"][
         ..., 7:8
     ]
+    return trajectory
+
+
+def furniture_bench_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
+    import tensorflow_graphics.geometry.transformation as tft
+
+    trajectory["observation"]["state"] = tf.concat(
+        (
+            trajectory["observation"]["state"][:, :7],
+            trajectory["observation"]["state"][:, -1:],
+        ),
+        axis=-1,
+    )
+    trajectory["action"] = tf.concat(
+        (
+            trajectory["action"][:, :3],
+            tft.euler.from_quaternion(trajectory["action"][:, 3:7]),
+            trajectory["action"][:, -1:],
+        ),
+        axis=-1,
+    )
     return trajectory
 
 
@@ -533,7 +557,9 @@ def utaustin_mutex_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, An
     trajectory["observation"]["state"] = trajectory["observation"]["state"][:, :8]
     # flip BGR channels back to RGB
     trajectory["observation"]["image"] = trajectory["observation"]["image"][..., ::-1]
-    trajectory["observation"]["wrist_image"] = trajectory["observation"]["wrist_image"][..., ::-1]
+    trajectory["observation"]["wrist_image"] = trajectory["observation"]["wrist_image"][
+        ..., ::-1
+    ]
     return trajectory
 
 
@@ -546,6 +572,22 @@ def berkeley_fanuc_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, An
         (
             trajectory["action"],
             tf.zeros_like(trajectory["action"][:, :1]),
+        ),
+        axis=-1,
+    )
+    return trajectory
+
+
+def cmu_playing_with_food_dataset_transform(
+    trajectory: Dict[str, Any]
+) -> Dict[str, Any]:
+    import tensorflow_graphics.geometry.transformation as tft
+
+    trajectory["action"] = tf.concat(
+        (
+            trajectory["action"][:, :3],
+            tft.euler.from_quaternion(trajectory["action"][:, 3:7]),
+            trajectory["action"][:, -1:],
         ),
         axis=-1,
     )
