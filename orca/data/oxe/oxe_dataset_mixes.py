@@ -183,7 +183,7 @@ def make_oxe_dataset_kwargs_and_weights(
         print("... Done!")
 
     # normalize weights to 1
-    weights = list(np.array(weights) / sum(weights))
+    weights = weights / np.sum(weights)
     return data_kwargs_list, weights
 
 
