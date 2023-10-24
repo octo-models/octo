@@ -82,7 +82,7 @@ def get_config(config_string):
     dataset_kwargs_list, dataset_sampling_weights = (
         make_oxe_dataset_kwargs_and_weights(
             RT_X_MIX + OXE_FRANKA_MIX,
-            data_dir='gs://rail-orca-central2',
+            data_dir='gs://rail-orca-central2/resize_336_336',
             n_third_person_cameras=1,
             n_wrist_cameras=1,
             load_depth=False,
