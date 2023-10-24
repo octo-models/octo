@@ -11,7 +11,7 @@ from orca.utils.typing import ActionEncoding
 
 RT_X_MIX = [
     ("fractal20220817_data", 1.0),
-    ('kuka', 0.1),
+    ("kuka", 0.1),
     ("bridge_dataset", 1.0),
     ("taco_play", 2.0),
     ("jaco_play", 4.0),
@@ -25,15 +25,15 @@ RT_X_MIX = [
 
 
 OXE_FRANKA_MIX = [
-    #("taco_play", 1.0),
-    #("berkeley_cable_routing", 1.0),
-    #("viola", 1.0),
-    #("toto", 1.0),
+    ("taco_play", 1.0),
+    ("berkeley_cable_routing", 1.0),
+    ("viola", 1.0),
+    ("toto", 1.0),
     ("stanford_hydra_dataset_converted_externally_to_rlds", 5.0),
     ("austin_buds_dataset_converted_externally_to_rlds", 5.0),
     ("nyu_franka_play_dataset_converted_externally_to_rlds", 10.0),
     ("maniskill_dataset_converted_externally_to_rlds", 0.2),
-    #("furniture_bench_dataset_converted_externally_to_rlds", 1.0),
+    # ("furniture_bench_dataset_converted_externally_to_rlds", 1.0),
     ("cmu_franka_exploration_dataset_converted_externally_to_rlds", 5.0),
     ("austin_sailor_dataset_converted_externally_to_rlds", 5.0),
     ("austin_sirius_dataset_converted_externally_to_rlds", 5.0),
@@ -42,7 +42,7 @@ OXE_FRANKA_MIX = [
     ("stanford_robocook_converted_externally_to_rlds", 1.0),
     ("iamlab_cmu_pickup_insert_converted_externally_to_rlds", 1.0),
     ("utaustin_mutex", 2.0),
-    #("cmu_food_manipulation", 1.0),
+    # ("cmu_food_manipulation", 1.0),
     ("cmu_play_fusion", 4.0),
 ]
 
@@ -104,8 +104,10 @@ OXE_FULL_MIX = [
 def make_oxe_dataset_kwargs_and_weights(
     data_mix: List[Tuple[str, float]],
     data_dir: str,
+    deduplicate: bool = True,
     balance_sampling_ratios: bool = True,
-    n_cameras: int = 3,
+    n_third_person_cameras: int = 1,
+    n_wrist_cameras: int = 0,
     load_depth: bool = True,
     load_proprio: bool = True,
 ) -> Tuple[Dict[str, Any], List[float]]:
@@ -115,14 +117,26 @@ def make_oxe_dataset_kwargs_and_weights(
     Args:
          data_mix: List of (dataset name, sampling weight) tuples.
          data_dir: Base data directory that gets registered in each dataset.
+         deduplicate: If True, discards any duplicate dataset entries based on dataset name.
          balance_sampling_ratios: If True, multiplies sampling weights by weights that compensate for the number
             of episodes in each dataset.
-         n_cameras: Number of RGB input channels to load.
+         n_third_person_cameras: Number of RGB third person camera input streams to load.
+         n_wrist_cameras: Number of RGB wrist camera input streams to load.
          load_depth: If True, loads corresponding depth channels for each RGB channel.
          load_proprio: If True, loads proprioceptive information.
     Returns:
         Tuple of (dataset_kwargs_list, sampling weights).
     """
+    if deduplicate:
+        filtered_datasets, included_dataset_names = [], []
+        for dataset, weight in data_mix:
+            if dataset not in included_dataset_names:
+                filtered_datasets.append((dataset, weight))
+                included_dataset_names.append(dataset)
+            else:
+                print(f"Skipping duplicate: {(dataset, weight)}.")
+        data_mix = filtered_datasets
+
     data_kwargs_list, weights = [], []
     for dataset, weight in data_mix:
         dataset_kwargs = copy.deepcopy(oxe_dataset_configs.OXE_DATASET_KWARGS[dataset])
@@ -134,8 +148,14 @@ def make_oxe_dataset_kwargs_and_weights(
             continue
 
         # adjust loaded features in kwargs
-        dataset_kwargs["image_obs_keys"] = dataset_kwargs["image_obs_keys"][:n_cameras] + dataset_kwargs["image_obs_keys"][-1:]
-        dataset_kwargs["depth_obs_keys"] = dataset_kwargs["depth_obs_keys"][:n_cameras]
+        dataset_kwargs["image_obs_keys"] = (
+            dataset_kwargs["image_obs_keys"][:n_third_person_cameras]
+            + dataset_kwargs["image_obs_keys"][-n_wrist_cameras:]
+        )
+        dataset_kwargs["depth_obs_keys"] = (
+            dataset_kwargs["depth_obs_keys"][:n_third_person_cameras]
+            + dataset_kwargs["depth_obs_keys"][-n_wrist_cameras:]
+        )
         if not load_depth:
             dataset_kwargs.pop("depth_obs_keys")
         if not load_proprio:
@@ -162,6 +182,8 @@ def make_oxe_dataset_kwargs_and_weights(
         )
         print("... Done!")
 
+    # normalize weights to 1
+    weights = list(np.array(weights) / sum(weights))
     return data_kwargs_list, weights
 
 

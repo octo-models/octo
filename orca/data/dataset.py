@@ -152,8 +152,7 @@ def apply_common_transforms(
     window_size: int = 1,
     resize_size: Optional[Tuple[int, int]] = None,
     skip_unlabeled: bool = False,
-    action_proprio_normalization_type: Optional[str] = None,
-    ram_budget: Optional[int] = None,
+    **unused_kwargs,
 ):
     """Common transforms shared between all datasets.
 
@@ -325,7 +324,9 @@ def make_dataset(
                     if resize_size
                     else traj["observation"]["image_0"].shape
                 )
-                traj["observation"][f"image_{i}"] = tf.io.encode_png(tf.zeros(pad_shape, dtype=tf.uint8))
+                traj["observation"][f"image_{i}"] = tf.io.encode_png(
+                    tf.zeros(pad_shape, dtype=tf.uint8)
+                )
             else:
                 traj["observation"][f"image_{i}"] = orig_obs[key]
         for i, key in enumerate(depth_obs_keys):
@@ -399,7 +400,7 @@ def make_interleaved_dataset(
     dataset_kwargs_list: List[dict],
     train: bool,
     sample_weights: Optional[List[float]] = None,
-    shuffle_buffer_size: int = 1000,
+    shuffle_buffer_size: int = 10000,
 ):
     """Creates an interleaved dataset from list of dataset kwargs.
 
@@ -408,7 +409,7 @@ def make_interleaved_dataset(
         dataset_kwargs_list: list of kwargs, each element is passed to 'make_dataset' for individual datasets.
         train: whether this is a training or validation dataset.
         sample_weights: sampling weights for each dataset in list, values need to be >= 1.
-        shuffle_buffer_size: base size of the dataset shuffle buffer for each dataset.
+        shuffle_buffer_size: size of the dataset shuffle buffer for interleaved dataset.
     """
     # update dataset kwargs & create datasets
     if not sample_weights:
@@ -420,18 +421,14 @@ def make_interleaved_dataset(
     for i, data_kwargs in enumerate(tqdm.tqdm(dataset_kwargs_list)):
         data_kwargs.update(**common_dataset_args)
         datasets.append(
-            make_dataset(**data_kwargs, train=train, apply_transforms=False)
-            # .unbatch()
-            # .shuffle(int(shuffle_buffer_size))
-            .repeat()
+            make_dataset(**data_kwargs, train=train, apply_transforms=False).repeat()
         )
 
     # interleave datasets with sampling weights
     dataset = dl.DLataset.sample_from_datasets(datasets, sample_weights)
-    #import copy
-    #filtered_common_args = copy.deepcopy(common_dataset_args)
-    #filtered_common_args.pop('action_proprio_normalization_type')
 
+    # apply common transforms like augmentation, chunking etc on interleaved episode dataset
+    # first interleaving episodes and then applying transforms is more memory efficient
     dataset = apply_common_transforms(
         dataset,
         train=train,

@@ -82,7 +82,8 @@ def get_config(config_string):
         make_oxe_dataset_kwargs_and_weights(
             RT_X_MIX,
             data_dir='gs://rail-orca-central1',
-            n_cameras=1,
+            n_third_person_cameras=1,
+            n_wrist_cameras=1,
             load_depth=False,
         )
     )
@@ -106,7 +107,7 @@ def get_config(config_string):
                     "common_kwargs": update_config(
                         base_data_config,
                         resize_size=(256, 256),
-                        ram_budget=3,       # limit RAM per dataset
+                        # ram_budget=3,       # limit RAM per dataset
                     ),
                     "data_kwargs_list": dataset_kwargs_list,
                     "sample_weights": dataset_sampling_weights,
