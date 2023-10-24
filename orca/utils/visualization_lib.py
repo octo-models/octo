@@ -287,7 +287,9 @@ def plot_trajectory_actions(
     pred_actions, actions, proprio = unnorm_pred_actions, unnorm_actions, unnorm_proprio
 
     # TODO: make this less hardcoded
-    proprio = np.concatenate([proprio[..., 1:7], proprio[..., -1:]], axis=-1)   # extract proprio  
+    proprio = np.concatenate(
+        [proprio[..., 1:7], proprio[..., -1:]], axis=-1
+    )  # extract proprio
 
     fig = go.Figure()
     fig.add_trace(

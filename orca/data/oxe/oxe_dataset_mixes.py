@@ -42,7 +42,7 @@ OXE_FRANKA_MIX = [
     ("stanford_robocook_converted_externally_to_rlds", 1.0),
     ("iamlab_cmu_pickup_insert_converted_externally_to_rlds", 1.0),
     ("utaustin_mutex", 2.0),
-    #("cmu_playing_with_food", 1.0),
+    # ("cmu_playing_with_food", 1.0),
     ("cmu_play_fusion", 4.0),
 ]
 
