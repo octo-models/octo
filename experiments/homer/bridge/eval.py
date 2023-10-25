@@ -1,35 +1,29 @@
 #!/usr/bin/env python3
 
-import sys
+import json
 import os
+import sys
 import time
-from datetime import datetime
 import traceback
 from collections import deque
-import json
-
-from absl import app, flags, logging
-
-import numpy as np
-import tensorflow as tf
-from pyquaternion import Quaternion
-
-import jax
-import jax.numpy as jnp
-from PIL import Image
-import imageio
+from datetime import datetime
 from functools import partial
 
-from flax.training import checkpoints
-from orca.model import create_model_def
-from orca.utils.train_utils import create_train_state
-from orca.data.utils.text_processing import text_processors
-import optax
 import cv2
+import flax
+import imageio
+import jax
+import jax.numpy as jnp
+import numpy as np
+import optax
+import tensorflow as tf
+from absl import app, flags, logging
+from experiments.homer.bridge.pretrained_utils import PretrainedModelWrapper
+from PIL import Image
+from pyquaternion import Quaternion
 
 # bridge_data_robot imports
 from widowx_envs.widowx_env_service import WidowXClient, WidowXStatus
-
 
 np.set_printoptions(suppress=True)
 
@@ -45,6 +39,12 @@ flags.DEFINE_multi_string(
 )
 flags.DEFINE_multi_string(
     "checkpoint_metadata_path", None, "Path to checkpoint metadata JSON", required=True
+)
+flags.DEFINE_multi_string(
+    "checkpoint_example_batch_path",
+    None,
+    "Path to checkpoint metadata JSON",
+    required=True,
 )
 flags.DEFINE_integer("im_size", None, "Image size", required=True)
 flags.DEFINE_string("video_save_path", None, "Path to save video")
@@ -145,113 +145,57 @@ def convert_obs(obs):
 
 @partial(jax.jit, static_argnames="argmax")
 def sample_actions(
-    observations, tasks, state, mean, std, rng, argmax=False, temperature=1.0
+    pretrained_model: PretrainedModelWrapper,
+    observations,
+    tasks,
+    mean,
+    std,
+    rng,
+    argmax=False,
+    temperature=1.0,
 ):
-    # add batch dim
+    # add batch dim to observations
     observations = jax.tree_map(lambda x: x[None], observations)
-    tasks = jax.tree_map(lambda x: x[None], tasks)
-    actions = state.apply_fn(
-        {"params": state.params},
+    # tasks = jax.tree_map(lambda x: x[None], tasks)
+    logging.warning(
+        "observations: %s", flax.core.pretty_repr(jax.tree_map(jnp.shape, observations))
+    )
+    logging.warning("tasks: %s", flax.core.pretty_repr(jax.tree_map(jnp.shape, tasks)))
+    actions = pretrained_model.sample_actions(
         observations,
         tasks,
+        seed=rng,
         train=False,
         argmax=argmax,
-        rng=rng,
         temperature=temperature,
-        method="predict_action",
     )
     # remove batch dim
     return actions[0] * std + mean
 
 
-def load_checkpoint(weights_path, config_path, metadata_path):
-    with open(config_path, "r") as f:
-        config = json.load(f)
-
-    window_size = config["dataset_kwargs"]["common_kwargs"]["window_size"]
-    horizon = window_size - config["model"]["policy_kwargs"]["pred_horizon"] + 1
-
-    example_actions = jnp.zeros((1, window_size, 7), dtype=np.float32)
-    example_obs = {
-        "image_0": jnp.zeros(
-            (1, window_size, FLAGS.im_size, FLAGS.im_size, 3), dtype=np.uint8
-        ),
-        "pad_mask": jnp.ones((1, window_size)),
-    }
-
-    if config["text_processor"] is None:
-        text_processor = None
-        language_embed = None
-    else:
-        text_processor = text_processors[config["text_processor"]](
-            **config["text_processor_kwargs"]
-        )
-        language_embed = text_processor.encode([[""]])
-
-    example_batch = {
-        "observations": example_obs,
-        "tasks": {
-            "image_0": jnp.zeros((1, FLAGS.im_size, FLAGS.im_size, 3), dtype=np.uint8),
-            "language_instruction": language_embed,
-        },
-        "actions": example_actions,
-    }
-
-    # create train_state
-    rng = jax.random.PRNGKey(0)
-    rng, construct_rng = jax.random.split(rng)
-
-    model_def = create_model_def(
-        action_dim=example_batch["actions"].shape[-1],
-        window_size=example_batch["observations"]["image_0"].shape[1],
-        **config["model"],
+def load_checkpoint(weights_path, config_path, metadata_path, example_batch_path):
+    model = PretrainedModelWrapper.load_pretrained(
+        weights_path, config_path, example_batch_path
     )
-
-    lr_schedule = optax.warmup_cosine_decay_schedule(
-        init_value=0.0,
-        peak_value=config["optimizer"]["learning_rate"],
-        warmup_steps=config["optimizer"]["warmup_steps"],
-        decay_steps=config["optimizer"]["decay_steps"],
-        end_value=0.0,
-    )
-
-    tx = optax.adam(lr_schedule)
-    train_state = create_train_state(
-        construct_rng,
-        model_def,
-        tx,
-        init_args=(
-            example_batch["observations"],
-            example_batch["tasks"],
-            example_batch["actions"],
-        ),
-    )
-
-    # hydrate train_state with parameters from checkpoint
-    train_state = checkpoints.restore_checkpoint(weights_path, train_state)
 
     with open(metadata_path, "r") as f:
         action_proprio_metadata = json.load(f)
     action_mean = jnp.array(action_proprio_metadata["action"]["mean"])
     action_std = jnp.array(action_proprio_metadata["action"]["std"])
 
-    rng, policy_rng = jax.random.split(rng)
-
     policy_fn = stack_and_pad_obs(
         supply_rng(
             partial(
                 sample_actions,
-                state=train_state,
+                model,
                 argmax=FLAGS.deterministic,
                 mean=action_mean,
                 std=action_std,
             ),
-            rng=policy_rng,
         ),
-        horizon=horizon,
+        horizon=model.config["dataset_kwargs"]["common_kwargs"]["window_size"],
     )
-
-    return policy_fn, text_processor
+    return (policy_fn, model)
 
 
 def wait_for_obs(widowx_client):
@@ -268,6 +212,7 @@ def main(_):
         len(FLAGS.checkpoint_weights_path)
         == len(FLAGS.checkpoint_config_path)
         == len(FLAGS.checkpoint_metadata_path)
+        == len(FLAGS.checkpoint_example_batch_path)
     )
 
     # policies is a dict from run_name to policy function
@@ -276,16 +221,21 @@ def main(_):
         checkpoint_weights_path,
         checkpoint_config_path,
         checkpoint_metadata_path,
+        checkpoint_example_batch_path,
     ) in zip(
         FLAGS.checkpoint_weights_path,
         FLAGS.checkpoint_config_path,
         FLAGS.checkpoint_metadata_path,
+        FLAGS.checkpoint_example_batch_path,
     ):
         assert tf.io.gfile.exists(checkpoint_weights_path), checkpoint_weights_path
         checkpoint_num = int(checkpoint_weights_path.split("_")[-1])
         run_name = checkpoint_config_path.split("/")[-1]
         policies[f"{run_name}-{checkpoint_num}"] = load_checkpoint(
-            checkpoint_weights_path, checkpoint_config_path, checkpoint_metadata_path
+            checkpoint_weights_path,
+            checkpoint_config_path,
+            checkpoint_metadata_path,
+            checkpoint_example_batch_path,
         )
 
     if FLAGS.initial_eep is not None:
@@ -312,10 +262,6 @@ def main(_):
     widowx_client = WidowXClient(FLAGS.ip, FLAGS.port)
     widowx_client.init(env_params, image_size=FLAGS.im_size)
 
-    task = {
-        "image_0": jnp.zeros((FLAGS.im_size, FLAGS.im_size, 3), dtype=np.uint8),
-    }
-
     # goal sampling loop
     while True:
         # ask for which policy to use
@@ -329,7 +275,8 @@ def main(_):
             policy_idx = int(input("select policy: "))
 
         policy_name = list(policies.keys())[policy_idx]
-        policy_fn, text_processor = policies[policy_name]
+        policy_fn, model = policies[policy_name]
+        model: PretrainedModelWrapper  # type hinting
 
         modality = input("Language or goal image? [l/g]")
         if modality == "g":
@@ -350,12 +297,8 @@ def main(_):
 
                 input("Press [Enter] when ready for taking the goal image. ")
                 obs = wait_for_obs(widowx_client)
-                task = convert_obs(obs)
-
-                # create a dummy language input if this model also expects language
-                if text_processor is not None:
-                    task["language_instruction"] = text_processor.encode("")
-
+                goals = jax.tree_map(lambda x: x[None], convert_obs(obs))
+                task = model.create_tasks(goals=goals)
         else:
             # ask for new instruction
             if "language_instruction" not in task or ["language_instruction"] is None:
@@ -363,9 +306,8 @@ def main(_):
             else:
                 ch = input("New instruction? [y/n]")
             if ch == "y":
-                task["language_instruction"] = text_processor.encode(
-                    input("Instruction?")
-                )
+                text = input("Instruction?")
+                task = model.create_tasks(text=[text])
 
         # reset env
         widowx_client.reset()
