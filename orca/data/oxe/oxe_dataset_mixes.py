@@ -150,13 +150,19 @@ def make_oxe_dataset_kwargs_and_weights(
             continue
 
         # adjust loaded features in kwargs
-        dataset_kwargs["image_obs_keys"] = (
-            dataset_kwargs["image_obs_keys"][:n_third_person_cameras]
-            + dataset_kwargs["image_obs_keys"][-n_wrist_cameras:]
+        dataset_kwargs["image_obs_keys"] = dataset_kwargs["image_obs_keys"][
+            :n_third_person_cameras
+        ] + (
+            dataset_kwargs["image_obs_keys"][-n_wrist_cameras:]
+            if n_wrist_cameras
+            else []
         )
-        dataset_kwargs["depth_obs_keys"] = (
-            dataset_kwargs["depth_obs_keys"][:n_third_person_cameras]
-            + dataset_kwargs["depth_obs_keys"][-n_wrist_cameras:]
+        dataset_kwargs["depth_obs_keys"] = dataset_kwargs["depth_obs_keys"][
+            :n_third_person_cameras
+        ] + (
+            dataset_kwargs["depth_obs_keys"][-n_wrist_cameras:]
+            if n_wrist_cameras
+            else []
         )
         if not load_depth:
             dataset_kwargs.pop("depth_obs_keys")
