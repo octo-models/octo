@@ -214,8 +214,9 @@ def main(_):
         init_args=(
             example_batch["observation"],
             example_batch["tasks"],
+            example_batch["observation"]["pad_mask"],
         ),
-        init_kwargs=dict(verbose=True),
+        init_kwargs=dict(train=False, verbose=True),
         pretrained_loaders=pretrained_loaders,
     )
     if FLAGS.config.resume_path is not None:
