@@ -6,6 +6,7 @@ import os
 import os.path as osp
 
 from absl import app, flags, logging
+import flax
 from flax.training import checkpoints
 from flax.traverse_util import flatten_dict
 import jax
@@ -219,6 +220,21 @@ def main(_):
         init_kwargs=dict(train=False, verbose=True),
         pretrained_loaders=pretrained_loaders,
     )
+
+    if save_dir is not None:
+        # Saving example batch for future checkpoint loading
+        with tf.io.gfile.GFile(
+            os.path.join(save_dir, "example_batch.msgpack"), "wb"
+        ) as f:
+            f.write(flax.serialization.msgpack_serialize(example_batch))
+
+        example_batch_spec = jax.tree_map(
+            lambda arr: (arr.shape, str(arr.dtype)), example_batch
+        )
+        wandb.config.update(
+            dict(example_batch_spec=example_batch_spec), allow_val_change=True
+        )
+
     if FLAGS.config.resume_path is not None:
         train_state = checkpoints.restore_checkpoint(
             FLAGS.config.resume_path, target=train_state
