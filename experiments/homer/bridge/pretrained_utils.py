@@ -70,7 +70,7 @@ class PretrainedModelWrapper:
         return self.orca_transformer(observations, tasks, pad_mask, train=train)
 
     def sample_actions(
-        self, observations, tasks, pad_mask=None, *, seed, sample_shape=(), **kwargs
+        self, observations, tasks, pad_mask=None, **kwargs
     ):
         """
         Args:
@@ -87,8 +87,6 @@ class PretrainedModelWrapper:
         )
         return self.heads["action"].predict_action(
             transformer_embeddings,
-            seed=seed,
-            sample_shape=sample_shape,
             train=False,
             **kwargs,
         )

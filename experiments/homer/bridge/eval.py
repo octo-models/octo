@@ -18,7 +18,7 @@ import numpy as np
 import optax
 import tensorflow as tf
 from absl import app, flags, logging
-from experiments.homer.bridge.pretrained_utils import PretrainedModelWrapper
+from pretrained_utils import PretrainedModelWrapper
 from PIL import Image
 from pyquaternion import Quaternion
 
@@ -165,7 +165,7 @@ def sample_actions(
     actions = pretrained_model.sample_actions(
         observations,
         tasks,
-        seed=rng,
+        rng=rng,
         argmax=argmax,
         temperature=temperature,
     )
@@ -261,6 +261,10 @@ def main(_):
 
     widowx_client = WidowXClient(FLAGS.ip, FLAGS.port)
     widowx_client.init(env_params, image_size=FLAGS.im_size)
+
+    task = {
+        "image_0": jnp.zeros((FLAGS.im_size, FLAGS.im_size, 3), dtype=np.uint8),
+    }
 
     # goal sampling loop
     while True:
