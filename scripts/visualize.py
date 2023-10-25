@@ -30,7 +30,11 @@ from orca.data.utils.text_processing import text_processors
 from orca.model import create_model_def
 from orca.model.components.hf_weight_loaders import weights_loaders
 from orca.utils.jax_utils import initialize_compilation_cache
-from orca.utils.train_utils import batched_apply, create_train_state
+from orca.utils.train_utils import (
+    batched_apply,
+    create_train_state,
+    filter_eval_datasets,
+)
 from orca.utils.visualization_lib import Visualizer
 
 FLAGS = flags.FLAGS
@@ -106,7 +110,12 @@ def main(_):
 
     val_datas = []
     visualizers = []
-    for dataset_kwargs in FLAGS.config.dataset_kwargs["data_kwargs_list"]:
+    val_datasets_kwargs, _ = filter_eval_datasets(
+        FLAGS.config.dataset_kwargs["data_kwargs_list"],
+        [1.0] * len(FLAGS.config.dataset_kwargs["data_kwargs_list"]),
+        FLAGS.config.eval_datasets,
+    )
+    for dataset_kwargs in val_datasets_kwargs:
         val_data_kwargs = copy.deepcopy(dataset_kwargs)
         val_data_kwargs.update(**FLAGS.config.dataset_kwargs["common_kwargs"])
         val_dataset = make_dataset(**val_data_kwargs, train=False)
