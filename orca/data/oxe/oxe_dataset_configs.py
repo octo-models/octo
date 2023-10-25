@@ -14,7 +14,7 @@ Target configuration:
     state_encoding: Type of state encoding used -- see above
     action_encoding: Type of action encoding used, e.g. EEF position vs joint position control
 """
-from orca.utils.typing import ActionEncoding, StateEncoding
+from orca.data.utils.data_utils import ActionEncoding, StateEncoding
 
 OXE_DATASET_KWARGS = {
     "fractal20220817_data": {

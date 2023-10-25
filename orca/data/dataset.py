@@ -1,8 +1,5 @@
 from collections import defaultdict
 from functools import partial
-import hashlib
-import inspect
-import json
 import logging
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
@@ -10,109 +7,18 @@ import dlimp as dl
 import numpy as np
 import tensorflow as tf
 import tensorflow_datasets as tfds
-from tensorflow_datasets.core.dataset_builder import DatasetBuilder
 import tqdm
 
 from orca.data.dataset_transforms import RLDS_TRAJECTORY_MAP_TRANSFORMS
 from orca.data.utils import bc_goal_relabeling, task_augmentation
-from orca.data.utils.data_utils import maybe_decode_depth_images, pprint_data_mixture
-from orca.utils.typing import (
+from orca.data.utils.data_utils import (
     ActionEncoding,
-    ActionEncodingType,
+    get_action_proprio_stats,
+    maybe_decode_depth_images,
+    normalize_action_and_proprio,
+    pprint_data_mixture,
     StateEncoding,
-    StateEncodingType,
 )
-
-
-def get_action_proprio_stats(
-    builder: DatasetBuilder,
-    dataset: tf.data.Dataset,
-    proprio_keys: List[str],
-    transform_fcn: Any,
-) -> Dict[str, Dict[str, List[float]]]:
-    # get statistics file path --> embed unique hash that catches if dataset info / keys / transform changed
-    transform_str = inspect.getsource(transform_fcn) if transform_fcn else ""
-    data_info_hash = hashlib.sha256(
-        (str(builder.info) + str(proprio_keys) + str(transform_str)).encode("utf-8")
-    ).hexdigest()
-    path = tf.io.gfile.join(
-        builder.info.data_dir, f"action_proprio_stats_{data_info_hash}.json"
-    )
-
-    # check if stats already exist and load, otherwise compute
-    if tf.io.gfile.exists(path):
-        logging.info(f"Loading existing statistics for normalization from {path}.")
-        with tf.io.gfile.GFile(path, "r") as f:
-            metadata = json.load(f)
-    else:
-        logging.info("Computing action/proprio statistics for normalization...")
-        actions = []
-        proprios = []
-        for episode in tqdm.tqdm(dataset.take(1000)):
-            actions.append(episode["action"].numpy())
-            proprios.append(episode["observation"]["proprio"].numpy())
-        actions = np.concatenate(actions)
-        proprios = np.concatenate(proprios)
-        metadata = {
-            "action": {
-                "mean": [float(e) for e in actions.mean(0)],
-                "std": [float(e) for e in actions.std(0)],
-                "max": [float(e) for e in actions.max(0)],
-                "min": [float(e) for e in actions.min(0)],
-            },
-            "proprio": {
-                "mean": [float(e) for e in proprios.mean(0)],
-                "std": [float(e) for e in proprios.std(0)],
-                "max": [float(e) for e in proprios.max(0)],
-                "min": [float(e) for e in proprios.min(0)],
-            },
-        }
-        del actions
-        del proprios
-        with tf.io.gfile.GFile(path, "w") as f:
-            json.dump(metadata, f)
-        logging.info("Done!")
-
-    return {
-        k: {k2: tf.convert_to_tensor(v2, dtype=tf.float32) for k2, v2 in v.items()}
-        for k, v in metadata.items()
-    }
-
-
-def _normalize_action_and_proprio(traj, metadata, normalization_type):
-    # maps keys of `metadata` to corresponding keys in `traj`
-    keys_to_normalize = {
-        "action": "action",
-        "proprio": "observation/proprio",
-    }
-    if normalization_type == "normal":
-        # normalize to mean 0, std 1
-        for key, traj_key in keys_to_normalize.items():
-            traj = dl.transforms.selective_tree_map(
-                traj,
-                match=traj_key,
-                map_fn=lambda x: (x - metadata[key]["mean"]) / metadata[key]["std"],
-            )
-        return traj
-
-    if normalization_type == "bounds":
-        # normalize to [-1, 1]
-        for key, traj_key in keys_to_normalize.items():
-            traj = dl.transforms.selective_tree_map(
-                traj,
-                match=traj_key,
-                map_fn=lambda x: tf.clip_by_value(
-                    2
-                    * (x - metadata[key]["min"])
-                    / (metadata[key]["max"] - metadata[key]["min"])
-                    - 1,
-                    -1,
-                    1,
-                ),
-            )
-        return traj
-
-    raise ValueError(f"Unknown normalization type {normalization_type}")
 
 
 def _chunk_act_obs(traj, window_size):
@@ -231,8 +137,8 @@ def make_dataset(
     state_obs_keys: Union[str, List[str]] = [],
     action_proprio_metadata: Optional[dict] = None,
     resize_size: Optional[Tuple[int, int]] = None,
-    state_encoding: Optional[StateEncodingType] = None,
-    action_encoding: Optional[ActionEncodingType] = None,
+    state_encoding: Optional[StateEncoding] = None,
+    action_encoding: Optional[ActionEncoding] = None,
     ram_budget: Optional[int] = None,
     action_proprio_normalization_type: Optional[str] = None,
     apply_transforms: bool = True,
@@ -254,11 +160,12 @@ def make_dataset(
         action_proprio_metadata (dict, optional): dict with min/max/mean/std for action and proprio normalization.
             If not provided, will get computed on the fly.
         resize_size (tuple, optional): target (height, width) for all RGB and depth images, default to no resize.
-        state_encoding (StateEncodingType, optional): type of state encoding used, e.g. joint angles vs EEF pose.
-        action_encoding (ActionEncodingType, optional): type of action encoding used, e.g. joint delta vs EEF delta.
+        state_encoding (StateEncoding, optional): type of state encoding used, e.g. joint angles vs EEF pose.
+        action_encoding (ActionEncoding, optional): type of action encoding used, e.g. joint delta vs EEF delta.
         ram_budget (int, optional): limits the RAM used by tf.data.AUTOTUNE, unit: GB, forwarded to AutotuneOptions.
         action_proprio_normalization_type (Optional[str], optional): The type of normalization to perform on the action,
             proprio, or both. Can be "normal" (mean 0, std 1) or "bounds" (normalized to [-1, 1]).
+        apply_transforms (bool): If True, applies common transforms like augmentations and chunking to episode dataset.
         **kwargs: Additional keyword arguments to pass to `apply_common_transforms`.
     Returns:
         Dataset of trajectories where each step has the following fields:
@@ -373,7 +280,7 @@ def make_dataset(
         )
         dataset = dataset.map(
             partial(
-                _normalize_action_and_proprio,
+                normalize_action_and_proprio,
                 metadata=action_proprio_metadata,
                 normalization_type=action_proprio_normalization_type,
             )
@@ -403,6 +310,7 @@ def make_interleaved_dataset(
     Args:
         common_dataset_args: shared arguments that get copied into every dataset (image size, shuffling etc)
         dataset_kwargs_list: list of kwargs, each element is passed to 'make_dataset' for individual datasets.
+            Will get merged with and overwritten by common_dataset_args.
         train: whether this is a training or validation dataset.
         sample_weights: sampling weights for each dataset in list, values need to be >= 1.
         shuffle_buffer_size: size of the dataset shuffle buffer for interleaved dataset.
@@ -414,7 +322,9 @@ def make_interleaved_dataset(
     pprint_data_mixture(dataset_kwargs_list, sample_weights)
 
     datasets = []
-    for i, data_kwargs in enumerate(tqdm.tqdm(dataset_kwargs_list)):
+    for i, data_kwargs in enumerate(
+        tqdm.tqdm(dataset_kwargs_list, description="Generating individual datasets...")
+    ):
         data_kwargs.update(**common_dataset_args)
         datasets.append(
             make_dataset(**data_kwargs, train=train, apply_transforms=False).repeat()
