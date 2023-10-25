@@ -122,9 +122,9 @@ def main(_):
         FLAGS.checkpoints is None
     ), "Must pass in exactly one of checkpoint or checkpoints"
 
-    if FLAGS.checkpoints_path:
-        list_of_checkpoints = checkpoints._all_checkpoints(FLAGS.checkpoints_path)
-        config_path = tf.io.gfile.join(FLAGS.checkpoints_path, "config.json")
+    if FLAGS.checkpoints:
+        list_of_checkpoints = checkpoints._all_checkpoints(FLAGS.checkpoints)
+        config_path = tf.io.gfile.join(FLAGS.checkpoints, "config.json")
     else:
         list_of_checkpoints = [FLAGS.checkpoint_path]
         config_path = tf.io.gfile.join(FLAGS.checkpoint_path, "..", "config.json")
@@ -137,20 +137,22 @@ def main(_):
 
     def process_text(batch):
         if text_processor is None:
-            batch.pop("language_instruction")
+            batch["tasks"].pop("language_instruction")
         else:
             batch["tasks"]["language_instruction"] = text_processor.encode(
-                [s.decode("utf-8") for s in batch["language_instruction"]]
+                [s.decode("utf-8") for s in batch["tasks"]["language_instruction"]]
             )
-            batch.pop("language_instruction")
         return batch
 
     val_data_iters = [map(process_text, val_data.iterator()) for val_data in val_datas]
     example_batch = next(val_data_iters[0])
 
+    # truncate batch size for faster init
+    example_batch = jax.tree_map(lambda x: x[:1], example_batch)
+
     model_def = create_model_def(
         action_dim=example_batch["action"].shape[-1],
-        horizon=example_batch["observation"]["image_0"].shape[1],
+        window_size=example_batch["observation"]["image_0"].shape[1],
         **old_config.model.to_dict(),
     )
 
