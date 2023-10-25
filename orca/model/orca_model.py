@@ -55,9 +55,9 @@ class OrcaTransformer(nn.Module):
         task_tokenizers (Sequence[nn.Module]): List of flax modules for tokenizing the task.
             The output of each tokenizer is concatenated to form the task token prefix.
         readouts (Dict[str, int]): Dictionary of {readout_name: n_tokens_for_readout}
+        transformer_kwargs (Dict): Dictionary of kwargs to forward to BlockTransformer.
         token_embedding_size (int): Dimension of the token embeddings (default: 512)
         max_horizon (int): Number of timesteps in the trajectory window.
-        transformer_kwargs (Dict): Dictionary of kwargs to forward to BlockTransformer.
     """
 
     observation_tokenizers: Sequence[nn.Module]
@@ -116,7 +116,6 @@ class OrcaTransformer(nn.Module):
 
         all_task_names = [f"task_{i}" for i in range(len(self.task_tokenizers))]
         all_obs_names = [f"obs_{i}" for i in range(len(self.observation_tokenizers))]
-        all_readout_names = [f"readout_{name}" for name in readouts]
 
         task_attention_rules = {
             task_name: AttentionRule.CAUSAL for task_name in all_task_names
@@ -129,7 +128,7 @@ class OrcaTransformer(nn.Module):
         # First, add the task tokens
         for i, tok in enumerate(self.task_tokenizers):
             # Receive inputs from tokenizer and cast to embedding size
-            task_tokens = tok(tasks, train=train)
+            task_tokens = tok(observations, tasks, train=train)
             task_tokens = nn.Dense(self.token_embedding_size)(task_tokens)
 
             # task_tokens shape is (batch, n_tokens, token_embedding_size)
@@ -229,25 +228,8 @@ class OrcaModel(nn.Module):
     orca_transformer: OrcaTransformer
     heads: Dict[str, nn.Module]
 
-    def __call__(self, *args, **kwargs):
-        """See OrcaTransformer.__call__."""
-        return self.orca_transformer(*args, **kwargs)
-
-    def run_head(
-        self,
-        observations,
-        tasks,
-        pad_mask,
-        head_name: str,
-        readout_name: str = None,
-        head_method_name: str = "__call__",
-        train=True,
-        **head_method_kwargs,
-    ):
-        """A convenience utility to run the transformer and a single head after.
-
-        Not recommended if you want to run multiple heads on the transformer or run the transformer without any heads.
-        (See train.py for a better workflow.)
+    def __call__(self, observations, tasks, pad_mask, train=True, verbose=False):
+        """Run transformer and the main method for all heads. Useful for init.
 
         Args:
             observations: A dictionary containing observation data
@@ -255,27 +237,40 @@ class OrcaModel(nn.Module):
             tasks: A dictionary containing task data
                 where each element has shape (batch, *).
             pad_mask: A boolean mask of shape (batch, horizon) where False indicates a padded timestep.
+            train: Run in training mode
+            verbose: If True, prints out the structure of the OrcaTransformer
 
+        Returns:
+            transformer_embeddings: See OrcaTransformer.__call__
+            head_outputs: dictionary of outputs from heads {head_name: output}
+        """
+        transformer_embeddings = self.orca_transformer(
+            observations, tasks, pad_mask, train=train, verbose=verbose
+        )
+        head_outputs = {}
+        for head_name, head in self.heads.items():
+            head_outputs[head_name] = head(transformer_embeddings, train=train)
+        return transformer_embeddings, head_outputs
+
+    def run_transformer(self, *args, **kwargs):
+        """Run transformer and return embeddings. See OrcaTransformer.__call__"""
+        return self.orca_transformer(*args, **kwargs)
+
+    def run_head(
+        self,
+        head_name: str,
+        *args,
+        head_method_name: str = "__call__",
+        **kwargs,
+    ):
+        """A convenience utility to run a method on a single head.
+
+        Args:
             head_name: Name of head to run.
-            readout_name: Which transformer embedding to pass to head. If None, assumes that head can
-                handle a dictionary of embeddings.
             head_method_name: Name of method to run on head. Defaults to "__call__".
             train: Whether model is being trained.
-
-            **head_method_kwargs: Keyword arguments to pass to method.
+            **kwargs: Keyword arguments to pass to method.
         """
-
-        transformer_embeddings = self.orca_transformer(
-            observations, tasks, pad_mask, train=train
-        )
-
-        # Extract relevant embeddings for the head
-        if readout_name is None:
-            embeddings = transformer_embeddings
-        else:
-            embeddings = transformer_embeddings[readout_name]
-
-        # Run the head!
         head = self.heads[head_name]
         method = getattr(head, head_method_name)
-        return method(embeddings, train=train, **head_method_kwargs)
+        return method(*args, **kwargs)
