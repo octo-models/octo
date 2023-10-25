@@ -53,9 +53,10 @@ class PretrainedModelWrapper:
             head_fns[head_name] = HeadWrapper(
                 partial(self.__call__, method="run_head", head_name=head_name)
             )
+        return head_fns
 
     def run_transformer(self, observations, tasks, pad_mask, train=False):
-        """
+        """Runs the transformer, but does shape checking on the inputs.
         Args:
             observations: dictionary of arrays of shape (batch_size, window_size, *)
             tasks: dict of tasks of shape (batch_size, *)
