@@ -258,8 +258,8 @@ class OrcaModel(nn.Module):
 
     def run_head(
         self,
-        head_name: str,
         *args,
+        head_name: str,
         head_method_name: str = "__call__",
         **kwargs,
     ):
