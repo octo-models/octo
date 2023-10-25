@@ -7,7 +7,7 @@ import tensorflow_datasets as tfds
 import tqdm
 
 from orca.data.oxe import oxe_dataset_configs
-from orca.utils.typing import ActionEncoding
+from orca.data.utils.data_utils import ActionEncoding
 
 RT_X_MIX = [
     ("fractal20220817_data", 1.0),
@@ -222,7 +222,7 @@ if __name__ == "__main__":
         data_mix=RT_X_MIX,
         data_dir="gs://rail-orca-central1",
         balance_sampling_ratios=True,
-        n_cameras=1,
+        n_third_person_cameras=1,
         load_depth=False,
     )
     ds = make_interleaved_dataset(
