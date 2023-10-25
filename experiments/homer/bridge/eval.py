@@ -75,6 +75,7 @@ FIXED_STD = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
 
 def stack_and_pad_obs(fn, horizon):
     """
+    TODO: Replace with env wrapper
     This turns a function that takes a fixed length observation history into a function that
     takes just the current observation (or sequence of observations since the last policy call).
     The full observation history is saved inside this function. This function handles stacking
@@ -165,7 +166,6 @@ def sample_actions(
         observations,
         tasks,
         seed=rng,
-        train=False,
         argmax=argmax,
         temperature=temperature,
     )
