@@ -207,16 +207,6 @@ def main(_):
     rng = jax.random.PRNGKey(FLAGS.config.seed)
     rng, construct_rng = jax.random.split(rng)
 
-    def init_fn(model: OrcaModel, observations, tasks):
-        # initialize transformer
-        transformer_embeddings = model.orca_transformer(
-            observations, tasks, observations["pad_mask"], train=False, verbose=True
-        )
-
-        for head_name, head in model.heads.items():
-            # initialize each head (make sure this initializes all head parameters!)
-            head(transformer_embeddings, train=False)
-
     train_state = create_train_state(
         construct_rng,
         model_def,
@@ -225,8 +215,8 @@ def main(_):
             example_batch["observation"],
             example_batch["tasks"],
         ),
+        init_kwargs=dict(verbose=True),
         pretrained_loaders=pretrained_loaders,
-        init_method=init_fn,
     )
     if FLAGS.config.resume_path is not None:
         train_state = checkpoints.restore_checkpoint(
