@@ -27,7 +27,7 @@ import optax
 from r2d2.controllers.oculus_controller import VRPolicy
 from r2d2.robot_env import RobotEnv
 from r2d2.user_interface.data_collector import DataCollecter
-from r2d2.user_interface.gui import RobotGUI
+from r2d2.user_interface.eval_gui import EvalGUI
 
 
 np.set_printoptions(suppress=True)
@@ -36,16 +36,6 @@ logging.set_verbosity(logging.WARNING)
 
 FLAGS = flags.FLAGS
 
-# flags.DEFINE_multi_string(
-#     "checkpoint_weights_path", None, "Path to checkpoint", required=True
-# )
-# flags.DEFINE_multi_string(
-#     "checkpoint_config_path", None, "Path to checkpoint config JSON", required=True
-# )
-# flags.DEFINE_multi_string(
-#     "checkpoint_metadata_path", None, "Path to checkpoint metadata JSON", required=True
-# )
-# flags.DEFINE_integer("im_size", None, "Image size", required=True)
 flags.DEFINE_string("video_save_path", None, "Path to save video")
 flags.DEFINE_integer("num_timesteps", 120, "num timesteps")
 flags.DEFINE_bool("blocking", False, "Use the blocking controller")
@@ -103,6 +93,10 @@ def supply_rng(f, rng=jax.random.PRNGKey(0)):
 def _resize_img(img):
     img = cv2.resize(img[:,:,:3], (320, 180), interpolation=cv2.INTER_AREA)
     return img
+
+
+def _null_goal():
+    return np.zeros((180, 320, 3), dtype=np.uint8)
 
 
 @partial(jax.jit, static_argnames="argmax")
@@ -218,7 +212,7 @@ def load_checkpoint(weights_path, config_path, metadata_path):
 class OrcaPolicy:
     def __init__(self, policy_fn, img_key='16291792_left'):
         self.policy_fn = policy_fn
-        self.task = None
+        self.set_goal(_null_goal())
         self.img_key = img_key
         self._last_time = None
 
@@ -241,32 +235,34 @@ class OrcaPolicy:
 
         return np.clip(action, -1, 1)
 
+    def load_goal_img_dir(self, goal_img_dir):
+        print(f"loaded goal imag dir: {goal_img_dir}")
+        img_path = os.path.join(goal_img_dir, '0.png')
+        goal_img = _resize_img(cv2.imread(img_path))
+        self.set_goal(goal_img)
+
+    def load_lang_conditioning(self, text):
+        return
+
 
 def main(_):
-    checkpoint_weights_path  = '/home/sdasari/orca/checkpoints/orca/orca_r2d2pen_20230928_034831/checkpoint_40000/'
-    checkpoint_config_path   = '/home/sdasari/orca/checkpoints/orca/orca_r2d2pen_20230928_034831/config.json'
-    checkpoint_metadata_path = '/home/sdasari/orca/checkpoints/orca/orca_r2d2pen_20230928_034831/action_proprio_metadata_r2_d2_pen.json'
-    goal_image_path          = '/home/sdasari/orca/checkpoints/orca/orca_r2d2pen_20230928_034831/wrist_goal.png'
+    checkpoint_weights_path  = '/home/sdasari/orca/checkpoints/orca/orca_r2d2_pen_mix_20231011_164455/checkpoint_40000/'
+    checkpoint_config_path   = '/home/sdasari/orca/checkpoints/orca/orca_r2d2_pen_mix_20231011_164455/config.json'
+    checkpoint_metadata_path = '/home/sdasari/orca/checkpoints/orca/orca_r2d2_pen_mix_20231011_164455/action_proprio_metadata_r2_d2_pen_ourlab.json'
 
     policy_fn, _ = load_checkpoint(
             checkpoint_weights_path, checkpoint_config_path, checkpoint_metadata_path
         )
-    goal_img = _resize_img(cv2.imread(goal_image_path))
-    
+
     policy = OrcaPolicy(policy_fn)
-    policy.set_goal(goal_img)
 
     # compile model
     observation = dict(image={policy.img_key: np.ones((180, 320, 3), dtype=np.uint8) * 255},
                        robot_state=dict(joint_positions=[0 for _ in range(7)]))
     policy.forward(observation)
 
-    print('model loaded')
-    env = RobotEnv()
-    controller = VRPolicy()
-
-    data_col = DataCollecter(env = env, controller=controller, policy=policy, save_data=False)
-    RobotGUI(robot=data_col)
+    # start up R2D2 eval gui
+    EvalGUI(policy=policy)
 
 
 if __name__ == "__main__":
