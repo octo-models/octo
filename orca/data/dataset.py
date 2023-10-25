@@ -323,7 +323,7 @@ def make_interleaved_dataset(
 
     datasets = []
     for i, data_kwargs in enumerate(
-        tqdm.tqdm(dataset_kwargs_list, description="Generating individual datasets...")
+        tqdm.tqdm(dataset_kwargs_list, desc="Generating individual datasets...")
     ):
         data_kwargs.update(**common_dataset_args)
         datasets.append(
