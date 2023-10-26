@@ -37,12 +37,9 @@ flags.DEFINE_string(
 flags.DEFINE_integer(
     "eval_every", None, "If not None, skip any steps not divisible by eval_every."
 )
-flags.DEFINE_multi_string(
-    "modes",
-    ["image"],
-    "List of modes to visualize and evaluate.",
+flags.DEFINE_integer(
+    "samples_per_timestep", 8, "Number of action samples to use at each timestep"
 )
-
 config_dir = os.path.join(os.path.dirname(__file__), "configs")
 config_flags.DEFINE_config_file(
     "config",
@@ -162,7 +159,12 @@ def main(_):
         )
 
         policy_fn = batched_apply(
-            partial(get_policy_sampled_actions, model, argmax=False, n=8),
+            partial(
+                get_policy_sampled_actions,
+                model,
+                argmax=False,
+                n=FLAGS.samples_per_timestep,
+            ),
             FLAGS.config.batch_size,
             devices=jax.devices(),
         )

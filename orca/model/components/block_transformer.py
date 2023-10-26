@@ -54,7 +54,10 @@ class TimestepGroup:
 
 @dataclass
 class TokenMetadata:
-    """Useful metadata for computing attention masks"""
+    """Useful metadata for computing attention masks. Note that all tokens within the
+    same group at the same timestep always attend to each other unless you explicitly have
+    attention_rules[self.name] = AttentionRule.NEVER
+    """
 
     name: str
     timestep: int  # -1 for prefix tokens
@@ -143,6 +146,9 @@ class BlockTransformer(nn.Module):
         attention_mask = self.generate_attention_mask(
             prefix_groups, timestep_groups, timestep_pad_mask
         )
+
+        # Storing attention mask in `intermediates` to make it accessible for debugging
+        # See https://flax.readthedocs.io/en/latest/guides/extracting_intermediates.html
         self.sow("intermediates", "attention_mask", attention_mask)
 
         # Assemble input tokens (batch, total_tokens, token_embedding_size)
@@ -243,7 +249,6 @@ class BlockTransformer(nn.Module):
         timestep_pad_mask: jax.Array,
     ):
         """
-        TODO: Need to update this docstring
         Args:
             prefix_groups: A list of PrefixGroup objects.
             timestep_groups: A list of TimestepGroup objects.
@@ -286,7 +291,7 @@ class BlockTransformer(nn.Module):
         total_tokens = tokens_for_prefix + tokens_per_time_step * horizon
         attention_mask = np.zeros((total_tokens, total_tokens), dtype=int)
 
-        def get_token_description(i):
+        def get_token_metadata(i):
             if i < tokens_for_prefix:
                 position = _get_position(i, tokens_per_prefix_group)
                 return TokenMetadata.create(prefix_groups[position], timestep=-1)
@@ -298,10 +303,9 @@ class BlockTransformer(nn.Module):
 
         for i in range(total_tokens):  # Token attending
             for j in range(total_tokens):  # Token being attended to
-                # description is a TokenMetadata(token_name, token_timestep, extra_info)
-                description_i = get_token_description(i)
-                description_j = get_token_description(j)
-                mask = int(description_i.should_attend_to(description_j))
+                metadata_i = get_token_metadata(i)
+                metadata_j = get_token_metadata(j)
+                mask = int(metadata_i.should_attend_to(metadata_j))
                 attention_mask[i, j] = mask
 
         pad_attention_mask = self.generate_pad_attention_mask(
@@ -386,9 +390,9 @@ class BlockTransformer(nn.Module):
         for j in range(len(all_metadatas)):  # Token being attended to
             row = [column_names[j]]
             for i in range(len(all_metadatas)):  # Token attending
-                description_i = all_metadatas[i]
-                description_j = all_metadatas[j]
-                mask = int(description_i.should_attend_to(description_j))
+                metadata_i = all_metadatas[i]
+                metadata_j = all_metadatas[j]
+                mask = int(metadata_i.should_attend_to(metadata_j))
                 row.append("x" if mask else " ")
             rows.append(row)
 
