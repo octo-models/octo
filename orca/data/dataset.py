@@ -17,6 +17,21 @@ from orca.data.dataset_transforms import RLDS_TRAJECTORY_MAP_TRANSFORMS
 from orca.data.utils import bc_goal_relabeling, task_augmentation
 
 
+def load_action_proprio_stats(path: str) -> Dict[str, Dict[str, List[float]]]:
+    # assert that path exists
+    assert tf.io.gfile.exists(path), f"{path} does not exist!"
+
+    # get statistics from an arbitrary (user supplied) path
+    logging.info(f"Loading existing statistics for normalization from {path}.")
+    with tf.io.gfile.GFile(path, "r") as f:
+        metadata = json.load(f)
+
+    return {
+        k: {k2: tf.convert_to_tensor(v2, dtype=tf.float32) for k2, v2 in v.items()}
+        for k, v in metadata.items()
+    }
+
+
 def get_action_proprio_stats(
     builder: DatasetBuilder,
     dataset: tf.data.Dataset,
@@ -34,37 +49,35 @@ def get_action_proprio_stats(
 
     # check if stats already exist and load, otherwise compute
     if tf.io.gfile.exists(path):
-        logging.info(f"Loading existing statistics for normalization from {path}.")
-        with tf.io.gfile.GFile(path, "r") as f:
-            metadata = json.load(f)
-    else:
-        logging.info("Computing action/proprio statistics for normalization...")
-        actions = []
-        proprios = []
-        for episode in tqdm.tqdm(dataset.take(1000)):
-            actions.append(episode["action"].numpy())
-            proprios.append(episode["observation"]["proprio"].numpy())
-        actions = np.concatenate(actions)
-        proprios = np.concatenate(proprios)
-        metadata = {
-            "action": {
-                "mean": [float(e) for e in actions.mean(0)],
-                "std": [float(e) for e in actions.std(0)],
-                "max": [float(e) for e in actions.max(0)],
-                "min": [float(e) for e in actions.min(0)],
-            },
-            "proprio": {
-                "mean": [float(e) for e in proprios.mean(0)],
-                "std": [float(e) for e in proprios.std(0)],
-                "max": [float(e) for e in proprios.max(0)],
-                "min": [float(e) for e in proprios.min(0)],
-            },
-        }
-        del actions
-        del proprios
-        with tf.io.gfile.GFile(path, "w") as f:
-            json.dump(metadata, f)
-        logging.info("Done!")
+        return load_action_proprio_stats(path)
+
+    logging.info("Computing action/proprio statistics for normalization...")
+    actions = []
+    proprios = []
+    for episode in tqdm.tqdm(dataset.take(1000)):
+        actions.append(episode["action"].numpy())
+        proprios.append(episode["observation"]["proprio"].numpy())
+    actions = np.concatenate(actions)
+    proprios = np.concatenate(proprios)
+    metadata = {
+        "action": {
+            "mean": [float(e) for e in actions.mean(0)],
+            "std": [float(e) for e in actions.std(0)],
+            "max": [float(e) for e in actions.max(0)],
+            "min": [float(e) for e in actions.min(0)],
+        },
+        "proprio": {
+            "mean": [float(e) for e in proprios.mean(0)],
+            "std": [float(e) for e in proprios.std(0)],
+            "max": [float(e) for e in proprios.max(0)],
+            "min": [float(e) for e in proprios.min(0)],
+        },
+    }
+    del actions
+    del proprios
+    with tf.io.gfile.GFile(path, "w") as f:
+        json.dump(metadata, f)
+    logging.info("Done!")
 
     return {
         k: {k2: tf.convert_to_tensor(v2, dtype=tf.float32) for k2, v2 in v.items()}
@@ -235,7 +248,7 @@ def make_dataset(
     image_obs_keys: Union[str, List[str]] = [],
     depth_obs_keys: Union[str, List[str]] = [],
     state_obs_keys: Union[str, List[str]] = [],
-    action_proprio_metadata: Optional[dict] = None,
+    action_proprio_metadata: Optional[Union[dict, str]] = None,
     resize_size: Optional[Tuple[int, int]] = None,
     **kwargs,
 ) -> tf.data.Dataset:
@@ -252,8 +265,8 @@ def make_dataset(
             Inserts padding image for each None key.
         state_obs_keys (str, List[str], optional): List of low-dim observation keys to be decoded.
             Get concatenated and mapped to "proprio". Inserts 1d padding for each None key.
-        action_proprio_metadata (dict, optional): dict with min/max/mean/std for action and proprio normalization.
-            If not provided, will get computed on the fly.
+        action_proprio_metadata (dict, str, optional): dict (or path to previously dumped json dict) with
+            min/max/mean/std for action and proprio normalization. If not provided, will get computed on the fly.
         resize_size (tuple, optional): target (height, width) for all RGB and depth images, default to no resize.
         **kwargs: Additional keyword arguments to pass to `apply_common_transforms`.
     Returns:
@@ -287,8 +300,11 @@ def make_dataset(
 
     def restructure(traj):
         # apply any dataset-specific transforms
-        if name in RLDS_TRAJECTORY_MAP_TRANSFORMS:
-            traj = RLDS_TRAJECTORY_MAP_TRANSFORMS[name](traj)
+        rlds_transform = RLDS_TRAJECTORY_MAP_TRANSFORMS[name]
+
+        # skip None transforms
+        if rlds_transform is not None:
+            traj = rlds_transform(traj)
 
         # extracts RGB images, depth images and proprio based on provided keys, pad for all None keys
         orig_obs = traj.pop("observation")
@@ -337,11 +353,10 @@ def make_dataset(
     dataset = dataset.map(restructure)
     if action_proprio_metadata is None:
         action_proprio_metadata = get_action_proprio_stats(
-            builder,
-            dataset,
-            state_obs_keys,
-            RLDS_TRAJECTORY_MAP_TRANSFORMS.get(name, None),
+            builder, dataset, state_obs_keys, RLDS_TRAJECTORY_MAP_TRANSFORMS[name]
         )
+    elif isinstance(action_proprio_metadata, str):
+        action_proprio_metadata = load_action_proprio_stats(action_proprio_metadata)
 
     dataset = apply_common_transforms(
         dataset,
