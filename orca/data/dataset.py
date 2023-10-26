@@ -248,8 +248,7 @@ def make_dataset(
     image_obs_keys: Union[str, List[str]] = [],
     depth_obs_keys: Union[str, List[str]] = [],
     state_obs_keys: Union[str, List[str]] = [],
-    action_proprio_metadata: Optional[dict] = None,
-    action_proprio_metadata_restore: Optional[str] = None,
+    action_proprio_metadata: Optional[Union[dict, str]] = None,
     resize_size: Optional[Tuple[int, int]] = None,
     **kwargs,
 ) -> tf.data.Dataset:
@@ -266,10 +265,8 @@ def make_dataset(
             Inserts padding image for each None key.
         state_obs_keys (str, List[str], optional): List of low-dim observation keys to be decoded.
             Get concatenated and mapped to "proprio". Inserts 1d padding for each None key.
-        action_proprio_metadata (dict, optional): dict with min/max/mean/std for action and proprio normalization.
-            If not provided, will get computed on the fly.
-        action_proprio_metadata_restore (str, optional): path to json dict containing action_proprio_metadata.
-            If not provided, will get computed on the fly. Will error if action_proprio_metadata is not None!
+        action_proprio_metadata (dict, str, optional): dict (or path to previously dumped json dict) with
+            min/max/mean/std for action and proprio normalization. If not provided, will get computed on the fly.
         resize_size (tuple, optional): target (height, width) for all RGB and depth images, default to no resize.
         **kwargs: Additional keyword arguments to pass to `apply_common_transforms`.
     Returns:
@@ -354,20 +351,12 @@ def make_dataset(
         return traj
 
     dataset = dataset.map(restructure)
-    if action_proprio_metadata_restore:
-        assert (
-            action_proprio_metadata is None
-        ), "Cannot supply action_proprio_metadata_restore and action_proprio_metadata!"
-        action_proprio_metadata = load_action_proprio_stats(
-            action_proprio_metadata_restore
-        )
-    elif action_proprio_metadata is None:
+    if action_proprio_metadata is None:
         action_proprio_metadata = get_action_proprio_stats(
-            builder,
-            dataset,
-            state_obs_keys,
-            RLDS_TRAJECTORY_MAP_TRANSFORMS[name],
+            builder, dataset, state_obs_keys, RLDS_TRAJECTORY_MAP_TRANSFORMS[name]
         )
+    elif isinstance(action_proprio_metadata, str):
+        action_proprio_metadata = load_action_proprio_stats(action_proprio_metadata)
 
     dataset = apply_common_transforms(
         dataset,
