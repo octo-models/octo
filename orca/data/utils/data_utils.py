@@ -1,4 +1,4 @@
-from enum import Enum
+from enum import IntEnum
 import hashlib
 import inspect
 import json
@@ -13,7 +13,7 @@ from tensorflow_datasets.core.dataset_builder import DatasetBuilder
 import tqdm
 
 
-class StateEncoding(Enum):
+class StateEncoding(IntEnum):
     """Defines supported proprio state encoding schemes for different datasets."""
 
     NONE = -1  # no state provided
@@ -22,7 +22,7 @@ class StateEncoding(Enum):
     JOINT = 3  # 7 x joint angles (padding added if fewer) + gripper open/close
 
 
-class ActionEncoding(Enum):
+class ActionEncoding(IntEnum):
     """Defines supported action encoding schemes for different datasets."""
 
     EEF_POS = 1  # EEF delta XYZ + roll-pitch-yaw + gripper open/close
