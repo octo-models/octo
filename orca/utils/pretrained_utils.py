@@ -1,30 +1,42 @@
-# TODO(dibya): This file will eventually go to orca.utils.pretrained_utils
-
+from functools import partial
 import json
 import logging
-from dataclasses import dataclass
-from functools import partial
 
 import flax
-import flax.linen as nn
 import flax.training.checkpoints as checkpoints
 import jax
 import jax.numpy as jnp
+from ml_collections import ConfigDict
 import optax
 import tensorflow as tf
-from ml_collections import ConfigDict
 
 from orca.data.utils.text_processing import text_processors
 from orca.model import create_model_def
 from orca.model.orca_model import OrcaModel
-from orca.utils.train_utils import TrainState, create_train_state
+from orca.utils.train_utils import create_train_state
 from orca.utils.typing import Any, Data, Dict, Params, Sequence
 
 nonpytree_field = partial(flax.struct.field, pytree_node=False)
 
 
 @flax.struct.dataclass
-class PretrainedModelWrapper:
+class PretrainedModel:
+    """Recommended way of interacting with a pretrained model.
+
+    Usage (example):
+        model = PretrainedModel.load_pretrained(checkpoint_path)
+
+        # Create the task dict
+        tasks = model.create_tasks(texts=["go to the red room"])
+        # or
+        tasks = model.create_tasks(goals={"image_0": goal_images})
+
+        # Run the model (jax.jit for speed)
+        policy_fn = jax.jit(model.sample_actions)
+        policy_fn(observations, tasks, rng=jax.random.PRNGKey(0))
+
+    """
+
     model_def: OrcaModel = nonpytree_field()
     params: Params
     text_processor: Any = nonpytree_field()
@@ -36,16 +48,12 @@ class PretrainedModelWrapper:
 
     @property
     def orca_transformer(self):
-        """Usage:
-        transformer_embeddings = self.orca_transformer(
-            observations, tasks, pad_mask, train=False
-        )
-        """
+        """Syntactic sugar for calling the transformer."""
         return partial(self.__call__, method="run_transformer")
 
     @property
     def heads(self):
-        """Usage:
+        """Syntactic sugar for calling heads.
         > self.heads["action"].predict_action(transformer_embeddings)
         """
         head_fns = {}
@@ -54,6 +62,37 @@ class PretrainedModelWrapper:
                 partial(self.__call__, method="run_head", head_name=head_name)
             )
         return head_fns
+
+    def create_tasks(self, goals: Dict[str, Data] = None, texts: Sequence[str] = None):
+        """Creates tasks dict from goals and texts.
+
+        Args:
+            goals: if not None, dict of shape (batch_size, *)
+            texts: if not None, list of texts of length batch_size
+
+        Omit images to run the language-conditioned model, and omit texts to run the
+        goal-conditioned model.
+
+        """
+        assert goals is not None or texts is not None
+        tasks = {}
+        if goals is not None:
+            tasks.update(goals)
+        else:
+            batch_size = len(texts)
+            tasks = {
+                k: jnp.zeros((batch_size, *v.shape[1:]), dtype=v.dtype)
+                for k, v in self.example_batch["tasks"].items()
+            }
+
+        if texts is None:
+            batch_size = jax.tree_util.tree_leaves(goals)[0].shape[0]
+            texts = [""] * batch_size
+        if self.text_processor is not None:
+            tasks["language_instruction"] = self.text_processor.encode(texts)
+
+        _verify_shapes(tasks, self.example_batch["tasks"], starting_dim=1)
+        return tasks
 
     def run_transformer(self, observations, tasks, pad_mask, train=False):
         """Runs the transformer, but does shape checking on the inputs.
@@ -69,9 +108,7 @@ class PretrainedModelWrapper:
 
         return self.orca_transformer(observations, tasks, pad_mask, train=train)
 
-    def sample_actions(
-        self, observations, tasks, pad_mask=None, **kwargs
-    ):
+    def sample_actions(self, observations, tasks, pad_mask=None, **kwargs):
         """
         Args:
             observations: dictionary of arrays of shape (batch_size, window_size, *)
@@ -93,10 +130,20 @@ class PretrainedModelWrapper:
 
     @classmethod
     def load_pretrained(
-        cls, checkpoint_path, config_path=None, example_batch_path=None
+        cls,
+        checkpoint_path: str,
+        config_path: str = None,
+        example_batch_path: str = None,
+        skip_verification: bool = False,
     ):
-        # Have to pass in image_size because they are not saved in the
-        # config. In the future, we should save them in the config.
+        """Loads a pretrained model from a checkpoint.
+
+        Args:
+            checkpoint_path: Checkpoint path (can either be a specific checkpoint or directory of all checkpoints)
+            config_path: Path to config.json. If None, defaults to checkpoint_path/config.json
+            example_batch_path: Path to example_batch.msgpack. If None, defaults to checkpoint_path/example_batch.msgpack
+            skip_verification: If True, doesn't check the loaded params have the correct shape. Faster, but more dangerous!
+        """
         if config_path is None:
             config_path = tf.io.gfile.join(checkpoint_path, "config.json")
         if example_batch_path is None:
@@ -124,6 +171,17 @@ class PretrainedModelWrapper:
             text_processor = text_processors[config["text_processor"]](
                 **config["text_processor_kwargs"]
             )
+
+        if skip_verification:
+            loaded = checkpoints.restore_checkpoint(checkpoint_path, target=None)
+            return cls(
+                model_def=model_def,
+                params=loaded["params"],
+                text_processor=text_processor,
+                example_batch=example_batch,
+                config=flax.core.freeze(config.to_dict()),
+            )
+
         # create train_state
         rng = jax.random.PRNGKey(0)
         rng, construct_rng = jax.random.split(rng)
@@ -158,37 +216,6 @@ class PretrainedModelWrapper:
             example_batch=example_batch,
             config=flax.core.freeze(config.to_dict()),
         )
-
-    def create_tasks(self, goals: Dict[str, Data] = None, texts: Sequence[str] = None):
-        """Creates tasks dict from images and texts.
-
-        Args:
-            goals: if not None, dict of shape (batch_size, *)
-            texts: if not None, list of texts of length batch_size
-
-        Omit images to run the language-conditioned model, and omit texts to run the
-        goal-conditioned model.
-
-        """
-        assert goals is not None or texts is not None
-        tasks = {}
-        if goals is not None:
-            tasks.update(goals)
-        else:
-            batch_size = len(texts)
-            tasks = {
-                k: jnp.zeros((batch_size, *v.shape[1:]), dtype=v.dtype)
-                for k, v in self.example_batch["tasks"].items()
-            }
-
-        if texts is None:
-            batch_size = jax.tree_util.tree_leaves(goals)[0].shape[0]
-            texts = [""] * batch_size
-        if self.text_processor is not None:
-            tasks["language_instruction"] = self.text_processor.encode(texts)
-
-        _verify_shapes(tasks, self.example_batch["tasks"])
-        return tasks
 
 
 class HeadWrapper:

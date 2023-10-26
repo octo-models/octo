@@ -18,12 +18,13 @@ import numpy as np
 import optax
 import tensorflow as tf
 from absl import app, flags, logging
-from pretrained_utils import PretrainedModelWrapper
 from PIL import Image
 from pyquaternion import Quaternion
 
 # bridge_data_robot imports
 from widowx_envs.widowx_env_service import WidowXClient, WidowXStatus
+
+from orca.utils.pretrained_utils import PretrainedModel
 
 np.set_printoptions(suppress=True)
 
@@ -146,7 +147,7 @@ def convert_obs(obs):
 
 @partial(jax.jit, static_argnames="argmax")
 def sample_actions(
-    pretrained_model: PretrainedModelWrapper,
+    pretrained_model: PretrainedModel,
     observations,
     tasks,
     mean,
@@ -174,7 +175,7 @@ def sample_actions(
 
 
 def load_checkpoint(weights_path, config_path, metadata_path, example_batch_path):
-    model = PretrainedModelWrapper.load_pretrained(
+    model = PretrainedModel.load_pretrained(
         weights_path, config_path, example_batch_path
     )
 
@@ -280,7 +281,7 @@ def main(_):
 
         policy_name = list(policies.keys())[policy_idx]
         policy_fn, model = policies[policy_name]
-        model: PretrainedModelWrapper  # type hinting
+        model: PretrainedModel  # type hinting
 
         modality = input("Language or goal image? [l/g]")
         if modality == "g":
