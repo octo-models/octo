@@ -1,31 +1,30 @@
-import sys
+#!/usr/bin/env python3
+
+import json
 import os
+import sys
 import time
-from datetime import datetime
 import traceback
 from collections import deque
-import json
-
-from absl import app, flags, logging
-
-import numpy as np
-import tensorflow as tf
-
-import jax
-import jax.numpy as jnp
-from PIL import Image
-import imageio
+from datetime import datetime
 from functools import partial
 
-from flax.training import checkpoints
-from orca.model import create_model_def
-from orca.utils.train_utils import create_train_state
-from orca.data.utils.text_processing import text_processors
+import cv2
+import flax
+import imageio
+import jax
+import jax.numpy as jnp
+import numpy as np
 import optax
+import tensorflow as tf
+from absl import app, flags, logging
+from PIL import Image
+from pyquaternion import Quaternion
 
 # bridge_data_robot imports
-from widowx_envs.widowx_env import BridgeDataRailRLPrivateWidowX
-from multicam_server.topic_utils import IMTopic
+from widowx_envs.widowx_env_service import WidowXClient, WidowXStatus, WidowXConfigs
+
+from orca.utils.pretrained_utils import PretrainedModel
 
 np.set_printoptions(suppress=True)
 
@@ -42,30 +41,48 @@ flags.DEFINE_multi_string(
 flags.DEFINE_multi_string(
     "checkpoint_metadata_path", None, "Path to checkpoint metadata JSON", required=True
 )
+flags.DEFINE_multi_string(
+    "checkpoint_example_batch_path",
+    None,
+    "Path to checkpoint metadata JSON",
+    required=True,
+)
 flags.DEFINE_integer("im_size", None, "Image size", required=True)
 flags.DEFINE_string("video_save_path", None, "Path to save video")
 flags.DEFINE_integer("num_timesteps", 120, "num timesteps")
 flags.DEFINE_bool("blocking", False, "Use the blocking controller")
-flags.DEFINE_spaceseplist("goal_eep", None, "Goal position")
-flags.DEFINE_spaceseplist("initial_eep", None, "Initial position")
+flags.DEFINE_spaceseplist("goal_eep", [0.3, 0.0, 0.15], "Goal position")
+flags.DEFINE_spaceseplist("initial_eep", [0.3, 0.0, 0.15], "Initial position")
 flags.DEFINE_integer("act_exec_horizon", 1, "Action sequence length")
 flags.DEFINE_bool("deterministic", False, "Whether to sample action deterministically")
+flags.DEFINE_float("temperature", 1.0, "Temperature for sampling actions")
+flags.DEFINE_string("ip", "localhost", "IP address of the robot")
+flags.DEFINE_integer("port", 5556, "Port of the robot")
+
+# show image flag
+flags.DEFINE_bool("show_image", False, "Show image")
 
 ##############################################################################
 
-STEP_DURATION = 0.2
+STEP_DURATION = 0.4
 NO_PITCH_ROLL = False
 NO_YAW = False
 STICKY_GRIPPER_NUM_STEPS = 1
-WORKSPACE_BOUNDS = np.array([[0.1, -0.15, -0.1, -1.57, 0], [0.45, 0.25, 0.25, 1.57, 0]])
-CAMERA_TOPICS = [IMTopic("/blue/image_raw")]
-FIXED_STD = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+WORKSPACE_BOUNDS = [[0.1, -0.15, -0.01, -1.57, 0], [0.45, 0.25, 0.25, 1.57, 0]]
+CAMERA_TOPICS = [{"name": "/blue/image_raw"}]
+FIXED_STD = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+ENV_PARAMS = {
+    "camera_topics": CAMERA_TOPICS,
+    "override_workspace_boundaries": WORKSPACE_BOUNDS,
+    "move_duration": STEP_DURATION,
+}
 
 ##############################################################################
 
 
 def stack_and_pad_obs(fn, horizon):
     """
+    TODO: Replace with env wrapper
     This turns a function that takes a fixed length observation history into a function that
     takes just the current observation (or sequence of observations since the last policy call).
     The full observation history is saved inside this function. This function handles stacking
@@ -100,6 +117,24 @@ def stack_and_pad_obs(fn, horizon):
     return wrapped_fn
 
 
+def state_to_eep(xyz_coor, zangle: float):
+    """
+    Implement the state to eep function.
+    Refered to `bridge_data_robot`'s `widowx_controller/widowx_controller.py`
+    return a 4x4 matrix
+    """
+    assert len(xyz_coor) == 3
+    DEFAULT_ROTATION = np.array([[0, 0, 1.0], [0, 1.0, 0], [-1.0, 0, 0]])
+    new_pose = np.eye(4)
+    new_pose[:3, -1] = xyz_coor
+    new_quat = Quaternion(axis=np.array([0.0, 0.0, 1.0]), angle=zangle) * Quaternion(
+        matrix=DEFAULT_ROTATION
+    )
+    new_pose[:3, :3] = new_quat.rotation_matrix
+    # yaw, pitch, roll = quat.yaw_pitch_roll
+    return new_pose
+
+
 def supply_rng(f, rng=jax.random.PRNGKey(0)):
     def wrapped(*args, **kwargs):
         nonlocal rng
@@ -118,113 +153,66 @@ def convert_obs(obs):
 
 @partial(jax.jit, static_argnames="argmax")
 def sample_actions(
-    observations, tasks, state, mean, std, rng, argmax=False, temperature=1.0
+    pretrained_model: PretrainedModel,
+    observations,
+    tasks,
+    mean,
+    std,
+    rng,
+    argmax=False,
+    temperature=1.0,
 ):
-    # add batch dim
+    # add batch dim to observations
     observations = jax.tree_map(lambda x: x[None], observations)
-    tasks = jax.tree_map(lambda x: x[None], tasks)
-    actions = state.apply_fn(
-        {"params": state.params},
+    # tasks = jax.tree_map(lambda x: x[None], tasks)
+    logging.warning(
+        "observations: %s", flax.core.pretty_repr(jax.tree_map(jnp.shape, observations))
+    )
+    logging.warning("tasks: %s", flax.core.pretty_repr(jax.tree_map(jnp.shape, tasks)))
+    actions = pretrained_model.sample_actions(
         observations,
         tasks,
-        train=False,
-        argmax=argmax,
         rng=rng,
+        argmax=argmax,
         temperature=temperature,
-        method="predict_action",
     )
     # remove batch dim
     return actions[0] * std + mean
 
 
-def load_checkpoint(weights_path, config_path, metadata_path):
-    with open(config_path, "r") as f:
-        config = json.load(f)
-
-    window_size = config["dataset_kwargs"]["common_kwargs"]["window_size"]
-    horizon = window_size - config["model"]["policy_kwargs"]["pred_horizon"] + 1
-
-    example_actions = jnp.zeros((1, window_size, 7), dtype=np.float32)
-    example_obs = {
-        "image_0": jnp.zeros(
-            (1, window_size, FLAGS.im_size, FLAGS.im_size, 3), dtype=np.uint8
-        ),
-        "pad_mask": jnp.ones((1, window_size)),
-    }
-
-    if config["text_processor"] is None:
-        text_processor = None
-        language_embed = None
-    else:
-        text_processor = text_processors[config["text_processor"]](
-            **config["text_processor_kwargs"]
-        )
-        language_embed = text_processor.encode([[""]])
-
-    example_batch = {
-        "observations": example_obs,
-        "tasks": {
-            "image_0": jnp.zeros((1, FLAGS.im_size, FLAGS.im_size, 3), dtype=np.uint8),
-            "language_instruction": language_embed,
-        },
-        "actions": example_actions,
-    }
-
-    # create train_state
-    rng = jax.random.PRNGKey(0)
-    rng, construct_rng = jax.random.split(rng)
-
-    model_def = create_model_def(
-        action_dim=example_batch["actions"].shape[-1],
-        window_size=example_batch["observations"]["image_0"].shape[1],
-        **config["model"],
+def load_checkpoint(weights_path, config_path, metadata_path, example_batch_path):
+    model = PretrainedModel.load_pretrained(
+        weights_path, config_path, example_batch_path
     )
-
-    lr_schedule = optax.warmup_cosine_decay_schedule(
-        init_value=0.0,
-        peak_value=config["optimizer"]["learning_rate"],
-        warmup_steps=config["optimizer"]["warmup_steps"],
-        decay_steps=config["optimizer"]["decay_steps"],
-        end_value=0.0,
-    )
-
-    tx = optax.adam(lr_schedule)
-    train_state = create_train_state(
-        construct_rng,
-        model_def,
-        tx,
-        init_args=(
-            example_batch["observations"],
-            example_batch["tasks"],
-            example_batch["actions"],
-        ),
-    )
-
-    # hydrate train_state with parameters from checkpoint
-    train_state = checkpoints.restore_checkpoint(weights_path, train_state)
 
     with open(metadata_path, "r") as f:
         action_proprio_metadata = json.load(f)
     action_mean = jnp.array(action_proprio_metadata["action"]["mean"])
     action_std = jnp.array(action_proprio_metadata["action"]["std"])
 
-    rng, policy_rng = jax.random.split(rng)
-
     policy_fn = stack_and_pad_obs(
         supply_rng(
             partial(
                 sample_actions,
-                state=train_state,
+                model,
                 argmax=FLAGS.deterministic,
                 mean=action_mean,
                 std=action_std,
+                temperature=FLAGS.temperature,
             ),
-            rng=policy_rng,
         ),
-        horizon=horizon,
+        horizon=model.config["dataset_kwargs"]["common_kwargs"]["window_size"],
     )
+    return (policy_fn, model)
 
-    return policy_fn, text_processor
+
+def wait_for_obs(widowx_client):
+    obs = widowx_client.get_observation()
+    while obs is None:
+        print("Waiting for observations...")
+        obs = widowx_client.get_observation()
+        time.sleep(1)
+    return obs
 
 
 def main(_):
@@ -232,6 +220,7 @@ def main(_):
         len(FLAGS.checkpoint_weights_path)
         == len(FLAGS.checkpoint_config_path)
         == len(FLAGS.checkpoint_metadata_path)
+        == len(FLAGS.checkpoint_example_batch_path)
     )
 
     # policies is a dict from run_name to policy function
@@ -240,16 +229,21 @@ def main(_):
         checkpoint_weights_path,
         checkpoint_config_path,
         checkpoint_metadata_path,
+        checkpoint_example_batch_path,
     ) in zip(
         FLAGS.checkpoint_weights_path,
         FLAGS.checkpoint_config_path,
         FLAGS.checkpoint_metadata_path,
+        FLAGS.checkpoint_example_batch_path,
     ):
         assert tf.io.gfile.exists(checkpoint_weights_path), checkpoint_weights_path
         checkpoint_num = int(checkpoint_weights_path.split("_")[-1])
-        run_name = checkpoint_config_path.split("/")[-1]
+        run_name = checkpoint_config_path.split("/")[-2]
         policies[f"{run_name}-{checkpoint_num}"] = load_checkpoint(
-            checkpoint_weights_path, checkpoint_config_path, checkpoint_metadata_path
+            checkpoint_weights_path,
+            checkpoint_config_path,
+            checkpoint_metadata_path,
+            checkpoint_example_batch_path,
         )
 
     if FLAGS.initial_eep is not None:
@@ -260,28 +254,22 @@ def main(_):
         start_state = None
 
     # set up environment
-    env_params = {
-        "fix_zangle": 0.1,
-        "move_duration": 0.2,
-        "adaptive_wait": True,
-        "move_to_rand_start_freq": 1,
-        "override_workspace_boundaries": WORKSPACE_BOUNDS,
-        "action_clipping": "xyz",
-        "catch_environment_except": False,
-        "start_state": start_state,
-        "return_full_image": False,
-        "camera_topics": CAMERA_TOPICS,
-    }
-    env = BridgeDataRailRLPrivateWidowX(env_params, fixed_image_size=FLAGS.im_size)
+    env_params = WidowXConfigs.DefaultEnvParams.copy()
+    env_params.update(ENV_PARAMS)
+    env_params["state_state"] = list(start_state)
+    widowx_client = WidowXClient(host=FLAGS.ip, port=FLAGS.port)
+    widowx_client.init(env_params, image_size=FLAGS.im_size)
 
-    task = {"image_0": jnp.zeros((FLAGS.im_size, FLAGS.im_size, 3), dtype=np.uint8)}
+    task = {
+        "image_0": jnp.zeros((FLAGS.im_size, FLAGS.im_size, 3), dtype=np.uint8),
+    }
 
     # goal sampling loop
     while True:
         # ask for which policy to use
         if len(policies) == 1:
             policy_idx = 0
-            input("Press [Enter] to start.")
+            print("Use default policy 1: ", list(policies.keys())[policy_idx])
         else:
             print("policies:")
             for i, name in enumerate(policies.keys()):
@@ -289,7 +277,8 @@ def main(_):
             policy_idx = int(input("select policy: "))
 
         policy_name = list(policies.keys())[policy_idx]
-        policy_fn, text_processor = policies[policy_name]
+        policy_fn, model = policies[policy_name]
+        model: PretrainedModel  # type hinting
 
         modality = input("Language or goal image? [l/g]")
         if modality == "g":
@@ -300,60 +289,49 @@ def main(_):
             else:
                 ch = input("Taking a new goal? [y/n]")
             if ch == "y":
-                if FLAGS.goal_eep is not None:
-                    assert isinstance(FLAGS.goal_eep, list)
-                    goal_eep = [float(e) for e in FLAGS.goal_eep]
-                else:
-                    low_bound = WORKSPACE_BOUNDS[0][:3] + 0.03
-                    high_bound = WORKSPACE_BOUNDS[1][:3] - 0.03
-                    goal_eep = np.random.uniform(low_bound, high_bound)
-                env.controller().open_gripper(True)
-                try:
-                    env.controller().move_to_state(goal_eep, 0, duration=1.5)
-                    env._reset_previous_qpos()
-                except Exception as e:
-                    continue
+                assert isinstance(FLAGS.goal_eep, list)
+                _eep = [float(e) for e in FLAGS.goal_eep]
+                goal_eep = state_to_eep(_eep, 0)
+                widowx_client.move_gripper(1.0)  # open gripper
+
+                move_status = None
+                while move_status != WidowXStatus.SUCCESS:
+                    move_status = widowx_client.move(goal_eep, duration=1.5)
+
                 input("Press [Enter] when ready for taking the goal image. ")
-                obs = env.current_obs()
-                task = convert_obs(obs)
-
-                # create a dummy language input if this model also expects language
-                if text_processor is not None:
-                    task["language_instruction"] = text_processor.encode("")
-
+                obs = wait_for_obs(widowx_client)
+                goals = jax.tree_map(lambda x: x[None], convert_obs(obs))
+                task = model.create_tasks(goals=goals)
         else:
             # ask for new instruction
-            if task["language_instruction"] is None:
+            if "language_instruction" not in task or ["language_instruction"] is None:
                 ch = "y"
             else:
                 ch = input("New instruction? [y/n]")
             if ch == "y":
-                task["language_instruction"] = text_processor.encode(
-                    input("Instruction?")
-                )
+                text = input("Instruction?")
+                task = model.create_tasks(text=[text])
 
-        try:
-            env.reset()
-            env.start()
-        except Exception as e:
-            continue
+        # reset env
+        widowx_client.reset()
+        time.sleep(2.5)
 
         # move to initial position
-        try:
-            if FLAGS.initial_eep is not None:
-                assert isinstance(FLAGS.initial_eep, list)
-                initial_eep = [float(e) for e in FLAGS.initial_eep]
-                env.controller().move_to_state(initial_eep, 0, duration=1.5)
-                env._reset_previous_qpos()
-        except Exception as e:
-            continue
+        if FLAGS.initial_eep is not None:
+            assert isinstance(FLAGS.initial_eep, list)
+            initial_eep = [float(e) for e in FLAGS.initial_eep]
+            eep = state_to_eep(initial_eep, 0)
+            widowx_client.move_gripper(1.0)  # open gripper
 
-        input("start?")
+            # retry move action until success
+            move_status = None
+            while move_status != WidowXStatus.SUCCESS:
+                move_status = widowx_client.move(eep, duration=1.5)
+
+        input("Press [Enter] to start.")
 
         # do rollout
-        obs = env.current_obs()
-        obs = convert_obs(obs)
-        obs_hist = [obs]
+        obs_hist = []
         last_tstep = time.time()
         images = []
         goals = []
@@ -366,6 +344,15 @@ def main(_):
             while t < FLAGS.num_timesteps:
                 if time.time() > last_tstep + STEP_DURATION or FLAGS.blocking:
                     last_tstep = time.time()
+
+                    raw_obs = wait_for_obs(widowx_client)
+                    obs = convert_obs(raw_obs)
+                    obs_hist.append(obs)
+
+                    if FLAGS.show_image:
+                        bgr_img = cv2.cvtColor(raw_obs["full_image"], cv2.COLOR_RGB2BGR)
+                        cv2.imshow("img_view", bgr_img)
+                        cv2.waitKey(10)
 
                     actions = np.array(policy_fn(obs_hist, task))
                     assert len(actions) >= FLAGS.act_exec_horizon
@@ -398,11 +385,7 @@ def main(_):
                             action[5] = 0
 
                         # perform environment step
-                        obs, _, _, _ = env.step(
-                            action, last_tstep + STEP_DURATION, blocking=FLAGS.blocking
-                        )
-                        obs = convert_obs(obs)
-                        obs_hist.append(obs)
+                        widowx_client.step_action(action, blocking=FLAGS.blocking)
 
                         # save image
                         images.append(obs["image_0"])

@@ -1,24 +1,29 @@
-from absl import app, flags
 import os
+
+from absl import app, flags
 
 FLAGS = flags.FLAGS
 
-flags.DEFINE_string("run_name", None, "WandB run name")
+flags.DEFINE_string("bucket_path", None, "Path to save dir on GCP bucket")
 flags.DEFINE_string("step_number", None, "Step number")
-flags.DEFINE_string("bucket", None, "GCP bucket")
+flags.DEFINE_string(
+    "save_path", "/mount/harddrive/homer/checkpoints/", "Path to save checkpoint"
+)
 
 
 def main(_):
-    os.makedirs(f"checkpoints/{FLAGS.run_name}", exist_ok=True)
-    os.system(
-        f"gsutil cp -r gs://{FLAGS.bucket}/log/orca/{FLAGS.run_name}/checkpoint_{FLAGS.step_number} checkpoints/{FLAGS.run_name}/"
-    )
-    os.system(
-        f"gsutil cp gs://{FLAGS.bucket}/log/orca/{FLAGS.run_name}/action_proprio* checkpoints/{FLAGS.run_name}/"
-    )
-    os.system(
-        f"gsutil cp gs://{FLAGS.bucket}/log/orca/{FLAGS.run_name}/config.json checkpoints/{FLAGS.run_name}/"
-    )
+    checkpoint_path = os.path.join(FLAGS.bucket_path, f"checkpoint_{FLAGS.step_number}")
+    norm_path = os.path.join(FLAGS.bucket_path, "action_proprio*")
+    config_path = os.path.join(FLAGS.bucket_path, "config.json*")
+    example_batch_path = os.path.join(FLAGS.bucket_path, "example_batch.msgpack*")
+    run_name = os.path.basename(os.path.normpath(FLAGS.bucket_path))
+    save_path = os.path.join(FLAGS.save_path, run_name)
+    os.makedirs(save_path, exist_ok=True)
+
+    os.system(f"gsutil cp -r {checkpoint_path} {save_path}/")
+    os.system(f"gsutil cp {norm_path} {save_path}/")
+    os.system(f"gsutil cp {config_path} {save_path}/")
+    os.system(f"gsutil cp {example_batch_path} {save_path}/")
 
 
 if __name__ == "__main__":
