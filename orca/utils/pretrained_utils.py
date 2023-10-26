@@ -97,9 +97,11 @@ class PretrainedModel:
     def run_transformer(self, observations, tasks, pad_mask, train=False):
         """Runs the transformer, but does shape checking on the inputs.
         Args:
-            observations: dictionary of arrays of shape (batch_size, window_size, *)
-            tasks: dict of tasks of shape (batch_size, *)
-            pad_mask: (batch_size, window_size)
+            observations: dictionary of arrays of shape (batch_size, window_size, *shape).
+                Shape must be consistent with self.example_batch["observation"]
+            tasks: dict of tasks of shape (batch_size, *shape)
+                Shape must be consistent with self.example_batch["tasks"]
+            pad_mask: (batch_size, window_size) Boolean mask that is False when the timestep corresponds to padding
             train: whether to run in train mode
             *args, **kwargs: Additional arguments for transformer or model.apply
         """
@@ -108,23 +110,27 @@ class PretrainedModel:
 
         return self.orca_transformer(observations, tasks, pad_mask, train=train)
 
-    def sample_actions(self, observations, tasks, pad_mask=None, **kwargs):
-        """
+    def sample_actions(self, observations, tasks, pad_mask=None, train=False, **kwargs):
+        """Samples actions from the model.
+
+        Recommended to do this inside a jax.jit
+
         Args:
             observations: dictionary of arrays of shape (batch_size, window_size, *)
             tasks: dict of tasks of shape (batch_size, *)
-            seed: jax rng key
-            **kwargs: kwargs to pass to predict_action
+            pad_mask: (batch_size, window_size) Boolean mask that is False when the timestep corresponds to padding
+            train: whether to run in train mode
+            **kwargs: kwargs to pass to model.heads["action"].predict_action
         """
         if pad_mask is None:
             pad_mask = observations["pad_mask"]
 
         transformer_embeddings = self.run_transformer(
-            observations, tasks, pad_mask, train=False
+            observations, tasks, pad_mask, train=train
         )
         return self.heads["action"].predict_action(
             transformer_embeddings,
-            train=False,
+            train=train,
             **kwargs,
         )
 
@@ -135,6 +141,7 @@ class PretrainedModel:
         config_path: str = None,
         example_batch_path: str = None,
         skip_verification: bool = False,
+        step=None,
     ):
         """Loads a pretrained model from a checkpoint.
 
@@ -143,6 +150,7 @@ class PretrainedModel:
             config_path: Path to config.json. If None, defaults to checkpoint_path/config.json
             example_batch_path: Path to example_batch.msgpack. If None, defaults to checkpoint_path/example_batch.msgpack
             skip_verification: If True, doesn't check the loaded params have the correct shape. Faster, but more dangerous!
+            step: int or None: If multiple checkpoints are present, which one to load. Defaults to the latest.
         """
         if config_path is None:
             config_path = tf.io.gfile.join(checkpoint_path, "config.json")
@@ -173,7 +181,9 @@ class PretrainedModel:
             )
 
         if skip_verification:
-            loaded = checkpoints.restore_checkpoint(checkpoint_path, target=None)
+            loaded = checkpoints.restore_checkpoint(
+                checkpoint_path, target=None, step=step
+            )
             return cls(
                 model_def=model_def,
                 params=loaded["params"],
@@ -207,7 +217,9 @@ class PretrainedModel:
             init_kwargs={"train": False},
         )
 
-        train_state = checkpoints.restore_checkpoint(checkpoint_path, train_state)
+        train_state = checkpoints.restore_checkpoint(
+            checkpoint_path, train_state, step=step
+        )
 
         return cls(
             model_def=model_def,
@@ -221,7 +233,7 @@ class PretrainedModel:
 class HeadWrapper:
     """Dummy class to help with the following syntactic sugar.
 
-    > PretrainedModelWrapper.heads["action"].predict_action(transformer_embeddings)
+    > PretrainedModel.heads["action"].predict_action(transformer_embeddings)
     """
 
     def __init__(self, fn):

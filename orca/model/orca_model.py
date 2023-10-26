@@ -25,7 +25,7 @@ class OrcaTransformer(nn.Module):
     but with additional groups of tokens ("readouts") that provide
     a way of "reading out" the information in the transformer.
 
-    For example, we may have a "action" readout that provides embeddings that are
+    For example, we may have an "action" readout that provides embeddings that are
     useful for predicting actions, and a "value" readout with embeddings that are useful for
     predicting values.
 
@@ -42,10 +42,11 @@ class OrcaTransformer(nn.Module):
     ]
 
     The observation tokens attend to the task prefix, and to all observation tokens in the same or previous timesteps.
-    Readouts attend to everything observation tokens do, but are not attended to by observation or task tokens.
+    Readouts attend to everything observation tokens do, but are not attended to by observation or task tokens. All
+    tokens within the same group and same timestep (e.g. "observation ts0 tokens") fully attend to each other.
 
     By this design, each readout does not influence the computation happening in the task or observation tokens,
-    and each readout is **independent* of one another**. This allows us to hot-swap in different
+    and each readout is **independent of one another**. This allows us to hot-swap in different
     readouts at any time (e.g. we can run with the action readout or the value readout or both at the same time).
 
 
@@ -57,7 +58,7 @@ class OrcaTransformer(nn.Module):
         readouts (Dict[str, int]): Dictionary of {readout_name: n_tokens_for_readout}
         transformer_kwargs (Dict): Dictionary of kwargs to forward to BlockTransformer.
         token_embedding_size (int): Dimension of the token embeddings (default: 512)
-        max_horizon (int): Number of timesteps in the trajectory window.
+        max_horizon (int): The maximum number of timesteps that the transformer can be run with.
     """
 
     observation_tokenizers: Sequence[nn.Module]
@@ -90,7 +91,7 @@ class OrcaTransformer(nn.Module):
 
         Returns:
             embedding_dict: A dictionary {
-                    **{readout_name: embedding of shape (batch, horizon, n_tokens_for_readout, token_embedding_size)for k in readouts},
+                    **{readout_name: embedding of shape (batch, horizon, n_tokens_for_readout, token_embedding_size) for k in readouts},
                     also includes the outputs corresponding to the task and observation tokens (although this probably isn't as useful)
                 }
 
@@ -175,9 +176,12 @@ class OrcaTransformer(nn.Module):
             readout_tokens += readout_pos_embedding[:, :horizon, :, :]
 
             attention_rules = {
-                **observation_attention_rules,
+                **{
+                    name: AttentionRule.CAUSAL
+                    for name in all_task_names + all_obs_names
+                },
                 f"readout_{readout_name}": AttentionRule.CAUSAL,
-            }  # Attend to your own readout tokens at all prior timesteps
+            }  # Attend to tasks, all previous observations, and your own previous readout tokens
 
             all_timestep_groups.append(
                 TimestepGroup(
