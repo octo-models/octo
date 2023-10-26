@@ -266,9 +266,7 @@ def main(_):
             devices=jax.devices(),
         )
         for mode in FLAGS.modes:
-            for data_kwargs, visualizer in zip(
-                FLAGS.config.dataset_kwargs["data_kwargs_list"], visualizers
-            ):
+            for data_kwargs, visualizer in zip(val_datasets_kwargs, visualizers):
                 images = visualizer.visualize_for_wandb(policy_fn, max_trajs=3)
                 wandb_log({f"{mode}_{data_kwargs['name']}": images}, step=step)
 
@@ -276,9 +274,7 @@ def main(_):
                 metrics = visualizer.metrics_for_wandb(info)
                 wandb_log({f"{mode}_{data_kwargs['name']}": metrics}, step=step)
         if FLAGS.run_eval:
-            for data_kwargs, val_data_iter in zip(
-                FLAGS.config.dataset_kwargs["data_kwargs_list"], val_data_iters
-            ):
+            for data_kwargs, val_data_iter in zip(val_datasets_kwargs, val_data_iters):
                 metrics = []
                 for _, batch in zip(range(FLAGS.config.num_val_batches), val_data_iter):
                     metrics.append(eval_step(train_state, batch))
