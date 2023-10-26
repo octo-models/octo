@@ -73,6 +73,11 @@ def apply_common_transforms(
         window_size (int, optional): The length of the snippets that trajectories are chunked into.
         skip_unlabeled (bool, optional): Whether to skip trajectories with no language labels.
     """
+    if unused_kwargs:
+        logging.warning(
+            f"Passing the following unused kwargs to 'apply_common_transforms': {unused_kwargs}"
+        )
+
     if skip_unlabeled:
         dataset = dataset.filter(
             lambda x: tf.math.reduce_any(x["language_instruction"] != "")
@@ -137,8 +142,8 @@ def make_dataset(
     state_obs_keys: Union[str, List[str]] = [],
     action_proprio_metadata: Optional[dict] = None,
     resize_size: Optional[Tuple[int, int]] = None,
-    state_encoding: Optional[StateEncoding] = None,
-    action_encoding: Optional[ActionEncoding] = None,
+    state_encoding: StateEncoding = StateEncoding.NONE,
+    action_encoding: ActionEncoding = ActionEncoding.EEF_POS,
     ram_budget: Optional[int] = None,
     action_proprio_normalization_type: Optional[str] = None,
     apply_transforms: bool = True,
@@ -160,8 +165,8 @@ def make_dataset(
         action_proprio_metadata (dict, optional): dict with min/max/mean/std for action and proprio normalization.
             If not provided, will get computed on the fly.
         resize_size (tuple, optional): target (height, width) for all RGB and depth images, default to no resize.
-        state_encoding (StateEncoding, optional): type of state encoding used, e.g. joint angles vs EEF pose.
-        action_encoding (ActionEncoding, optional): type of action encoding used, e.g. joint delta vs EEF delta.
+        state_encoding (StateEncoding): type of state encoding used, e.g. joint angles vs EEF pose.
+        action_encoding (ActionEncoding): type of action encoding used, e.g. joint delta vs EEF delta.
         ram_budget (int, optional): limits the RAM used by tf.data.AUTOTUNE, unit: GB, forwarded to AutotuneOptions.
         action_proprio_normalization_type (Optional[str], optional): The type of normalization to perform on the action,
             proprio, or both. Can be "normal" (mean 0, std 1) or "bounds" (normalized to [-1, 1]).
