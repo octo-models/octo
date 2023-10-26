@@ -6,10 +6,8 @@
 #
 #############################################
 
-import copy
 import datetime
 from functools import partial
-import json
 import os
 
 from absl import app, flags, logging
@@ -17,29 +15,20 @@ from flax.training import checkpoints
 from flax.traverse_util import flatten_dict
 import jax
 import jax.numpy as jnp
-from jax.sharding import Mesh, NamedSharding, PartitionSpec
 from ml_collections import config_flags, ConfigDict
 from ml_collections.config_dict import placeholder
 import numpy as np
-import optax
+import orbax.checkpoint as ocp
 import tensorflow as tf
 import wandb
 
-from orca.data.dataset import make_dataset
-from orca.data.utils.text_processing import text_processors
-from orca.model import create_model_def
-from orca.model.components.hf_weight_loaders import weights_loaders
 from orca.utils.jax_utils import initialize_compilation_cache
-from orca.utils.train_utils import (
-    batched_apply,
-    create_train_state,
-    filter_eval_datasets,
-)
+from orca.utils.pretrained_utils import PretrainedModel
+from orca.utils.train_utils import batched_apply, filter_eval_datasets
 from orca.utils.visualization_lib import Visualizer
 
 FLAGS = flags.FLAGS
 flags.DEFINE_bool("dummy", False, "Dummy visualization run.")
-flags.DEFINE_string("checkpoint", None, "Checkpoint to visualize.")
 flags.DEFINE_string(
     "checkpoints",
     None,
@@ -48,21 +37,16 @@ flags.DEFINE_string(
 flags.DEFINE_integer(
     "eval_every", None, "If not None, skip any steps not divisible by eval_every."
 )
-flags.DEFINE_multi_string(
-    "modes",
-    ["image"],
-    "List of modes to visualize and evaluate.",
+flags.DEFINE_integer(
+    "samples_per_timestep", 8, "Number of action samples to use at each timestep"
 )
-
 config_dir = os.path.join(os.path.dirname(__file__), "configs")
 config_flags.DEFINE_config_file(
     "config",
-    os.path.join(config_dir, "config.py:transformer_bc_bridge"),
+    os.path.join(config_dir, "config.py:gc_bridge"),
     "File path used to get the dataset kwargs.",
     lock_config=False,
 )
-
-flags.DEFINE_bool("run_eval", False, "If True, runs eval on all provided datasets.")
 
 wandb_config = ConfigDict(
     dict(
@@ -70,7 +54,7 @@ wandb_config = ConfigDict(
         group=placeholder(str),
         entity=placeholder(str),
         name="evaluation",
-        mode="disabled",
+        mode="online",
     )
 )
 config_flags.DEFINE_config_dict("wandb", wandb_config, "wandb config")
@@ -101,14 +85,9 @@ def main(_):
 
     # prevent tensorflow from using GPUs
     tf.config.set_visible_devices([], "GPU")
-    if FLAGS.config.text_processor is None:
-        text_processor = None
-    else:
-        text_processor = text_processors[FLAGS.config.text_processor](
-            **FLAGS.config.text_processor_kwargs
-        )
+    model = PretrainedModel.load_pretrained(FLAGS.checkpoints)
+    text_processor = model.text_processor
 
-    val_datas = []
     visualizers = []
     val_datasets_kwargs, _ = filter_eval_datasets(
         FLAGS.config.dataset_kwargs["data_kwargs_list"],
@@ -116,95 +95,37 @@ def main(_):
         FLAGS.config.eval_datasets,
     )
     for dataset_kwargs in val_datasets_kwargs:
-        val_data_kwargs = copy.deepcopy(dataset_kwargs)
-        val_data_kwargs.update(**FLAGS.config.dataset_kwargs["common_kwargs"])
-        val_dataset = make_dataset(**val_data_kwargs, train=False)
-        val_datas.append(
-            val_dataset.unbatch()
-            .shuffle(FLAGS.config.shuffle_buffer_size)
-            .repeat()
-            .batch(FLAGS.config.batch_size)
-        )
-        visualizers.append(Visualizer(val_data_kwargs, text_processor=text_processor))
-
-    assert (FLAGS.checkpoint is None) ^ (
-        FLAGS.checkpoints is None
-    ), "Must pass in exactly one of checkpoint or checkpoints"
-
-    if FLAGS.checkpoints:
-        list_of_checkpoints = checkpoints._all_checkpoints(FLAGS.checkpoints)
-        config_path = tf.io.gfile.join(FLAGS.checkpoints, "config.json")
-    else:
-        list_of_checkpoints = [FLAGS.checkpoint_path]
-        config_path = tf.io.gfile.join(FLAGS.checkpoint_path, "..", "config.json")
-
-    logging.info(list_of_checkpoints)
-    logging.info(f"Loading config from {config_path}")
-    with tf.io.gfile.GFile(config_path, "r") as config_file:
-        old_config = ConfigDict(json.load(config_file))
-    logging.info(old_config)
-
-    def process_text(batch):
-        if text_processor is None:
-            batch["tasks"].pop("language_instruction")
-        else:
-            batch["tasks"]["language_instruction"] = text_processor.encode(
-                [s.decode("utf-8") for s in batch["tasks"]["language_instruction"]]
+        val_data_kwargs = {
+            **dataset_kwargs,
+            **FLAGS.config.dataset_kwargs["common_kwargs"],
+        }
+        visualizers.append(
+            Visualizer(
+                val_data_kwargs, text_processor=text_processor, cache_trajs=False
             )
-        return batch
+        )
 
-    val_data_iters = [map(process_text, val_data.iterator()) for val_data in val_datas]
-    example_batch = next(val_data_iters[0])
-
-    # truncate batch size for faster init
-    example_batch = jax.tree_map(lambda x: x[:1], example_batch)
-
-    model_def = create_model_def(
-        action_dim=example_batch["action"].shape[-1],
-        window_size=example_batch["observation"]["image_0"].shape[1],
-        **old_config.model.to_dict(),
-    )
-
-    # pretrained weights to load
-    pretrained_loaders = [weights_loaders[w] for w in old_config.pretrained_weights]
-
-    lr_schedule = optax.warmup_cosine_decay_schedule(
-        init_value=0.0,
-        peak_value=old_config.optimizer.learning_rate,
-        warmup_steps=old_config.optimizer.warmup_steps,
-        decay_steps=old_config.optimizer.decay_steps,
-        end_value=0.0,
-    )
-    tx = optax.adam(lr_schedule)
-    rng = jax.random.PRNGKey(FLAGS.config.seed)
-    rng, construct_rng = jax.random.split(rng)
-
-    train_state = create_train_state(
-        construct_rng,
-        model_def,
-        tx,
-        init_args=(
-            example_batch["observation"],
-            example_batch["tasks"],
-            example_batch["action"],
-        ),
-        pretrained_loaders=pretrained_loaders,
-    )
+    list_of_checkpoints = checkpoints._all_checkpoints(FLAGS.checkpoints)
 
     @partial(jax.jit, static_argnames=("argmax", "n"))
-    def get_policy_sampled_actions(state, observations, tasks, *, argmax=False, n=1):
-        actions = state.apply_fn(
-            {"params": state.params},
+    def get_policy_sampled_actions(
+        model: PretrainedModel, observations, tasks, *, argmax=False, n=1
+    ):
+        horizon = (
+            model.config["dataset_kwargs"]["common_kwargs"]["window_size"]
+            - model.config["model"]["heads"]["action"]["kwargs"]["pred_horizon"]
+            + 1
+        )  # This is the horizon the model was trained for
+        observations = jax.tree_map(lambda x: x[:, -1 * horizon :], observations)
+
+        actions = model.sample_actions(
             observations,
             tasks,
-            train=False,
             argmax=argmax,
             sample_shape=(n,),
-            rng=state.rng,
-            method="predict_action",
-            rngs={"dropout": state.rng},
+            rng=jax.random.PRNGKey(0),
         )
-        actions = actions[..., 0, :]
+        actions = actions[..., 0, :]  # get first prediction
 
         # viz expects (batch_size, n_samples, action_dim)
         if argmax:
@@ -212,35 +133,6 @@ def main(_):
         else:
             actions = jnp.moveaxis(actions, 0, 1)
         return actions
-
-    if FLAGS.run_eval:
-        # create a 1D mesh with a single axis named "batch"
-        mesh = Mesh(jax.devices(), axis_names="batch")
-        # replicated sharding -- does not shard arrays
-        replicated_sharding = NamedSharding(mesh, PartitionSpec())
-        # data-parallel sharding -- shards arrays along the first axis
-        dp_sharding = NamedSharding(mesh, PartitionSpec("batch"))
-
-        def loss_fn(params, state, batch, rng, train=True):
-            info = state.apply_fn(
-                {"params": params},
-                batch["observation"],
-                batch["tasks"],
-                batch["action"],
-                train=train,
-                rngs={"dropout": rng},
-            )
-            return info["loss"], info
-
-        @partial(
-            jax.jit,
-            # state is replicated, batch is data-parallel
-            in_shardings=(replicated_sharding, dp_sharding),
-            out_shardings=replicated_sharding,
-        )
-        def eval_step(state, batch):
-            loss, info = loss_fn(state.params, state, batch, state.rng, train=False)
-            return info
 
     wandb_id = "{name}_{time}".format(
         name=FLAGS.wandb.name,
@@ -254,32 +146,45 @@ def main(_):
     def wandb_log(info, step):
         wandb.log(flatten_dict(info, sep="/"), step=step)
 
+    checkpointer = ocp.PyTreeCheckpointer()
+    from flax.training import orbax_utils
+
+    custom_restore_args = orbax_utils.restore_args_from_target(model)
+
     for checkpoint in list_of_checkpoints:
         step = int(checkpoints._checkpoint_path_step(checkpoint))
         if FLAGS.eval_every is not None and step % FLAGS.eval_every != 0:
             continue
         print(f"Loading checkpoint {step}: ", checkpoint)
-        train_state = checkpoints.restore_checkpoint(checkpoint, target=train_state)
+        model = checkpointer.restore(
+            checkpoint,
+            item=model,
+            transforms={},
+            restore_args=custom_restore_args,
+        )
+
         policy_fn = batched_apply(
-            partial(get_policy_sampled_actions, train_state, argmax=False, n=8),
+            partial(
+                get_policy_sampled_actions,
+                model,
+                argmax=False,
+                n=FLAGS.samples_per_timestep,
+            ),
             FLAGS.config.batch_size,
             devices=jax.devices(),
         )
-        for mode in FLAGS.modes:
-            for data_kwargs, visualizer in zip(val_datasets_kwargs, visualizers):
-                images = visualizer.visualize_for_wandb(policy_fn, max_trajs=3)
-                wandb_log({f"{mode}_{data_kwargs['name']}": images}, step=step)
 
-                info = visualizer.raw_evaluations(policy_fn, max_trajs=100)
-                metrics = visualizer.metrics_for_wandb(info)
-                wandb_log({f"{mode}_{data_kwargs['name']}": metrics}, step=step)
-        if FLAGS.run_eval:
-            for data_kwargs, val_data_iter in zip(val_datasets_kwargs, val_data_iters):
-                metrics = []
-                for _, batch in zip(range(FLAGS.config.num_val_batches), val_data_iter):
-                    metrics.append(eval_step(train_state, batch))
-                metrics = jax.tree_map(lambda *xs: np.mean(xs), *metrics)
-                wandb_log({f"validation_{data_kwargs['name']}": metrics}, step=step)
+        for data_kwargs, visualizer in zip(val_datasets_kwargs, visualizers):
+            raw_infos = visualizer.raw_evaluations(policy_fn, max_trajs=100)
+            metrics = visualizer.metrics_for_wandb(raw_infos)
+            images = visualizer.visualize_for_wandb(policy_fn, max_trajs=8)
+            wandb_log(
+                {
+                    f"offline_metrics_{data_kwargs['name']}": metrics,
+                    f"visualizations_{data_kwargs['name']}": images,
+                },
+                step=step,
+            )
 
 
 if __name__ == "__main__":

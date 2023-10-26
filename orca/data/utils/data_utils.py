@@ -63,6 +63,21 @@ def maybe_decode_depth_images(
     )
 
 
+def load_action_proprio_stats(path: str) -> Dict[str, Dict[str, List[float]]]:
+    # assert that path exists
+    assert tf.io.gfile.exists(path), f"{path} does not exist!"
+
+    # get statistics from an arbitrary (user supplied) path
+    logging.info(f"Loading existing statistics for normalization from {path}.")
+    with tf.io.gfile.GFile(path, "r") as f:
+        metadata = json.load(f)
+
+    return {
+        k: {k2: tf.convert_to_tensor(v2, dtype=tf.float32) for k2, v2 in v.items()}
+        for k, v in metadata.items()
+    }
+
+
 def get_action_proprio_stats(
     builder: DatasetBuilder,
     dataset: tf.data.Dataset,
@@ -80,37 +95,35 @@ def get_action_proprio_stats(
 
     # check if stats already exist and load, otherwise compute
     if tf.io.gfile.exists(path):
-        logging.info(f"Loading existing statistics for normalization from {path}.")
-        with tf.io.gfile.GFile(path, "r") as f:
-            metadata = json.load(f)
-    else:
-        logging.info("Computing action/proprio statistics for normalization...")
-        actions = []
-        proprios = []
-        for episode in tqdm.tqdm(dataset.take(1000)):
-            actions.append(episode["action"].numpy())
-            proprios.append(episode["observation"]["proprio"].numpy())
-        actions = np.concatenate(actions)
-        proprios = np.concatenate(proprios)
-        metadata = {
-            "action": {
-                "mean": [float(e) for e in actions.mean(0)],
-                "std": [float(e) for e in actions.std(0)],
-                "max": [float(e) for e in actions.max(0)],
-                "min": [float(e) for e in actions.min(0)],
-            },
-            "proprio": {
-                "mean": [float(e) for e in proprios.mean(0)],
-                "std": [float(e) for e in proprios.std(0)],
-                "max": [float(e) for e in proprios.max(0)],
-                "min": [float(e) for e in proprios.min(0)],
-            },
-        }
-        del actions
-        del proprios
-        with tf.io.gfile.GFile(path, "w") as f:
-            json.dump(metadata, f)
-        logging.info("Done!")
+        return load_action_proprio_stats(path)
+
+    logging.info("Computing action/proprio statistics for normalization...")
+    actions = []
+    proprios = []
+    for episode in tqdm.tqdm(dataset.take(1000)):
+        actions.append(episode["action"].numpy())
+        proprios.append(episode["observation"]["proprio"].numpy())
+    actions = np.concatenate(actions)
+    proprios = np.concatenate(proprios)
+    metadata = {
+        "action": {
+            "mean": [float(e) for e in actions.mean(0)],
+            "std": [float(e) for e in actions.std(0)],
+            "max": [float(e) for e in actions.max(0)],
+            "min": [float(e) for e in actions.min(0)],
+        },
+        "proprio": {
+            "mean": [float(e) for e in proprios.mean(0)],
+            "std": [float(e) for e in proprios.std(0)],
+            "max": [float(e) for e in proprios.max(0)],
+            "min": [float(e) for e in proprios.min(0)],
+        },
+    }
+    del actions
+    del proprios
+    with tf.io.gfile.GFile(path, "w") as f:
+        json.dump(metadata, f)
+    logging.info("Done!")
 
     return {
         k: {k2: tf.convert_to_tensor(v2, dtype=tf.float32) for k2, v2 in v.items()}

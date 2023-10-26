@@ -14,6 +14,7 @@ from orca.data.utils import bc_goal_relabeling, task_augmentation
 from orca.data.utils.data_utils import (
     ActionEncoding,
     get_action_proprio_stats,
+    load_action_proprio_stats,
     maybe_decode_depth_images,
     normalize_action_and_proprio,
     pprint_data_mixture,
@@ -140,7 +141,7 @@ def make_dataset(
     image_obs_keys: Union[str, List[str]] = [],
     depth_obs_keys: Union[str, List[str]] = [],
     state_obs_keys: Union[str, List[str]] = [],
-    action_proprio_metadata: Optional[dict] = None,
+    action_proprio_metadata: Optional[Union[dict, str]] = None,
     resize_size: Optional[Tuple[int, int]] = None,
     state_encoding: StateEncoding = StateEncoding.NONE,
     action_encoding: ActionEncoding = ActionEncoding.EEF_POS,
@@ -162,8 +163,8 @@ def make_dataset(
             Inserts padding image for each None key.
         state_obs_keys (str, List[str], optional): List of low-dim observation keys to be decoded.
             Get concatenated and mapped to "proprio". Inserts 1d padding for each None key.
-        action_proprio_metadata (dict, optional): dict with min/max/mean/std for action and proprio normalization.
-            If not provided, will get computed on the fly.
+        action_proprio_metadata (dict, str, optional): dict (or path to previously dumped json dict) with
+            min/max/mean/std for action and proprio normalization. If not provided, will get computed on the fly.
         resize_size (tuple, optional): target (height, width) for all RGB and depth images, default to no resize.
         state_encoding (StateEncoding): type of state encoding used, e.g. joint angles vs EEF pose.
         action_encoding (ActionEncoding): type of action encoding used, e.g. joint delta vs EEF delta.
@@ -207,8 +208,11 @@ def make_dataset(
 
     def restructure(traj):
         # apply any dataset-specific transforms
-        if name in RLDS_TRAJECTORY_MAP_TRANSFORMS:
-            traj = RLDS_TRAJECTORY_MAP_TRANSFORMS[name](traj)
+        rlds_transform = RLDS_TRAJECTORY_MAP_TRANSFORMS[name]
+
+        # skip None transforms
+        if rlds_transform is not None:
+            traj = rlds_transform(traj)
 
         # remove unused keys
         keep_keys = [
@@ -276,20 +280,21 @@ def make_dataset(
         return traj
 
     dataset = dataset.map(restructure)
+
+    # normalize actions and proprioceptive inputs
     if action_proprio_metadata is None:
         action_proprio_metadata = get_action_proprio_stats(
-            builder,
-            dataset,
-            state_obs_keys,
-            RLDS_TRAJECTORY_MAP_TRANSFORMS.get(name, None),
+            builder, dataset, state_obs_keys, RLDS_TRAJECTORY_MAP_TRANSFORMS[name]
         )
-        dataset = dataset.map(
-            partial(
-                normalize_action_and_proprio,
-                metadata=action_proprio_metadata,
-                normalization_type=action_proprio_normalization_type,
-            )
+    elif isinstance(action_proprio_metadata, str):
+        action_proprio_metadata = load_action_proprio_stats(action_proprio_metadata)
+    dataset = dataset.map(
+        partial(
+            normalize_action_and_proprio,
+            metadata=action_proprio_metadata,
+            normalization_type=action_proprio_normalization_type,
         )
+    )
 
     if apply_transforms:
         dataset = apply_common_transforms(
