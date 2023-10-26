@@ -28,7 +28,7 @@ import optax
 import cv2
 
 # bridge_data_robot imports
-from widowx_envs.widowx_env_service import WidowXClient, WidowXStatus
+from widowx_envs.widowx_env_service import WidowXClient, WidowXStatus, WidowXConfigs
 
 
 np.set_printoptions(suppress=True)
@@ -54,6 +54,7 @@ flags.DEFINE_spaceseplist("goal_eep", [0.3, 0.0, 0.15], "Goal position")
 flags.DEFINE_spaceseplist("initial_eep", [0.3, 0.0, 0.15], "Initial position")
 flags.DEFINE_integer("act_exec_horizon", 1, "Action sequence length")
 flags.DEFINE_bool("deterministic", False, "Whether to sample action deterministically")
+flags.DEFINE_float("temperature", 1.0, "Temperature for sampling actions")
 flags.DEFINE_string("ip", "localhost", "IP address of the robot")
 flags.DEFINE_integer("port", 5556, "Port of the robot")
 
@@ -62,13 +63,18 @@ flags.DEFINE_bool("show_image", False, "Show image")
 
 ##############################################################################
 
-STEP_DURATION = 0.2
+STEP_DURATION = 0.4
 NO_PITCH_ROLL = False
 NO_YAW = False
 STICKY_GRIPPER_NUM_STEPS = 1
-WORKSPACE_BOUNDS = [[0.1, -0.15, -0.1, -1.57, 0], [0.45, 0.25, 0.25, 1.57, 0]]
+WORKSPACE_BOUNDS = [[0.1, -0.15, -0.01, -1.57, 0], [0.45, 0.25, 0.25, 1.57, 0]]
 CAMERA_TOPICS = [{"name": "/blue/image_raw"}]
-FIXED_STD = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+FIXED_STD = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+ENV_PARAMS = {
+    "camera_topics": CAMERA_TOPICS,
+    "override_workspace_boundaries": WORKSPACE_BOUNDS,
+    "move_duration": STEP_DURATION,
+}
 
 ##############################################################################
 
@@ -245,6 +251,7 @@ def load_checkpoint(weights_path, config_path, metadata_path):
                 argmax=FLAGS.deterministic,
                 mean=action_mean,
                 std=action_std,
+                temperature=FLAGS.temperature,
             ),
             rng=policy_rng,
         ),
@@ -283,7 +290,7 @@ def main(_):
     ):
         assert tf.io.gfile.exists(checkpoint_weights_path), checkpoint_weights_path
         checkpoint_num = int(checkpoint_weights_path.split("_")[-1])
-        run_name = checkpoint_config_path.split("/")[-1]
+        run_name = checkpoint_config_path.split("/")[-2]
         policies[f"{run_name}-{checkpoint_num}"] = load_checkpoint(
             checkpoint_weights_path, checkpoint_config_path, checkpoint_metadata_path
         )
@@ -296,20 +303,10 @@ def main(_):
         start_state = None
 
     # set up environment
-    env_params = {
-        "fix_zangle": 0.1,
-        "move_duration": 0.2,
-        "adaptive_wait": True,
-        "move_to_rand_start_freq": 1,
-        "override_workspace_boundaries": WORKSPACE_BOUNDS,
-        "action_clipping": "xyz",
-        "catch_environment_except": False,
-        "start_state": list(start_state),
-        "return_full_image": False,
-        "camera_topics": CAMERA_TOPICS,
-    }
-
-    widowx_client = WidowXClient(FLAGS.ip, FLAGS.port)
+    env_params = WidowXConfigs.DefaultEnvParams.copy()
+    env_params.update(ENV_PARAMS)
+    env_params["state_state"] = list(start_state)
+    widowx_client = WidowXClient(host=FLAGS.ip, port=FLAGS.port)
     widowx_client.init(env_params, image_size=FLAGS.im_size)
 
     task = {
@@ -343,6 +340,7 @@ def main(_):
                 assert isinstance(FLAGS.goal_eep, list)
                 _eep = [float(e) for e in FLAGS.goal_eep]
                 goal_eep = state_to_eep(_eep, 0)
+                widowx_client.move_gripper(1.0)  # open gripper
 
                 move_status = None
                 while move_status != WidowXStatus.SUCCESS:
@@ -376,13 +374,14 @@ def main(_):
             assert isinstance(FLAGS.initial_eep, list)
             initial_eep = [float(e) for e in FLAGS.initial_eep]
             eep = state_to_eep(initial_eep, 0)
+            widowx_client.move_gripper(1.0)  # open gripper
 
             # retry move action until success
             move_status = None
             while move_status != WidowXStatus.SUCCESS:
                 move_status = widowx_client.move(eep, duration=1.5)
 
-        input("start?")
+        input("Press [Enter] to start.")
 
         # do rollout
         obs_hist = []
