@@ -92,7 +92,7 @@ class BasicActionHead(nn.Module):
         actions_chunked = self._chunk_actions(actions)
 
         # only use first horizon timesteps from the window
-        horizon = actions_chunked.shape[1]
+        horizon = action_logprob.shape[1]
         actions_chunked = actions_chunked[:, :horizon]
 
         # tokenize the target actions and convert them to one hot vectors
