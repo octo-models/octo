@@ -1,5 +1,6 @@
-from absl import app, flags
 import os
+
+from absl import app, flags
 
 FLAGS = flags.FLAGS
 
@@ -14,6 +15,7 @@ def main(_):
     checkpoint_path = os.path.join(FLAGS.bucket_path, f"checkpoint_{FLAGS.step_number}")
     norm_path = os.path.join(FLAGS.bucket_path, "action_proprio*")
     config_path = os.path.join(FLAGS.bucket_path, "config.json*")
+    example_batch_path = os.path.join(FLAGS.bucket_path, "example_batch.msgpack*")
     run_name = os.path.basename(os.path.normpath(FLAGS.bucket_path))
     save_path = os.path.join(FLAGS.save_path, run_name)
     os.makedirs(save_path, exist_ok=True)
@@ -21,6 +23,7 @@ def main(_):
     os.system(f"gsutil cp -r {checkpoint_path} {save_path}/")
     os.system(f"gsutil cp {norm_path} {save_path}/")
     os.system(f"gsutil cp {config_path} {save_path}/")
+    os.system(f"gsutil cp {example_batch_path} {save_path}/")
 
 
 if __name__ == "__main__":
