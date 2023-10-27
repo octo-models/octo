@@ -24,5 +24,7 @@ def uniform(traj):
         lambda x: tf.gather(x, goal_idxs),
         traj["observation"],
     )
+    traj["tasks"]["goal_timestep"] = goal_idxs + 1
+    traj["tasks"]["end_timestep"] = tf.ones_like(goal_idxs) * traj_len
 
     return traj

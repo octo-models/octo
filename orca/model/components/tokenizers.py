@@ -208,10 +208,53 @@ class ActionTokenizer(nn.Module):
             return actions
 
 
+class BinTokenizer(nn.Module):
+    """
+    Tokenizes continuous inputs via dimension-wise binning in given range.
+
+    Args:
+        n_bins (int): Number of discrete bins per dimension.
+        bin_type (str): Type of binning. ['uniform', 'normal' = Gaussian]
+        low (float): Lower bound for bin range.
+        high (float): Upper bound for bin range.
+    """
+
+    n_bins: int
+    bin_type: str = "uniform"
+    low: float = 0
+    high: float = 1
+
+    def setup(self):
+        if self.normalization_type == "uniform":
+            self.thresholds = jnp.linspace(self.low, self.high, self.n_bins + 1)
+        elif self.normalization_type == "normal":
+            self.thresholds = norm.ppf(jnp.linspace(EPS, 1 - EPS, self.n_bins + 1))
+        else:
+            raise ValueError
+
+    def __call__(self, inputs, mode: str = "tokenize"):
+        if mode == "tokenize":
+            if self.normalization_type == "bounds":
+                inputs = jnp.clip(inputs, self.low + EPS, self.high - EPS)
+            inputs = inputs[..., None]
+            token_one_hot = (inputs < self.thresholds[1:]) & (
+                inputs >= self.thresholds[:-1]
+            ).astype(jnp.uint8)
+            output_tokens = jnp.argmax(token_one_hot, axis=-1)
+            return output_tokens
+        elif mode == "detokenize":
+            output_tokens = inputs
+            one_hot = jax.nn.one_hot(output_tokens, self.n_bins)
+            bin_avgs = (self.thresholds[1:] + self.thresholds[:-1]) / 2
+            outputs = jnp.sum(one_hot * bin_avgs, axis=-1)
+            return outputs
+
+
 TOKENIZERS = {
     "image_tokenizer": ImageTokenizer,
     "language_tokenizer": LanguageTokenizer,
     "action_tokenizer": ActionTokenizer,
+    "bin_tokenizer": BinTokenizer,
 }
 
 
