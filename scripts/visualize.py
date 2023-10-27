@@ -24,7 +24,7 @@ import wandb
 
 from orca.utils.jax_utils import initialize_compilation_cache
 from orca.utils.pretrained_utils import PretrainedModel
-from orca.utils.train_utils import batched_apply
+from orca.utils.train_utils import batched_apply, filter_eval_datasets
 from orca.utils.visualization_lib import Visualizer
 
 FLAGS = flags.FLAGS
@@ -89,7 +89,12 @@ def main(_):
     text_processor = model.text_processor
 
     visualizers = []
-    for dataset_kwargs in FLAGS.config.dataset_kwargs["data_kwargs_list"]:
+    val_datasets_kwargs, _ = filter_eval_datasets(
+        FLAGS.config.dataset_kwargs["data_kwargs_list"],
+        [1.0] * len(FLAGS.config.dataset_kwargs["data_kwargs_list"]),
+        FLAGS.config.eval_datasets,
+    )
+    for dataset_kwargs in val_datasets_kwargs:
         val_data_kwargs = {
             **dataset_kwargs,
             **FLAGS.config.dataset_kwargs["common_kwargs"],
@@ -169,9 +174,7 @@ def main(_):
             devices=jax.devices(),
         )
 
-        for data_kwargs, visualizer in zip(
-            FLAGS.config.dataset_kwargs["data_kwargs_list"], visualizers
-        ):
+        for data_kwargs, visualizer in zip(val_datasets_kwargs, visualizers):
             raw_infos = visualizer.raw_evaluations(policy_fn, max_trajs=100)
             metrics = visualizer.metrics_for_wandb(raw_infos)
             images = visualizer.visualize_for_wandb(policy_fn, max_trajs=8)
