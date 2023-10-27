@@ -28,6 +28,7 @@ from orca.utils.jax_utils import initialize_compilation_cache
 from orca.utils.train_utils import (
     batched_apply,
     create_train_state,
+    filter_eval_datasets,
     format_name_with_config,
     Timer,
 )
@@ -138,13 +139,19 @@ def main(_):
             FLAGS.config.dataset_kwargs["data_kwargs_list"],
             train=True,
             sample_weights=sample_weights,
+            shuffle_buffer_size=FLAGS.config.shuffle_buffer_size,
         )
         .repeat()
         .batch(FLAGS.config.batch_size)
     )
     val_datas = []
     visualizers = []
-    for dataset_kwargs in FLAGS.config.dataset_kwargs["data_kwargs_list"]:
+    val_datasets_kwargs, val_datasets_sample_weights = filter_eval_datasets(
+        FLAGS.config.dataset_kwargs["data_kwargs_list"],
+        sample_weights,
+        FLAGS.config.eval_datasets,
+    )
+    for dataset_kwargs in val_datasets_kwargs:
         val_data_kwargs = copy.deepcopy(dataset_kwargs)
         val_data_kwargs.update(**FLAGS.config.dataset_kwargs["common_kwargs"])
         val_dataset = make_dataset(**val_data_kwargs, train=False)
@@ -374,9 +381,7 @@ def main(_):
             logging.info("Evaluating...")
             timer.tick("val")
             per_dataset_metrics = []
-            for data_kwargs, val_data_iter in zip(
-                FLAGS.config.dataset_kwargs["data_kwargs_list"], val_data_iters
-            ):
+            for data_kwargs, val_data_iter in zip(val_datasets_kwargs, val_data_iters):
                 metrics = []
                 for _, batch in zip(range(FLAGS.config.num_val_batches), val_data_iter):
                     metrics.append(eval_step(train_state, batch))
@@ -385,19 +390,21 @@ def main(_):
                 per_dataset_metrics.append(metrics)
 
             # log weighted aggregate metrics
-            sample_weights = (
-                sample_weights
-                if sample_weights is not None
+            val_datasets_sample_weights = (
+                val_datasets_sample_weights
+                if val_datasets_sample_weights is not None
                 else [1.0] * len(per_dataset_metrics)
             )
-            sample_weights = sample_weights / np.sum(
-                sample_weights
+            val_datasets_sample_weights = val_datasets_sample_weights / np.sum(
+                val_datasets_sample_weights
             )  # normalize to sum to 1
             agg_metrics = jax.tree_map(
                 lambda *xs: np.sum(xs),
                 *[
                     jax.tree_map(lambda x: x * weight, metric)
-                    for metric, weight in zip(per_dataset_metrics, sample_weights)
+                    for metric, weight in zip(
+                        per_dataset_metrics, val_datasets_sample_weights
+                    )
                 ],
             )
             wandb_log({"validation_aggregate": agg_metrics}, step=i)
@@ -409,9 +416,7 @@ def main(_):
                 partial(get_policy_sampled_actions, train_state),
                 FLAGS.config.batch_size,
             )
-            for data_kwargs, visualizer in zip(
-                FLAGS.config.dataset_kwargs["data_kwargs_list"], visualizers
-            ):
+            for data_kwargs, visualizer in zip(val_datasets_kwargs, visualizers):
                 raw_infos = visualizer.raw_evaluations(policy_fn, max_trajs=100)
                 metrics = visualizer.metrics_for_wandb(raw_infos)
                 images = visualizer.visualize_for_wandb(policy_fn, max_trajs=8)

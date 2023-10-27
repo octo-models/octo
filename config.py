@@ -38,6 +38,7 @@ def get_config(config_string):
         text_processor_kwargs=dict(),
         pretrained_weights=[],
         wandb=base_wandb_config,
+        eval_datasets=None,
     )
 
     # params that need to be specified multiple places

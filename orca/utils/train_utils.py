@@ -153,3 +153,21 @@ def batched_apply(fn, batch_size, devices=None):
         return jax.tree_map(lambda *args: np.concatenate(args, axis=0), *outputs)
 
     return wrapped_fn
+
+
+def filter_eval_datasets(dataset_kwargs_list, sample_weights, eval_datasets=None):
+    if eval_datasets is None:
+        return dataset_kwargs_list, sample_weights
+    else:
+        return list(
+            map(
+                list,
+                zip(
+                    *[
+                        (dkwargs, weight)
+                        for dkwargs, weight in zip(dataset_kwargs_list, sample_weights)
+                        if (dkwargs["name"] in eval_datasets)
+                    ]
+                ),
+            )
+        )
