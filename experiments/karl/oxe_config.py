@@ -13,12 +13,12 @@ def get_config(config_string):
 
     base_config = dict(
         batch_size=256,
-        shuffle_buffer_size=20000,
+        shuffle_buffer_size=10000,
         num_val_batches=8,
         num_steps=int(2e6),
         start_step=placeholder(int),
         log_interval=100,
-        eval_interval=10000,
+        eval_interval=10000000,
         save_interval=10000,
         save_dir='gs://karl-central-2',
         resume_path=placeholder(str),
@@ -58,15 +58,27 @@ def get_config(config_string):
     )
 
     base_model_config = dict(
-        policy_kwargs=dict(
+        token_embedding_size=256,
+        max_horizon=10,
+        readouts=dict(action=7),
+        transformer_kwargs=dict(
             num_layers=4,
             mlp_dim=1024,
-            vocab_size=256,
-            num_heads=8,
+            num_attention_heads=8,
             dropout_rate=0.1,
-            normalization_type=normalization_type,
-            pred_horizon=1,
-        )
+        ),
+        heads=dict(
+            action=dict(
+                cls_name="token_per_dim_action_head",
+                kwargs=dict(
+                    pred_horizon=1,
+                    action_dim=7,
+                    vocab_size=256,
+                    normalization_type=normalization_type,
+                    readout_key="action",
+                ),
+            )
+        ),
     )
 
     base_tokenizer_kwargs = dict(
@@ -92,7 +104,6 @@ def get_config(config_string):
     possible_structures = {
         "transformer_bc_rtx": ConfigDict(
             dict(
-                agent="transformer_bc",
                 model=update_config(
                     base_model_config,
                     observation_tokenizers=[
