@@ -28,10 +28,10 @@ def get_config(config_string):
         num_val_batches=8,
         num_steps=int(2e6),
         start_step=placeholder(int),
-        log_interval=100,
-        eval_interval=5000,
+        log_interval=1000,
+        eval_interval=20000,
         save_interval=5000,
-        save_dir=placeholder(str),
+        save_dir="gs://karl-central-1", #placeholder(str),
         resume_path=placeholder(str),
         seed=42,
         text_processor=None,
@@ -69,7 +69,7 @@ def get_config(config_string):
         "data_kwargs_list": [
             {
                 "name": "bridge_dataset",
-                "data_dir": "/nfs/kun2/datasets/tfds",
+                "data_dir": "gs://rail-orca-central1", #"/nfs/kun2/datasets/tfds",
                 "image_obs_keys": ["image_0"],
                 "state_obs_keys": ["state"],
             },

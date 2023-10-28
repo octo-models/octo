@@ -225,16 +225,16 @@ class BinTokenizer(nn.Module):
     high: float = 1
 
     def setup(self):
-        if self.normalization_type == "uniform":
+        if self.bin_type == "uniform":
             self.thresholds = jnp.linspace(self.low, self.high, self.n_bins + 1)
-        elif self.normalization_type == "normal":
+        elif self.bin_type == "normal":
             self.thresholds = norm.ppf(jnp.linspace(EPS, 1 - EPS, self.n_bins + 1))
         else:
             raise ValueError
 
     def __call__(self, inputs, mode: str = "tokenize"):
         if mode == "tokenize":
-            if self.normalization_type == "bounds":
+            if self.bin_type == "bounds":
                 inputs = jnp.clip(inputs, self.low + EPS, self.high - EPS)
             inputs = inputs[..., None]
             token_one_hot = (inputs < self.thresholds[1:]) & (
