@@ -77,10 +77,10 @@ class TemporalDistanceRewardHead(nn.Module):
 
         # compute target distances
         # use goal distance when it is not padded, otherwise use distance to end (for language instruction tasks)
-        distance_to_goal = jnp.minimum(
+        distance_to_goal = jnp.maximum(
             tasks["goal_timestep"][:, None] - observations["timestep"], 0
         )
-        distance_to_end = jnp.minimum(
+        distance_to_end = jnp.maximum(
             tasks["end_timestep"][:, None] - observations["timestep"], 0
         )
         has_goal = jnp.any(tasks["image_0"], axis=(-1, -2, -3))
@@ -95,7 +95,7 @@ class TemporalDistanceRewardHead(nn.Module):
         # compute the CE loss using the log probabilities and target distances
         distance_loss = -jnp.sum(distance_logprob * distance_labels_one_hot, axis=-1)
         # mask the loss with the pad mask to avoid supervising padding
-        distance_loss = (distance_loss * pad_mask[:, :, None]).mean()
+        distance_loss = (distance_loss * pad_mask).mean()
 
         # take the highest probability distances as the predicted distances
         distance_pred = jnp.argmax(distance_logits, axis=-1)
@@ -103,12 +103,12 @@ class TemporalDistanceRewardHead(nn.Module):
         # compute accuracy between predicted distances and target distances
         accuracy = distance_pred == distance_labels
         # mask the accuracy with the pad mask to remove the contribution of padding
-        accuracy = (accuracy * pad_mask[:, :, None]).mean()
+        accuracy = (accuracy * pad_mask).mean()
 
         # detokenize the predicted distances
         distance_values = self.distance_tokenizer(distance_pred, mode="detokenize")
         # compute the mean squared error between predicted distances and target distances
-        distance_mse = jnp.square(distance_target - distance_values).sum(axis=-1)
+        distance_mse = jnp.square(distance_target - distance_values)
         # mask the mse with the pad mask to remove the contribution of padding
         distance_mse = (distance_mse * pad_mask).mean()
 
@@ -116,6 +116,8 @@ class TemporalDistanceRewardHead(nn.Module):
             "loss": distance_loss,
             "mse": distance_mse,
             "accuracy": accuracy,
+            "distance_targets": distance_target,
+            "distance_pred": distance_pred,
         }
 
     def predict_reward(
