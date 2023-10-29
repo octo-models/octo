@@ -208,6 +208,12 @@ class ResNetEncoder(nn.Module):
 
     @nn.compact
     def __call__(self, observations: jnp.ndarray, train: bool = True, cond_var=None):
+        expecting_cond_var = self.use_multiplicative_cond or self.use_film
+        received_cond_var = cond_var is not None
+        assert (
+            expecting_cond_var == received_cond_var
+        ), "Only pass in cond var iff model expecting cond var"
+
         # put inputs in [-1, 1]
         x = observations.astype(jnp.float32) / 127.5 - 1.0
 
