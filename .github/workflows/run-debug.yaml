@@ -1,9 +1,9 @@
-name: Run Debug Dataset
+name: run-debug
 
 on:
   pull_request:
   push:
-    branches: [main, test-debug-ci]
+    branches: [main]
 
 jobs:
   setup_and_run:
@@ -23,12 +23,9 @@ jobs:
         pip install -e .
         pip install -r requirements.txt
 
-    - name: Jax with CPU
+    - name: install Jax with CPU
       run: |
         pip install --upgrade "jax[cpu]==0.4.13"
 
     - name: Train on debug dataset
       run: WANDB_MODE=disabled python train.py --config config.py:ci_debug_dataset --name debug
-
-    - name: Run pre-commit
-      uses: pre-commit/action@v3.0.0
