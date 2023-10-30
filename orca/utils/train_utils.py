@@ -16,13 +16,23 @@ class TrainState(train_state.TrainState):
 
 
 def create_train_state(
-    rng, model_def, tx, init_args=(), init_kwargs=dict(), pretrained_loaders=tuple()
+    rng,
+    model_def,
+    tx,
+    init_args=(),
+    init_kwargs=dict(),
+    pretrained_loaders=tuple(),
+    init_method=None,
 ):
     """Utility to create a TrainState."""
     init_rng, state_rng = jax.random.split(rng)
 
     # Initializing the model in a jit avoids running the model on CPU
-    init_dict = jax.jit(model_def.init)(init_rng, *init_args, **init_kwargs)
+    @jax.jit
+    def _init():
+        return model_def.init(init_rng, *init_args, **init_kwargs, method=init_method)
+
+    init_dict = _init()
 
     ev, params = flax.core.pop(init_dict, "params")
     assert (
@@ -143,3 +153,21 @@ def batched_apply(fn, batch_size, devices=None):
         return jax.tree_map(lambda *args: np.concatenate(args, axis=0), *outputs)
 
     return wrapped_fn
+
+
+def filter_eval_datasets(dataset_kwargs_list, sample_weights, eval_datasets=None):
+    if eval_datasets is None:
+        return dataset_kwargs_list, sample_weights
+    else:
+        return list(
+            map(
+                list,
+                zip(
+                    *[
+                        (dkwargs, weight)
+                        for dkwargs, weight in zip(dataset_kwargs_list, sample_weights)
+                        if (dkwargs["name"] in eval_datasets)
+                    ]
+                ),
+            )
+        )

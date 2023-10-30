@@ -6,6 +6,7 @@ import os
 import os.path as osp
 
 from absl import app, flags, logging
+import flax
 from flax.training import checkpoints
 from flax.traverse_util import flatten_dict
 import jax
@@ -21,12 +22,13 @@ import wandb
 import orca
 from orca.data.dataset import make_dataset, make_interleaved_dataset
 from orca.data.utils.text_processing import text_processors
-from orca.model import create_model_def
+from orca.model import create_model_def, OrcaModel
 from orca.model.components.hf_weight_loaders import weights_loaders
 from orca.utils.jax_utils import initialize_compilation_cache
 from orca.utils.train_utils import (
     batched_apply,
     create_train_state,
+    filter_eval_datasets,
     format_name_with_config,
     Timer,
 )
@@ -137,13 +139,19 @@ def main(_):
             FLAGS.config.dataset_kwargs["data_kwargs_list"],
             train=True,
             sample_weights=sample_weights,
+            shuffle_buffer_size=FLAGS.config.shuffle_buffer_size,
         )
         .repeat()
         .batch(FLAGS.config.batch_size)
     )
     val_datas = []
     visualizers = []
-    for dataset_kwargs in FLAGS.config.dataset_kwargs["data_kwargs_list"]:
+    val_datasets_kwargs, val_datasets_sample_weights = filter_eval_datasets(
+        FLAGS.config.dataset_kwargs["data_kwargs_list"],
+        sample_weights,
+        FLAGS.config.eval_datasets,
+    )
+    for dataset_kwargs in val_datasets_kwargs:
         val_data_kwargs = copy.deepcopy(dataset_kwargs)
         val_data_kwargs.update(**FLAGS.config.dataset_kwargs["common_kwargs"])
         val_dataset = make_dataset(**val_data_kwargs, train=False)
@@ -190,8 +198,6 @@ def main(_):
 
     # set up model, optimizer, loss
     model_def = create_model_def(
-        action_dim=example_batch["action"].shape[-1],
-        window_size=example_batch["observation"]["image_0"].shape[1],
         **FLAGS.config.model.to_dict(),
     )
 
@@ -216,10 +222,26 @@ def main(_):
         init_args=(
             example_batch["observation"],
             example_batch["tasks"],
-            example_batch["action"],
+            example_batch["observation"]["pad_mask"],
         ),
+        init_kwargs=dict(train=False, verbose=True),
         pretrained_loaders=pretrained_loaders,
     )
+
+    if save_dir is not None:
+        # Saving example batch for future checkpoint loading
+        with tf.io.gfile.GFile(
+            os.path.join(save_dir, "example_batch.msgpack"), "wb"
+        ) as f:
+            f.write(flax.serialization.msgpack_serialize(example_batch))
+
+        example_batch_spec = jax.tree_map(
+            lambda arr: (arr.shape, str(arr.dtype)), example_batch
+        )
+        wandb.config.update(
+            dict(example_batch_spec=example_batch_spec), allow_val_change=True
+        )
+
     if FLAGS.config.resume_path is not None:
         train_state = checkpoints.restore_checkpoint(
             FLAGS.config.resume_path, target=train_state
@@ -234,16 +256,39 @@ def main(_):
     else:
         start_step = FLAGS.config.start_step or 0
 
+    horizon = (
+        FLAGS.config.dataset_kwargs.common_kwargs.window_size
+        - FLAGS.config.model.heads["action"]["kwargs"]["pred_horizon"]
+        + 1
+    )  # Ensures that there is a full horizon of actions to predict for each timestep
+
     def loss_fn(params, state, batch, rng, train=True):
-        info = state.apply_fn(
+        def get_loss(model: OrcaModel, observations, tasks, actions, train):
+            # only use first horizon timesteps as input to transformer
+            # to ensure that there is a full horizon of actions to predict for each timestep
+            observations = jax.tree_map(lambda x: x[:, :horizon], observations)
+
+            transformer_embeddings = model.orca_transformer(
+                observations, tasks, observations["pad_mask"], train=train
+            )
+            action_loss, action_metrics = model.heads["action"].loss(
+                transformer_embeddings,  # Action head knows to pull out the action readout_key
+                actions,
+                pad_mask=observations["pad_mask"],
+                train=train,
+            )
+
+            return action_loss, action_metrics
+
+        return state.apply_fn(
             {"params": params},
             batch["observation"],
             batch["tasks"],
             batch["action"],
             train=train,
             rngs={"dropout": rng},
+            method=get_loss,
         )
-        return info["loss"], info
 
     @partial(
         jax.jit,
@@ -271,12 +316,6 @@ def main(_):
         loss, info = loss_fn(state.params, state, batch, state.rng, train=False)
         return info
 
-    horizon = (
-        FLAGS.config.dataset_kwargs.common_kwargs.window_size
-        - FLAGS.config.model.policy_kwargs.pred_horizon
-        + 1
-    )
-
     @partial(
         jax.jit,
         in_shardings=(replicated_sharding, dp_sharding, dp_sharding),
@@ -285,18 +324,34 @@ def main(_):
     def get_policy_sampled_actions(state, observations, tasks):
         # only use first horizon timesteps as input to predict_action
         observations = jax.tree_map(lambda x: x[:, -horizon:], observations)
+
+        def get_actions(model, observations, tasks, train):
+            transformer_embeddings = model.orca_transformer(
+                observations,
+                tasks,
+                observations["pad_mask"],
+                train=train,
+            )
+
+            actions = model.heads["action"].predict_action(
+                transformer_embeddings,  # Action head knows to pull out the action readout_key
+                train=train,
+                argmax=False,
+                sample_shape=(NUM_ACTIONS_FOR_VIS,),
+                rng=state.rng,
+            )
+            return actions
+
         actions = state.apply_fn(
             {"params": state.params},
             observations,
             tasks,
             train=False,
-            argmax=False,
-            sample_shape=(NUM_ACTIONS_FOR_VIS,),
-            rng=state.rng,
-            method="predict_action",
+            method=get_actions,
             rngs={"dropout": state.rng},
-        )
-        # actions is (n, batch_size, pred_horizon, action_dim)
+        )  # We could also have used run_head here, but this is easier to read
+
+        # actions is (NUM_ACTIONS_FOR_VIS, batch_size, pred_horizon, action_dim)
         # where actions[:, :, i] predicts the action at timestep "window_size + i"
         actions = actions[..., 0, :]
 
@@ -326,9 +381,7 @@ def main(_):
             logging.info("Evaluating...")
             timer.tick("val")
             per_dataset_metrics = []
-            for data_kwargs, val_data_iter in zip(
-                FLAGS.config.dataset_kwargs["data_kwargs_list"], val_data_iters
-            ):
+            for data_kwargs, val_data_iter in zip(val_datasets_kwargs, val_data_iters):
                 metrics = []
                 for _, batch in zip(range(FLAGS.config.num_val_batches), val_data_iter):
                     metrics.append(eval_step(train_state, batch))
@@ -337,19 +390,21 @@ def main(_):
                 per_dataset_metrics.append(metrics)
 
             # log weighted aggregate metrics
-            sample_weights = (
-                sample_weights
-                if sample_weights is not None
+            val_datasets_sample_weights = (
+                val_datasets_sample_weights
+                if val_datasets_sample_weights is not None
                 else [1.0] * len(per_dataset_metrics)
             )
-            sample_weights = sample_weights / np.sum(
-                sample_weights
+            val_datasets_sample_weights = val_datasets_sample_weights / np.sum(
+                val_datasets_sample_weights
             )  # normalize to sum to 1
             agg_metrics = jax.tree_map(
                 lambda *xs: np.sum(xs),
                 *[
                     jax.tree_map(lambda x: x * weight, metric)
-                    for metric, weight in zip(per_dataset_metrics, sample_weights)
+                    for metric, weight in zip(
+                        per_dataset_metrics, val_datasets_sample_weights
+                    )
                 ],
             )
             wandb_log({"validation_aggregate": agg_metrics}, step=i)
@@ -361,9 +416,7 @@ def main(_):
                 partial(get_policy_sampled_actions, train_state),
                 FLAGS.config.batch_size,
             )
-            for data_kwargs, visualizer in zip(
-                FLAGS.config.dataset_kwargs["data_kwargs_list"], visualizers
-            ):
+            for data_kwargs, visualizer in zip(val_datasets_kwargs, visualizers):
                 raw_infos = visualizer.raw_evaluations(policy_fn, max_trajs=100)
                 metrics = visualizer.metrics_for_wandb(raw_infos)
                 images = visualizer.visualize_for_wandb(policy_fn, max_trajs=8)

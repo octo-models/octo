@@ -38,6 +38,7 @@ def get_config(config_string):
         text_processor_kwargs=dict(),
         pretrained_weights=[],
         wandb=base_wandb_config,
+        eval_datasets=None,
     )
 
     # params that need to be specified multiple places
@@ -80,15 +81,27 @@ def get_config(config_string):
     )
 
     base_model_config = dict(
-        policy_kwargs=dict(
+        token_embedding_size=256,
+        max_horizon=10,
+        readouts=dict(action=7),
+        transformer_kwargs=dict(
             num_layers=4,
             mlp_dim=1024,
-            vocab_size=256,
-            num_heads=8,
+            num_attention_heads=8,
             dropout_rate=0.1,
-            normalization_type=normalization_type,
-            pred_horizon=1,
-        )
+        ),
+        heads=dict(
+            action=dict(
+                cls_name="token_per_dim_action_head",
+                kwargs=dict(
+                    pred_horizon=1,
+                    action_dim=7,
+                    vocab_size=256,
+                    normalization_type=normalization_type,
+                    readout_key="action",
+                ),
+            )
+        ),
     )
 
     base_tokenizer_kwargs = dict(
@@ -210,6 +223,7 @@ def get_config(config_string):
                                 num_tokens=64,
                                 task_stack_keys=[],
                                 task_film_keys=["language_instruction"],
+                                encoder="resnetv1-34-bridge-film",
                             ),
                         ),
                     ],
@@ -299,6 +313,7 @@ def get_config(config_string):
                                 num_tokens=64,
                                 task_stack_keys=["image_.*"],
                                 task_film_keys=["language_instruction"],
+                                encoder="resnetv1-34-bridge-film",
                             ),
                         ),
                     ],
@@ -329,6 +344,7 @@ def get_config(config_string):
                                 num_tokens=64,
                                 task_stack_keys=["image_.*"],
                                 task_film_keys=["language_instruction"],
+                                encoder="resnetv1-34-bridge-film",
                             ),
                         ),
                     ],
@@ -356,14 +372,26 @@ def get_config(config_string):
         "ci_debug_dataset": ConfigDict(
             dict(
                 model=dict(
-                    policy_kwargs=dict(
-                        num_layers=1,
-                        mlp_dim=128,
-                        vocab_size=256,
-                        num_heads=1,
+                    token_embedding_size=256,
+                    max_horizon=10,
+                    readouts=dict(action=7),
+                    transformer_kwargs=dict(
+                        num_layers=4,
+                        mlp_dim=1024,
+                        num_attention_heads=8,
                         dropout_rate=0.1,
-                        normalization_type=normalization_type,
-                        pred_horizon=1,
+                    ),
+                    heads=dict(
+                        action=dict(
+                            cls_name="token_per_dim_action_head",
+                            kwargs=dict(
+                                pred_horizon=1,
+                                action_dim=7,
+                                vocab_size=256,
+                                normalization_type=normalization_type,
+                                readout_key="action",
+                            ),
+                        )
                     ),
                     observation_tokenizers=[
                         (

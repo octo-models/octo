@@ -286,6 +286,11 @@ def plot_trajectory_actions(
     """Creates a 3D plotly figure of the trajectory and predicted actions."""
     pred_actions, actions, proprio = unnorm_pred_actions, unnorm_actions, unnorm_proprio
 
+    # TODO: make this less hardcoded
+    proprio = np.concatenate(
+        [proprio[..., 1:7], proprio[..., -1:]], axis=-1
+    )  # extract proprio
+
     fig = go.Figure()
     fig.add_trace(
         go.Scatter3d(
