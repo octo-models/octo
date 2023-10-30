@@ -1,7 +1,7 @@
 # ORCA
 
 ![](https://github.com/rail-berkeley/orca/workflows/run-debug/badge.svg)
-
+![](https://github.com/rail-berkeley/orca/workflows/pre-commit/badge.svg)
 
 This repo contains code for training and finetuning large robot policies.
 Currently, ORCA policies are causal transformer models trained on a diverse mix of robot datasets using BC.
