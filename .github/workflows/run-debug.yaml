@@ -16,14 +16,14 @@ jobs:
     - name: Setup Python
       uses: actions/setup-python@v4
       with:
-        python-version: '3.10' 
+        python-version: '3.10'
 
     - name: Install dependencies
       run: |
         pip install -e .
         pip install -r requirements.txt
 
-    - name: install Jax with CPU
+    - name: Install Jax with CPU
       run: |
         pip install --upgrade "jax[cpu]==0.4.13"
 
