@@ -55,6 +55,7 @@ def apply_common_transforms(
     window_size: int = 1,
     resize_size: Optional[Tuple[int, int]] = None,
     skip_unlabeled: bool = False,
+    num_parallel_reads: int = tf.data.AUTOTUNE,
     **unused_kwargs,
 ):
     """Common transforms shared between all datasets.
@@ -73,6 +74,7 @@ def apply_common_transforms(
         resize_size (tuple, optional): target (height, width) for all RGB and depth images, default to no resize.
         window_size (int, optional): The length of the snippets that trajectories are chunked into.
         skip_unlabeled (bool, optional): Whether to skip trajectories with no language labels.
+        num_parallel_reads: number of parallel reads in the dataloader. default enum: tf.data.AUTOTUNE
     """
     if unused_kwargs:
         logging.warning(
@@ -85,14 +87,16 @@ def apply_common_transforms(
         )
 
     # decodes string keys with names "image" & "depth", resizes "image" and "depth"
-    dataset = dataset.frame_map(dl.transforms.decode_images)
-    dataset = dataset.frame_map(maybe_decode_depth_images)
+    dataset = dataset.frame_map(dl.transforms.decode_images, num_parallel_reads)
+    dataset = dataset.frame_map(maybe_decode_depth_images, num_parallel_reads)
     if resize_size:
         dataset = dataset.frame_map(
-            partial(dl.transforms.resize_images, size=resize_size)
+            partial(dl.transforms.resize_images, size=resize_size),
+            num_parallel_reads,
         )
         dataset = dataset.frame_map(
-            partial(dl.transforms.resize_depth_images, size=resize_size)
+            partial(dl.transforms.resize_depth_images, size=resize_size),
+            num_parallel_reads,
         )
 
     if train:
@@ -101,7 +105,8 @@ def apply_common_transforms(
             partial(
                 dl.transforms.augment,
                 augment_kwargs=image_augment_kwargs,
-            )
+            ),
+            num_parallel_reads,
         )
 
     # adds the "tasks" key
@@ -147,6 +152,7 @@ def make_dataset(
     action_encoding: ActionEncoding = ActionEncoding.EEF_POS,
     ram_budget: Optional[int] = None,
     action_proprio_normalization_type: Optional[str] = None,
+    num_parallel_reads: int = tf.data.AUTOTUNE,
     apply_transforms: bool = True,
     **kwargs,
 ) -> tf.data.Dataset:
@@ -169,6 +175,7 @@ def make_dataset(
         state_encoding (StateEncoding): type of state encoding used, e.g. joint angles vs EEF pose.
         action_encoding (ActionEncoding): type of action encoding used, e.g. joint delta vs EEF delta.
         ram_budget (int, optional): limits the RAM used by tf.data.AUTOTUNE, unit: GB, forwarded to AutotuneOptions.
+        num_parallel_reads: number of parallel reads in the dataloader. default enum: tf.data.AUTOTUNE
         action_proprio_normalization_type (Optional[str], optional): The type of normalization to perform on the action,
             proprio, or both. Can be "normal" (mean 0, std 1) or "bounds" (normalized to [-1, 1]).
         apply_transforms (bool): If True, applies common transforms like augmentations and chunking to episode dataset.
@@ -191,7 +198,7 @@ def make_dataset(
         split = "train" if train else "val"
 
     dataset = dl.DLataset.from_rlds(
-        builder, split=split, shuffle=shuffle, num_parallel_reads=8
+        builder, split=split, shuffle=shuffle, num_parallel_reads=num_parallel_reads
     )
     if ram_budget:
         dataset = dataset.with_ram_budget(ram_budget)
@@ -304,6 +311,7 @@ def make_dataset(
             dataset,
             train=train,
             resize_size=resize_size,
+            num_parallel_reads=num_parallel_reads,
             **kwargs,
         )
 
@@ -354,5 +362,11 @@ def make_interleaved_dataset(
         **common_dataset_args,
     )
 
-    dataset = dataset.flatten(num_parallel_calls=8).shuffle(shuffle_buffer_size)
+    # set default num_parallel_reads if not set in config
+    if "num_parallel_reads" not in common_dataset_args:
+        common_dataset_args["num_parallel_reads"] = tf.data.AUTOTUNE
+
+    dataset = dataset.flatten(
+        num_parallel_calls=common_dataset_args["num_parallel_reads"]
+    ).shuffle(shuffle_buffer_size)
     return dataset

@@ -82,7 +82,7 @@ def get_config(config_string):
     )
 
     base_tokenizer_kwargs = dict(
-        encoder="resnetv1-34-bridge",
+        encoder="resnetv1-34-bridge-film",
         encoder_kwargs=dict(
             pooling_method="none", add_spatial_coordinates=True, act="swish"
         ),
@@ -121,6 +121,7 @@ def get_config(config_string):
                         base_data_config,
                         resize_size=(256, 256),
                         ram_budget=1,       # limit RAM per dataset
+                        num_parallel_reads=16,  # if not set, default to autotune
                         task_augmentation_strategy="switch_keys",
                         task_augmentation_kwargs = dict(
                             switch_key_groups_probs = [
