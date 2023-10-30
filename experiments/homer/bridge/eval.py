@@ -148,7 +148,10 @@ def convert_obs(obs):
     image_obs = (
         obs["image"].reshape(3, FLAGS.im_size, FLAGS.im_size).transpose(1, 2, 0) * 255
     ).astype(np.uint8)
-    return {"image_0": image_obs, "proprio": obs["state"]}
+    # TODO: proprio from robot env doesn't match training proprio,
+    # need to add transformation somewhere (probably in PretrainedModel class)
+    # return {"image_0": image_obs, "proprio": obs["state"]}
+    return {"image_0": image_obs}
 
 
 @partial(jax.jit, static_argnames="argmax")
@@ -340,60 +343,61 @@ def main(_):
         # keep track of our own gripper state to implement sticky gripper
         is_gripper_closed = False
         num_consecutive_gripper_change_actions = 0
-        try:
-            while t < FLAGS.num_timesteps:
-                if time.time() > last_tstep + STEP_DURATION or FLAGS.blocking:
-                    last_tstep = time.time()
+        while t < FLAGS.num_timesteps:
+            if time.time() > last_tstep + STEP_DURATION or FLAGS.blocking:
+                last_tstep = time.time()
 
-                    raw_obs = wait_for_obs(widowx_client)
-                    obs = convert_obs(raw_obs)
-                    obs_hist.append(obs)
+                raw_obs = widowx_client.get_observation()
+                if raw_obs is None:
+                    # this indicates a loss of connection with the server
+                    # due to an exception in the last step so end the trajectory
+                    break
+                obs = convert_obs(raw_obs)
+                obs_hist.append(obs)
 
-                    if FLAGS.show_image:
-                        bgr_img = cv2.cvtColor(raw_obs["full_image"], cv2.COLOR_RGB2BGR)
-                        cv2.imshow("img_view", bgr_img)
-                        cv2.waitKey(10)
+                if FLAGS.show_image:
+                    bgr_img = cv2.cvtColor(raw_obs["full_image"], cv2.COLOR_RGB2BGR)
+                    cv2.imshow("img_view", bgr_img)
+                    cv2.waitKey(10)
 
-                    actions = np.array(policy_fn(obs_hist, task))
-                    assert len(actions) >= FLAGS.act_exec_horizon
+                actions = np.array(policy_fn(obs_hist, task))
+                assert len(actions) >= FLAGS.act_exec_horizon
 
-                    obs_hist = []
-                    for i in range(FLAGS.act_exec_horizon):
-                        action = actions[i]
-                        action += np.random.normal(0, FIXED_STD)
+                obs_hist = []
+                for i in range(FLAGS.act_exec_horizon):
+                    action = actions[i]
+                    action += np.random.normal(0, FIXED_STD)
 
-                        # sticky gripper logic
-                        if (action[-1] < 0.5) != is_gripper_closed:
-                            num_consecutive_gripper_change_actions += 1
-                        else:
-                            num_consecutive_gripper_change_actions = 0
+                    # sticky gripper logic
+                    if (action[-1] < 0.5) != is_gripper_closed:
+                        num_consecutive_gripper_change_actions += 1
+                    else:
+                        num_consecutive_gripper_change_actions = 0
 
-                        if (
-                            num_consecutive_gripper_change_actions
-                            >= STICKY_GRIPPER_NUM_STEPS
-                        ):
-                            is_gripper_closed = not is_gripper_closed
-                            num_consecutive_gripper_change_actions = 0
+                    if (
+                        num_consecutive_gripper_change_actions
+                        >= STICKY_GRIPPER_NUM_STEPS
+                    ):
+                        is_gripper_closed = not is_gripper_closed
+                        num_consecutive_gripper_change_actions = 0
 
-                        action[-1] = 0.0 if is_gripper_closed else 1.0
+                    action[-1] = 0.0 if is_gripper_closed else 1.0
 
-                        # remove degrees of freedom
-                        if NO_PITCH_ROLL:
-                            action[3] = 0
-                            action[4] = 0
-                        if NO_YAW:
-                            action[5] = 0
+                    # remove degrees of freedom
+                    if NO_PITCH_ROLL:
+                        action[3] = 0
+                        action[4] = 0
+                    if NO_YAW:
+                        action[5] = 0
 
-                        # perform environment step
-                        widowx_client.step_action(action, blocking=FLAGS.blocking)
+                    # perform environment step
+                    widowx_client.step_action(action, blocking=FLAGS.blocking)
 
-                        # save image
-                        images.append(obs["image_0"])
-                        goals.append(task["image_0"])
+                    # save image
+                    images.append(obs["image_0"])
+                    goals.append(task["image_0"][0])
 
-                        t += 1
-        except Exception as e:
-            print(traceback.format_exc(), file=sys.stderr)
+                    t += 1
 
         # save video
         if FLAGS.video_save_path is not None:
