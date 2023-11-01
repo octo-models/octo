@@ -89,7 +89,7 @@ class TemporalDistanceRewardHead(nn.Module):
         )
 
         # tokenize the target actions and convert them to one hot vectors
-        distance_labels = self.distance_tokenizer(distance_target, mode="tokenize")
+        distance_labels = self.distance_tokenizer(distance_target)
         distance_labels_one_hot = jax.nn.one_hot(distance_labels, self.n_bins)
 
         # compute the CE loss using the log probabilities and target distances
@@ -106,7 +106,7 @@ class TemporalDistanceRewardHead(nn.Module):
         accuracy = (accuracy * pad_mask).mean()
 
         # detokenize the predicted distances
-        distance_values = self.distance_tokenizer(distance_pred, mode="detokenize")
+        distance_values = self.distance_tokenizer.decode(distance_pred)
         # compute the mean squared error between predicted distances and target distances
         distance_mse = jnp.square(distance_target - distance_values)
         # mask the mse with the pad mask to remove the contribution of padding
@@ -140,7 +140,7 @@ class TemporalDistanceRewardHead(nn.Module):
             distance_tokens = dist.sample(seed=rng, sample_shape=sample_shape).astype(
                 jnp.int32
             )
-        return -1 * self.distance_tokenizer(distance_tokens, mode="detokenize")
+        return -1 * self.distance_tokenizer.decode(distance_tokens)
 
 
 REWARD_HEADS = {
