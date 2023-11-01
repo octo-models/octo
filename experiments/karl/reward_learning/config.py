@@ -146,6 +146,7 @@ def get_config(config_string):
                             "image_tokenizer",
                             update_config(
                                 base_tokenizer_kwargs,
+                                encoder="resnetv1-34-bridge-film",
                                 num_tokens=64,
                                 task_stack_keys=[],
                                 task_film_keys=["language_instruction"],
@@ -171,6 +172,7 @@ def get_config(config_string):
                             "image_tokenizer",
                             update_config(
                                 base_tokenizer_kwargs,
+                                encoder="resnetv1-34-bridge-film",
                                 num_tokens=64,
                                 task_stack_keys=["image_.*"],
                                 task_film_keys=["language_instruction"],
