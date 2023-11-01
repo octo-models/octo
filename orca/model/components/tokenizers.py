@@ -26,22 +26,28 @@ class TokenLearner(nn.Module):
     """
 
     num_tokens: int
-    bottleneck_dim: int = 64
-    dropout_rate: float = 0.0
+    bottleneck_dim: int = 128
+    dropout_rate: float = 0.1
 
     @nn.compact
     def __call__(self, inputs, train: bool = True):
-        if len(inputs.shape) == 4:
-            inputs = inputs.reshape(inputs.shape[0], -1, inputs.shape[-1])
+        input_4_dims = len(inputs.shape) == 4
+        if input_4_dims:
+            b, t, _, d = inputs.shape
+            inputs = inputs.reshape(b * t, -1, d)
         x = nn.LayerNorm()(inputs)
         x = MlpBlock(
             mlp_dim=self.bottleneck_dim,
             out_dim=self.num_tokens,
             dropout_rate=self.dropout_rate,
-        )(x, train=train)
+        )(x, deterministic=not train)
         x = jnp.transpose(x, (0, 2, 1))  # (batch, num_tokens, h*w)
         x = nn.softmax(x, axis=-1)
-        return jnp.einsum("bna,baf->bnf", x, inputs)
+        x = jnp.einsum("bna,baf->bnf", x, inputs)
+
+        if input_4_dims:
+            x = x.reshape((b, t, self.num_tokens, d))
+        return x
 
 
 class ImageTokenizer(nn.Module):
@@ -50,7 +56,7 @@ class ImageTokenizer(nn.Module):
     Args:
         encoder (str): Name of used encoder.
         encoder_kwargs (dict, optional): Overwrite dict for encoder hyperparameters.
-        use_token_learner (bool): Whether to use token learner. Defaults to False.
+        early_fusion (bool): If true multi-cam and goal images during first layer of encoder, else fuses after encoding using TokenLearner
         num_tokens (int): Number of output tokens, only enforced when use_token_learner is True.
         obs_stack_keys (Sequence[str]): Which spatial observation inputs get stacked for encoder input. Supports regex.
         task_stack_keys (Sequence[str]): Which spatial task inputs get stacked for encoder input. Supports regex.
@@ -59,7 +65,7 @@ class ImageTokenizer(nn.Module):
 
     encoder: str
     encoder_kwargs: dict = None
-    use_token_learner: bool = False
+    early_fusion: bool = True
     num_tokens: int = 8
     conditioning_type: str = "none"
     obs_stack_keys: Sequence[str] = ("image_.*", "depth_.*")
@@ -80,44 +86,73 @@ class ImageTokenizer(nn.Module):
                     if check_spatial:
                         assert len(inputs[key].shape) >= 4
                     extracted_outputs.append(inputs[key])
-            return jnp.concatenate(extracted_outputs, axis=-1)
+            return extracted_outputs
 
         # stack all spatial observation and task inputs
-        enc_inputs = extract_inputs(
+        obs_inputs = extract_inputs(
             self.obs_stack_keys, observations, check_spatial=True
         )
+        task_inputs = None
         if tasks and self.task_stack_keys:
             task_inputs = extract_inputs(
                 self.task_stack_keys, tasks, check_spatial=True
             )
-            task_inputs = task_inputs[:, None].repeat(enc_inputs.shape[1], axis=1)
-            enc_inputs = jnp.concatenate([enc_inputs, task_inputs], axis=-1)
-        b, t, h, w, c = enc_inputs.shape
-        enc_inputs = jnp.reshape(enc_inputs, (b * t, h, w, c))
+            task_inputs = [t[:, None] for t in task_inputs]
+
+        if self.early_fusion:
+            enc_inputs = jnp.concatenate(obs_inputs, axis=-1)
+            if task_inputs is not None:
+                task_inputs = jnp.concatenate(task_inputs, axis=-1).repeat(
+                    enc_inputs.shape[1], axis=1
+                )
+                enc_inputs = jnp.concatenate([enc_inputs, task_inputs], axis=-1)[
+                    :, :, None
+                ]
+        else:
+            # late fusion treats the goal as an extra time-step during CNN encoding
+            enc_inputs = jnp.concatenate([o[:, :, None] for o in obs_inputs], axis=2)
+            if task_inputs is not None:
+                task_inputs = jnp.concatenate(
+                    [t[:, :, None] for t in task_inputs], axis=2
+                )
+                enc_inputs = jnp.concatenate([enc_inputs, task_inputs], axis=1)
+
+        b, t, n, h, w, c = enc_inputs.shape
+        enc_inputs = jnp.reshape(enc_inputs, (b * t * n, h, w, c))
 
         # extract non-spatial FiLM inputs
         encoder_input_kwargs = {}
         if self.task_film_keys:
-            film_inputs = extract_inputs(self.task_film_keys, tasks)
+            film_inputs = jnp.concatenate(
+                extract_inputs(self.task_film_keys, tasks), axis=-1
+            )
             film_inputs = film_inputs[:, None].repeat(t, axis=1)
+            film_inputs = film_inputs[:, :, None].repeat(n, axis=2)
             encoder_input_kwargs.update(
-                {"cond_var": jnp.reshape(film_inputs, (b * t, -1))}
+                {"cond_var": jnp.reshape(film_inputs, (b * t * n, -1))}
             )
 
         # run visual encoder
         image_tokens = encoders[self.encoder](**self.encoder_kwargs)(
             enc_inputs, **encoder_input_kwargs
         )
-        image_tokens = jnp.reshape(image_tokens, (b, t, -1, image_tokens.shape[-1]))
 
-        if self.use_token_learner:
-            image_tokens = jnp.reshape(
-                image_tokens, (b * t, -1, image_tokens.shape[-1])
+        d = image_tokens.shape[-1]
+        image_tokens = jnp.reshape(image_tokens, (b, t, -1, d))
+        if self.early_fusion:
+            assert (
+                image_tokens.shape[2] == self.num_tokens
+            ), f"encoder should produce {self.num_tokens} tokens!"
+            return image_tokens
+
+        if task_inputs is not None:
+            image_tokens = jnp.reshape(image_tokens, (b, t, n, -1, d))
+            obs_tokens, task_tokens = image_tokens[:, :-1], image_tokens[:, -1:]
+            image_tokens = jnp.concatenate(
+                (obs_tokens, task_tokens.repeat(t - 1, axis=1)), axis=2
             )
-            image_tokens = TokenLearner(num_tokens=self.num_tokens)(
-                image_tokens, train=train
-            )
-        return image_tokens
+            image_tokens = image_tokens.reshape((b, t - 1, -1, d))
+        return TokenLearner(num_tokens=self.num_tokens)(image_tokens, train=train)
 
 
 class LanguageTokenizer(nn.Module):
