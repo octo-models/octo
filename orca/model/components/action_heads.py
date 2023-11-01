@@ -7,7 +7,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from orca.model.components.tokenizers import ActionTokenizer
+from orca.model.components.tokenizers import BinTokenizer
 from orca.utils.typing import PRNGKey
 
 
@@ -33,9 +33,11 @@ class BasicActionHead(nn.Module):
         self.vocab_proj = nn.Dense(
             self.vocab_size * self.pred_horizon * self.action_dim
         )
-        self.action_tokenizer = ActionTokenizer(
-            vocab_size=self.vocab_size,
-            normalization_type=self.normalization_type,
+        self.action_tokenizer = BinTokenizer(
+            n_bins=self.vocab_size,
+            bin_type="uniform"
+            if self.normalization_type == "bounds"
+            else self.normalization_type,
         )
 
     def __call__(self, embeddings, train=True) -> Any:
@@ -96,7 +98,7 @@ class BasicActionHead(nn.Module):
         actions_chunked = actions_chunked[:, :horizon]
 
         # tokenize the target actions and convert them to one hot vectors
-        action_labels = self.action_tokenizer(actions_chunked, mode="tokenize")
+        action_labels = self.action_tokenizer(actions_chunked)
         action_labels_one_hot = jax.nn.one_hot(action_labels, self.vocab_size)
 
         # compute the CE loss using the log probabilities and target actions
@@ -113,7 +115,7 @@ class BasicActionHead(nn.Module):
         accuracy = (accuracy * pad_mask[:, :, None, None]).mean()
 
         # detokenize the predicted actions
-        action_values = self.action_tokenizer(action_pred, mode="detokenize")
+        action_values = self.action_tokenizer.decode(action_pred)
         # compute the mean squared error between predicted actions and target actions
         action_mse = jnp.square(actions_chunked - action_values).sum(axis=-1)
         # mask the mse with the pad mask to remove the contribution of padding
@@ -148,7 +150,7 @@ class BasicActionHead(nn.Module):
             action_tokens = dist.sample(seed=rng, sample_shape=sample_shape).astype(
                 jnp.int32
             )
-        return self.action_tokenizer(action_tokens, mode="detokenize")
+        return self.action_tokenizer.decode(action_tokens)
 
     def _chunk_actions(self, actions):
         """
@@ -178,9 +180,11 @@ class TokenPerDimActionHead(BasicActionHead):
 
     def setup(self):
         self.vocab_proj = nn.Dense(self.vocab_size)
-        self.action_tokenizer = ActionTokenizer(
-            vocab_size=self.vocab_size,
-            normalization_type=self.normalization_type,
+        self.action_tokenizer = BinTokenizer(
+            n_bins=self.vocab_size,
+            bin_type="uniform"
+            if self.normalization_type == "bounds"
+            else self.normalization_type,
         )
 
     def __call__(self, embeddings, train=True) -> Any:
