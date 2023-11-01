@@ -206,10 +206,19 @@ class ResNetEncoder(nn.Module):
     num_spatial_blocks: int = 8
     use_film: bool = False
 
+    # image normalization stats calculated on ImageNet from torchvision
+    img_norm_mean: Any = jnp.array([0.485, 0.456, 0.406]).reshape((1, 1, 1, 3))
+    img_norm_std: Any = jnp.array([0.229, 0.224, 0.225]).reshape((1, 1, 1, 3))
+
     @nn.compact
     def __call__(self, observations: jnp.ndarray, train: bool = True, cond_var=None):
-        # put inputs in [-1, 1]
-        x = observations.astype(jnp.float32) / 127.5 - 1.0
+        # put inputs in [-1, 1] and normalize by image stats
+        x = observations.astype(jnp.float32) / 255
+        assert x.shape[-1] % 3 == 0, "images should have rgb channels!"
+        rpt = int(x.shape[-1] / 3)
+        mean = jnp.tile(self.img_norm_mean, (1, 1, 1, rpt))
+        std = jnp.tile(self.img_norm_std, (1, 1, 1, rpt))
+        x = (x - mean) / std
 
         if self.add_spatial_coordinates:
             x = AddSpatialCoordinates(dtype=self.dtype)(x)
