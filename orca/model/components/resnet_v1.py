@@ -212,7 +212,13 @@ class ResNetEncoder(nn.Module):
 
     @nn.compact
     def __call__(self, observations: jnp.ndarray, train: bool = True, cond_var=None):
-        # put inputs in [-1, 1] and normalize by image stats
+        expecting_cond_var = self.use_multiplicative_cond or self.use_film
+        received_cond_var = cond_var is not None
+        assert (
+            expecting_cond_var == received_cond_var
+        ), "Only pass in cond var iff model expecting cond var"
+
+        # put image in range [0, 1] and normalize by image stats
         x = observations.astype(jnp.float32) / 255
         assert x.shape[-1] % 3 == 0, "images should have rgb channels!"
         rpt = int(x.shape[-1] / 3)
