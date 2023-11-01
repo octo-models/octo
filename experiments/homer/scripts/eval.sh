@@ -1,16 +1,16 @@
 NAMES=(
-    "gc_bridge_20231016_035512"
-    "orca_gcbc_rtx_full_v4_2_20231019_002711"
+    "gc_bridge_match_old_20231026_193653"
 )
 
 STEPS=(
-    "250000"
-    "780000"
+    "345000"
 )
 
-VIDEO_DIR="10-20"
+VIDEO_DIR="11-1"
 
 TIMESTEPS="50"
+
+TEMPERATURE="1.0"
 
 CMD="python experiments/homer/bridge/eval.py \
     --num_timesteps $TIMESTEPS \
@@ -18,7 +18,9 @@ CMD="python experiments/homer/bridge/eval.py \
     $(for i in "${!NAMES[@]}"; do echo "--checkpoint_weights_path /mount/harddrive/homer/checkpoints/${NAMES[$i]}/checkpoint_${STEPS[$i]} "; done) \
     $(for i in "${!NAMES[@]}"; do echo "--checkpoint_config_path /mount/harddrive/homer/checkpoints/${NAMES[$i]}/config.json "; done) \
     $(for i in "${!NAMES[@]}"; do echo "--checkpoint_metadata_path /mount/harddrive/homer/checkpoints/${NAMES[$i]}/action_proprio_metadata_bridge_dataset.json "; done) \
+    $(for i in "${!NAMES[@]}"; do echo "--checkpoint_example_batch_path /mount/harddrive/homer/checkpoints/${NAMES[$i]}/example_batch.msgpack "; done) \
     --im_size 256 \
+    --temperature $TEMPERATURE \
     --blocking
 "
 
