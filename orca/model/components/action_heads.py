@@ -138,7 +138,7 @@ class BasicActionHead(nn.Module):
         # unfolding the pred_horizon dim, and projecting to the vocab size
         # (batch, tokens_per_action, token_embedding_size)
 
-        action_logits = self.__call__(embeddings, train=train) * temperature
+        action_logits = self.__call__(embeddings, train=train)
         action_logits = action_logits[:, -1]
 
         if argmax:
