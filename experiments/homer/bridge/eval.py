@@ -2,10 +2,7 @@
 
 import json
 import os
-import sys
 import time
-import traceback
-from collections import deque
 from datetime import datetime
 from functools import partial
 
@@ -15,17 +12,14 @@ import imageio
 import jax
 import jax.numpy as jnp
 import numpy as np
-import optax
 import tensorflow as tf
 from absl import app, flags, logging
-from PIL import Image
-from pyquaternion import Quaternion
 
 # bridge_data_robot imports
 from widowx_envs.widowx_env_service import WidowXClient, WidowXStatus, WidowXConfigs
 
 from orca.utils.pretrained_utils import PretrainedModel
-from widowx_wrapper import WidowXGym
+from widowx_wrapper import WidowXGym, convert_obs, wait_for_obs, state_to_eep
 from orca.utils.gym_wrappers import (
     HistoryWrapper,
     RHCWrapper,
@@ -73,12 +67,9 @@ flags.DEFINE_bool("show_image", False, "Show image")
 ##############################################################################
 
 STEP_DURATION = 0.4
-NO_PITCH_ROLL = False
-NO_YAW = False
 STICKY_GRIPPER_NUM_STEPS = 1
 WORKSPACE_BOUNDS = [[0.1, -0.15, -0.01, -1.57, 0], [0.45, 0.25, 0.25, 1.57, 0]]
 CAMERA_TOPICS = [{"name": "/blue/image_raw"}]
-FIXED_STD = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 ENV_PARAMS = {
     "camera_topics": CAMERA_TOPICS,
     "override_workspace_boundaries": WORKSPACE_BOUNDS,
@@ -88,24 +79,6 @@ ENV_PARAMS = {
 ##############################################################################
 
 
-def state_to_eep(xyz_coor, zangle: float):
-    """
-    Implement the state to eep function.
-    Refered to `bridge_data_robot`'s `widowx_controller/widowx_controller.py`
-    return a 4x4 matrix
-    """
-    assert len(xyz_coor) == 3
-    DEFAULT_ROTATION = np.array([[0, 0, 1.0], [0, 1.0, 0], [-1.0, 0, 0]])
-    new_pose = np.eye(4)
-    new_pose[:3, -1] = xyz_coor
-    new_quat = Quaternion(axis=np.array([0.0, 0.0, 1.0]), angle=zangle) * Quaternion(
-        matrix=DEFAULT_ROTATION
-    )
-    new_pose[:3, :3] = new_quat.rotation_matrix
-    # yaw, pitch, roll = quat.yaw_pitch_roll
-    return new_pose
-
-
 def supply_rng(f, rng=jax.random.PRNGKey(0)):
     def wrapped(*args, **kwargs):
         nonlocal rng
@@ -113,16 +86,6 @@ def supply_rng(f, rng=jax.random.PRNGKey(0)):
         return f(*args, rng=key, **kwargs)
 
     return wrapped
-
-
-def convert_obs(obs):
-    image_obs = (
-        obs["image"].reshape(3, FLAGS.im_size, FLAGS.im_size).transpose(1, 2, 0) * 255
-    ).astype(np.uint8)
-    # TODO: proprio from robot env doesn't match training proprio,
-    # need to add transformation somewhere (probably in PretrainedModel class)
-    # return {"image_0": image_obs, "proprio": obs["state"]}
-    return {"image_0": image_obs}
 
 
 @partial(jax.jit, static_argnames="argmax")
@@ -177,15 +140,6 @@ def load_checkpoint(weights_path, config_path, metadata_path, example_batch_path
     return (policy_fn, model)
 
 
-def wait_for_obs(widowx_client):
-    obs = widowx_client.get_observation()
-    while obs is None:
-        print("Waiting for observations...")
-        obs = widowx_client.get_observation()
-        time.sleep(1)
-    return obs
-
-
 def main(_):
     assert (
         len(FLAGS.checkpoint_weights_path)
@@ -230,7 +184,9 @@ def main(_):
     env_params["state_state"] = list(start_state)
     widowx_client = WidowXClient(host=FLAGS.ip, port=FLAGS.port)
     widowx_client.init(env_params, image_size=FLAGS.im_size)
-    env = WidowXGym(widowx_client, FLAGS.im_size, FLAGS.blocking)
+    env = WidowXGym(
+        widowx_client, FLAGS.im_size, FLAGS.blocking, STICKY_GRIPPER_NUM_STEPS
+    )
     env = HistoryWrapper(env, FLAGS.horizon)
     # env = TemporalEnsembleWrapper(env, FLAGS.pred_horizon)
     env = RHCWrapper(env, FLAGS.pred_horizon, FLAGS.exec_horizon)
@@ -275,7 +231,7 @@ def main(_):
 
                 input("Press [Enter] when ready for taking the goal image. ")
                 obs = wait_for_obs(widowx_client)
-                goals = jax.tree_map(lambda x: x[None], convert_obs(obs))
+                goals = jax.tree_map(lambda x: x[None], convert_obs(obs, FLAGS.im_size))
                 task = model.create_tasks(goals=goals)
         else:
             # ask for new instruction
@@ -311,24 +267,24 @@ def main(_):
         images = []
         goals = []
         t = 0
-
         while t < FLAGS.num_timesteps:
             if time.time() > last_tstep + STEP_DURATION or FLAGS.blocking:
                 last_tstep = time.time()
 
+                # save images
+                images.append(obs["image_0"][-1])
+                goals.append(task["image_0"][0])
+
                 if FLAGS.show_image:
-                    bgr_img = cv2.cvtColor(obs["full_image"], cv2.COLOR_RGB2BGR)
+                    bgr_img = cv2.cvtColor(obs["full_image"][-1], cv2.COLOR_RGB2BGR)
                     cv2.imshow("img_view", bgr_img)
                     cv2.waitKey(10)
 
+                # get action
                 action = np.array(policy_fn(obs, task))
 
                 # perform environment step
                 obs, _, _, truncated, _ = env.step(action)
-
-                # save image
-                images.append(obs["image_0"][-1])
-                goals.append(task["image_0"][0])
 
                 t += 1
 
