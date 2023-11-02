@@ -1,16 +1,16 @@
 NAMES=(
-    "gc_bridge_match_old_20231026_193653"
+    "focus_only_on_gripper_20231101_063346"
 )
 
 STEPS=(
-    "345000"
+    "600000"
 )
 
-VIDEO_DIR="11-1"
+VIDEO_DIR="11-2"
 
 TIMESTEPS="50"
 
-TEMPERATURE="1.0"
+TEMPERATURE="0.1"
 
 CMD="python experiments/homer/bridge/eval.py \
     --num_timesteps $TIMESTEPS \
