@@ -51,10 +51,9 @@ class HistoryWrapper(gym.Wrapper):
     are padding.
     """
 
-    def __init__(self, env: gym.Env, horizon: int, pred_horizon: int):
+    def __init__(self, env: gym.Env, horizon: int):
         super().__init__(env)
         self.horizon = horizon
-        self.pred_horizon = pred_horizon
 
         self.history = deque(maxlen=self.horizon)
         self.num_obs = 0
@@ -85,13 +84,10 @@ class RHCWrapper(gym.Wrapper):
     we execute `exec_horizon` of them.
     """
 
-    def __init__(
-        self, env: gym.Env, horizon: int, pred_horizon: int, exec_horizon: int
-    ):
+    def __init__(self, env: gym.Env, pred_horizon: int, exec_horizon: int):
         super().__init__(env)
         assert exec_horizon <= pred_horizon
 
-        self.horizon = horizon
         self.pred_horizon = pred_horizon
         self.exec_horizon = exec_horizon
 
@@ -115,11 +111,8 @@ class TemporalEnsembleWrapper(gym.Wrapper):
     `pred_horizon` predictions for that timestep.
     """
 
-    def __init__(
-        self, env: gym.Env, horizon: int, pred_horizon: int, exp_weight: int = 0
-    ):
+    def __init__(self, env: gym.Env, pred_horizon: int, exp_weight: int = 0):
         super().__init__(env)
-        self.horizon = horizon
         self.pred_horizon = pred_horizon
         self.exp_weight = exp_weight
 
