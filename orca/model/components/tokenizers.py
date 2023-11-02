@@ -193,7 +193,7 @@ class BinTokenizer(nn.Module):
             )
 
     def __call__(self, inputs):
-        if self.bin_type == "bounds":
+        if self.bin_type == "uniform":
             inputs = jnp.clip(inputs, self.low + EPS, self.high - EPS)
         inputs = inputs[..., None]
         token_one_hot = (inputs < self.thresholds[1:]) & (
