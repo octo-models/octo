@@ -277,6 +277,9 @@ def make_dataset(
             if key not in traj:
                 raise ValueError(f"Key {key} is missing from trajectory: {traj}")
 
+        # add timestep info
+        traj["observation"]["timestep"] = tf.range(traj_len) + 1
+
         return traj
 
     dataset = dataset.map(restructure)

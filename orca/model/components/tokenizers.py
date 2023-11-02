@@ -166,52 +166,53 @@ class LanguageTokenizer(nn.Module):
         return tokens
 
 
-class ActionTokenizer(nn.Module):
+class BinTokenizer(nn.Module):
     """
-    Tokenizes actions via uniform or gaussian binning in given range.
+    Tokenizes continuous inputs via dimension-wise binning in given range.
 
     Args:
-        vocab_size (int): Number of discrete bins per dimension.
-        normalization_type (str): Type of binning. ['bounds' = uniform, 'normal' = Gaussian]
-        low (float): Lower bound for action bin range.
-        high (float): Upper bound for action bin range.
+        n_bins (int): Number of discrete bins per dimension.
+        bin_type (str): Type of binning. ['uniform', 'normal' = Gaussian]
+        low (float): Lower bound for bin range.
+        high (float): Upper bound for bin range.
     """
 
-    vocab_size: int
-    normalization_type: str = "bounds"
+    n_bins: int
+    bin_type: str = "uniform"
     low: float = 0
     high: float = 1
 
     def setup(self):
-        if self.normalization_type == "bounds":
-            self.thresholds = jnp.linspace(self.low, self.high, self.vocab_size + 1)
-        elif self.normalization_type == "normal":
-            self.thresholds = norm.ppf(jnp.linspace(EPS, 1 - EPS, self.vocab_size + 1))
+        if self.bin_type == "uniform":
+            self.thresholds = jnp.linspace(self.low, self.high, self.n_bins + 1)
+        elif self.bin_type == "normal":
+            self.thresholds = norm.ppf(jnp.linspace(EPS, 1 - EPS, self.n_bins + 1))
         else:
-            raise ValueError
+            raise ValueError(
+                f"Binning type {self.bin_type} not supported in BinTokenizer."
+            )
 
-    def __call__(self, actions, mode: str = "tokenize"):
-        if mode == "tokenize":
-            if self.normalization_type == "bounds":
-                actions = jnp.clip(actions, self.low + EPS, self.high - EPS)
-            actions = actions[..., None]
-            token_one_hot = (actions < self.thresholds[1:]) & (
-                actions >= self.thresholds[:-1]
-            ).astype(jnp.uint8)
-            action_tokens = jnp.argmax(token_one_hot, axis=-1)
-            return action_tokens
-        elif mode == "detokenize":
-            action_tokens = actions
-            one_hot = jax.nn.one_hot(action_tokens, self.vocab_size)
-            bin_avgs = (self.thresholds[1:] + self.thresholds[:-1]) / 2
-            actions = jnp.sum(one_hot * bin_avgs, axis=-1)
-            return actions
+    def __call__(self, inputs):
+        if self.bin_type == "uniform":
+            inputs = jnp.clip(inputs, self.low + EPS, self.high - EPS)
+        inputs = inputs[..., None]
+        token_one_hot = (inputs < self.thresholds[1:]) & (
+            inputs >= self.thresholds[:-1]
+        ).astype(jnp.uint8)
+        output_tokens = jnp.argmax(token_one_hot, axis=-1)
+        return output_tokens
+
+    def decode(self, inputs):
+        one_hot = jax.nn.one_hot(inputs, self.n_bins)
+        bin_avgs = (self.thresholds[1:] + self.thresholds[:-1]) / 2
+        outputs = jnp.sum(one_hot * bin_avgs, axis=-1)
+        return outputs
 
 
 TOKENIZERS = {
     "image_tokenizer": ImageTokenizer,
     "language_tokenizer": LanguageTokenizer,
-    "action_tokenizer": ActionTokenizer,
+    "bin_tokenizer": BinTokenizer,
 }
 
 
@@ -220,10 +221,10 @@ if __name__ == "__main__":
 
     action = np.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7])
     action = np.broadcast_to(action, [2, 2, 7])
-    tokenizer = ActionTokenizer(vocab_size=256, normalization_type="normal")
+    tokenizer = BinTokenizer(n_bins=256, bin_type="normal")
     params = tokenizer.init(jax.random.PRNGKey(0), action)
     action_tokens = tokenizer.apply(params, action)
-    detokenized_actions = tokenizer.apply(params, action_tokens, mode="detokenize")
+    detokenized_actions = tokenizer.apply(params, action_tokens, method="decode")
 
     print(action)
     print(action_tokens)
