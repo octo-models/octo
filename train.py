@@ -7,7 +7,6 @@ import os.path as osp
 
 from absl import app, flags, logging
 import flax
-from flax.training import checkpoints
 from flax.traverse_util import flatten_dict
 import jax
 import jax.numpy as jnp
@@ -15,6 +14,7 @@ from jax.sharding import Mesh, NamedSharding, PartitionSpec
 from ml_collections import config_flags
 import numpy as np
 import optax
+import orbax.checkpoint
 import tensorflow as tf
 import tqdm
 import wandb
@@ -73,42 +73,61 @@ def main(_):
     tf.config.set_visible_devices([], "GPU")
 
     # set up wandb and logging
-    name = format_name_with_config(
-        FLAGS.name,
-        FLAGS.config.to_dict(),
-    )
-    wandb_id = "{name}_{time}".format(
-        name=name,
-        time=datetime.datetime.now().strftime("%Y%m%d_%H%M%S"),
-    )
-    wandb.init(
-        config=FLAGS.config.to_dict(),
-        id=wandb_id,
-        name=name,
-        mode="disabled" if FLAGS.debug else None,
-        **FLAGS.config.wandb,
-    )
+    if FLAGS.config.wandb_resume_id is None:
+        name = format_name_with_config(
+            FLAGS.name,
+            FLAGS.config.to_dict(),
+        )
+        wandb_id = "{name}_{time}".format(
+            name=name,
+            time=datetime.datetime.now().strftime("%Y%m%d_%H%M%S"),
+        )
+        wandb.init(
+            config=FLAGS.config.to_dict(),
+            id=wandb_id,
+            name=name,
+            mode="disabled" if FLAGS.debug else None,
+            **FLAGS.config.wandb,
+        )
+
+        if FLAGS.config.save_dir is not None:
+            save_dir = tf.io.gfile.join(
+                FLAGS.config.save_dir,
+                FLAGS.config.wandb.project,
+                FLAGS.config.wandb.group or "",
+                wandb_id,
+            )
+            wandb.config.update(dict(save_dir=save_dir), allow_val_change=True)
+            logging.info("Saving to %s", save_dir)
+            tf.io.gfile.makedirs(save_dir)
+            with tf.io.gfile.GFile(
+                os.path.join(save_dir, "config.json"), "w"
+            ) as config_file:
+                config_file.write(FLAGS.config.to_json_best_effort())
+        else:
+            save_dir = None
+            logging.info("save_dir not passed in, not saving checkpoints")
+    else:
+        # resume previous run
+        wandb_run = wandb.Api().run(FLAGS.config.wandb_resume_id)
+        wandb.init(
+            project=wandb_run.project,
+            id=wandb_run.id,
+            resume="must",
+        )
+        save_dir = wandb_run.config["save_dir"]
+
+    if save_dir is not None:
+        # make checkpoint manager
+        options = orbax.checkpoint.CheckpointManagerOptions(
+            max_to_keep=1e6,
+        )
+        checkpointer = orbax.checkpoint.CheckpointManager(
+            save_dir, orbax.checkpoint.PyTreeCheckpointer(), options=options
+        )
 
     codebase_directory = osp.abspath(osp.join(osp.dirname(orca.__file__), ".."))
     wandb.run.log_code(codebase_directory)  # TODO: replace w/ codesave_library?
-
-    if FLAGS.config.save_dir is not None:
-        save_dir = tf.io.gfile.join(
-            FLAGS.config.save_dir,
-            FLAGS.config.wandb.project,
-            FLAGS.config.wandb.group or "",
-            wandb_id,
-        )
-        wandb.config.update(dict(save_dir=save_dir), allow_val_change=True)
-        logging.info("Saving to %s", save_dir)
-        tf.io.gfile.makedirs(save_dir)
-        with tf.io.gfile.GFile(
-            os.path.join(save_dir, "config.json"), "w"
-        ) as config_file:
-            config_file.write(FLAGS.config.to_json_best_effort())
-    else:
-        save_dir = None
-        logging.info("save_dir not passed in, not saving checkpoints")
 
     # set up text tokenization (this needs to happen after batching but before sharding)
     if FLAGS.config.text_processor is None:
@@ -245,12 +264,12 @@ def main(_):
             dict(example_batch_spec=example_batch_spec), allow_val_change=True
         )
 
-    if FLAGS.config.resume_path is not None:
-        train_state = checkpoints.restore_checkpoint(
-            FLAGS.config.resume_path, target=train_state
+    if FLAGS.config.wandb_resume_id is not None:
+        train_state = checkpointer.restore(
+            checkpointer.latest_step(), items=train_state
         )
         checkpoint_step = int(train_state.step)
-        logging.info("Restored checkpoint from %s", FLAGS.config.resume_path)
+        logging.info("Restored checkpoint from %s", save_dir)
         if FLAGS.config.start_step is not None:
             start_step = FLAGS.config.start_step  # start_step overrides checkpoint
         else:
@@ -434,9 +453,7 @@ def main(_):
 
         if (i + 1) % FLAGS.config.save_interval == 0 and save_dir is not None:
             logging.info("Saving checkpoint...")
-            checkpoint_path = checkpoints.save_checkpoint(
-                save_dir, train_state, step=i + 1, keep=1e6
-            )
+            checkpoint_path = checkpointer.save(i + 1, train_state)
             logging.info("Saved checkpoint to %s", checkpoint_path)
 
         timer.tock("total")
