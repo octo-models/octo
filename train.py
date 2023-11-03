@@ -204,14 +204,13 @@ def main(_):
     # pretrained weights to load
     pretrained_loaders = [weights_loaders[w] for w in FLAGS.config.pretrained_weights]
 
-    lr_schedule = optax.warmup_cosine_decay_schedule(
-        init_value=0.0,
-        peak_value=FLAGS.config.optimizer.learning_rate,
-        warmup_steps=FLAGS.config.optimizer.warmup_steps,
-        decay_steps=FLAGS.config.optimizer.decay_steps,
-        end_value=0.0,
-    )
-    tx = optax.adam(lr_schedule)
+    optimizer_kwargs = FLAGS.config.optimizer.to_dict()
+    if isinstance(optimizer_kwargs["learning_rate"], dict):
+        optimizer_kwargs["learning_rate"] = optax.warmup_cosine_decay_schedule(
+            **optimizer_kwargs["learning_rate"]
+        )
+    tx = optax.adamw(**optimizer_kwargs)
+
     rng = jax.random.PRNGKey(FLAGS.config.seed)
     rng, construct_rng = jax.random.split(rng)
 
