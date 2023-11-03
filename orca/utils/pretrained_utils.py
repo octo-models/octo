@@ -3,11 +3,11 @@ import json
 import logging
 
 import flax
-import flax.training.checkpoints as checkpoints
 import jax
 import jax.numpy as jnp
 from ml_collections import ConfigDict
 import optax
+import orbax.checkpoint
 import tensorflow as tf
 
 from orca.data.utils.text_processing import text_processors
@@ -180,9 +180,13 @@ class PretrainedModel:
                 **config["text_processor_kwargs"]
             )
 
+        checkpointer = orbax.checkpoint.CheckpointManager(
+            checkpoint_path, orbax.checkpoint.PyTreeCheckpointer()
+        )
+
         if skip_verification:
-            loaded = checkpoints.restore_checkpoint(
-                checkpoint_path, target=None, step=step
+            loaded = checkpointer.restore(
+                checkpointer.latest_step() if step is None else step
             )
             return cls(
                 model_def=model_def,
@@ -217,8 +221,9 @@ class PretrainedModel:
             init_kwargs={"train": False},
         )
 
-        train_state = checkpoints.restore_checkpoint(
-            checkpoint_path, train_state, step=step
+        train_state = checkpointer.restore(
+            step=checkpointer.latest_step() if step is None else step,
+            items=train_state,
         )
 
         return cls(
