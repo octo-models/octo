@@ -26,12 +26,12 @@ def get_config(config_string):
         eval_interval=5000,
         save_interval=5000,
         save_dir=placeholder(str),
-        resume_path=placeholder(str),
         seed=42,
         text_processor=None,
         text_processor_kwargs=dict(),
         pretrained_weights=[],
         wandb=base_wandb_config,
+        wandb_resume_id=placeholder(str),
         eval_datasets=None,
     )
 
