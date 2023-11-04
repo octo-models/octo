@@ -209,7 +209,10 @@ def main(_):
         optimizer_kwargs["learning_rate"] = optax.warmup_cosine_decay_schedule(
             **optimizer_kwargs["learning_rate"]
         )
-    tx = optax.adamw(**optimizer_kwargs)
+    tx = optax.chain(
+        optax.clip_by_global_norm(optimizer_kwargs.pop("clip_gradient")),
+        optax.adamw(mu_dtype=jnp.bfloat16, **optimizer_kwargs),
+    )
 
     rng = jax.random.PRNGKey(FLAGS.config.seed)
     rng, construct_rng = jax.random.split(rng)
