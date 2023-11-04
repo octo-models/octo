@@ -1,16 +1,22 @@
 NAMES=(
-    "focus_only_on_gripper_20231101_063346"
+    "gc_bridge_match_old_20231026_193653"
 )
 
 STEPS=(
-    "600000"
+    "345000"
 )
 
-VIDEO_DIR="11-2"
+VIDEO_DIR="11-3"
 
 TIMESTEPS="50"
 
-TEMPERATURE="0.1"
+TEMPERATURE="1.0"
+
+HORIZON="1"
+
+PRED_HORIZON="1"
+
+EXEC_HORIZON="1"
 
 CMD="python experiments/homer/bridge/eval.py \
     --num_timesteps $TIMESTEPS \
@@ -21,6 +27,9 @@ CMD="python experiments/homer/bridge/eval.py \
     $(for i in "${!NAMES[@]}"; do echo "--checkpoint_example_batch_path /mount/harddrive/homer/checkpoints/${NAMES[$i]}/example_batch.msgpack "; done) \
     --im_size 256 \
     --temperature $TEMPERATURE \
+    --horizon $HORIZON \
+    --pred_horizon $PRED_HORIZON \
+    --exec_horizon $EXEC_HORIZON \
     --blocking
 "
 
