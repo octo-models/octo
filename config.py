@@ -85,6 +85,7 @@ def get_config(config_string):
             end_value=0.0,
         ),
         weight_decay=0.01,
+        clip_gradient=1.0,
     )
 
     base_model_config = dict(
