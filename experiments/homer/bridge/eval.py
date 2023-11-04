@@ -243,24 +243,12 @@ def main(_):
                 text = input("Instruction?")
                 task = model.create_tasks(text=[text])
 
+        input("Press [Enter] to start.")
+
         # reset env
         widowx_client.reset()
         time.sleep(2.5)
         obs, _ = env.reset()
-
-        # move to initial position
-        if FLAGS.initial_eep is not None:
-            assert isinstance(FLAGS.initial_eep, list)
-            initial_eep = [float(e) for e in FLAGS.initial_eep]
-            eep = state_to_eep(initial_eep, 0)
-            widowx_client.move_gripper(1.0)  # open gripper
-
-            # retry move action until success
-            move_status = None
-            while move_status != WidowXStatus.SUCCESS:
-                move_status = widowx_client.move(eep, duration=1.5)
-
-        input("Press [Enter] to start.")
 
         # do rollout
         last_tstep = time.time()
