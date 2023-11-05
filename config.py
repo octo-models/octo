@@ -55,11 +55,11 @@ def get_config(config_string):
             ],
         ),
         goal_relabeling_strategy="uniform",
-        action_proprio_normalization_type=normalization_type,
     )
 
     base_bridge_data_config = {
-        "common_kwargs": base_data_config,
+        "common_kwargs": {"action_proprio_normalization_type": normalization_type},
+        "transform_kwargs": base_data_config,
         "data_kwargs_list": [
             {
                 "name": "bridge_dataset",
@@ -156,7 +156,9 @@ def get_config(config_string):
                 ),
                 optimizer=base_optimizer_config,
                 dataset_kwargs={
-                    "common_kwargs": base_data_config,
+                    "common_kwargs": {
+                        "action_proprio_normalization_type": normalization_type
+                    },
                     "data_kwargs_list": [
                         {
                             "name": "r2_d2_pen",
@@ -169,6 +171,7 @@ def get_config(config_string):
                             "state_obs_keys": ["joint_position"],
                         },
                     ],
+                    "transform_kwargs": base_data_config,
                 },
                 **base_config,
             )
@@ -187,10 +190,9 @@ def get_config(config_string):
                 ),
                 optimizer=base_optimizer_config,
                 dataset_kwargs={
-                    "common_kwargs": update_config(
-                        base_data_config,
-                        resize_size=(180, 320),
-                    ),
+                    "common_kwargs": {
+                        "action_proprio_normalization_type": normalization_type
+                    },
                     "data_kwargs_list": [
                         {
                             "name": "r2_d2_pen",
@@ -209,6 +211,10 @@ def get_config(config_string):
                             "state_obs_keys": ["state"],
                         },
                     ],
+                    "transform_kwargs": update_config(
+                        base_data_config,
+                        resize_size=(180, 320),
+                    ),
                 },
                 **base_config,
             )
@@ -324,7 +330,8 @@ def get_config(config_string):
                 optimizer=base_optimizer_config,
                 dataset_kwargs=update_config(
                     base_bridge_data_config,
-                    common_kwargs=dict(
+                    transform_kwargs=dict(
+                        **base_data_config,
                         **base_task_augmentation_kwargs,
                     ),
                 ),
@@ -355,7 +362,7 @@ def get_config(config_string):
                 optimizer=base_optimizer_config,
                 dataset_kwargs=update_config(
                     base_bridge_data_config,
-                    common_kwargs=dict(
+                    transform_kwargs=dict(
                         task_augmentation_strategy="switch_keys",
                         task_augmentation_kwargs=dict(
                             switch_key_groups_probs=[
@@ -416,10 +423,9 @@ def get_config(config_string):
                 ),
                 optimizer=base_optimizer_config,
                 dataset_kwargs={
-                    "common_kwargs": update_config(
-                        base_data_config,
-                        resize_size=(256, 256),
-                    ),
+                    "common_kwargs": {
+                        "action_proprio_normalization_type": normalization_type
+                    },
                     "data_kwargs_list": [
                         {
                             "name": "bridge_dataset",
@@ -428,6 +434,7 @@ def get_config(config_string):
                             "state_obs_keys": ["state"],
                         },
                     ],
+                    "transform_kwargs": base_data_config,
                 },
                 **update_config(
                     base_config,
