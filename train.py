@@ -120,13 +120,13 @@ def main(_):
     if save_dir is not None:
         # make checkpointers
         options = orbax.checkpoint.CheckpointManagerOptions(
-            max_to_keep=1, step_prefix="train_state"
+            max_to_keep=1,
         )
         state_checkpointer = orbax.checkpoint.CheckpointManager(
             save_dir, orbax.checkpoint.PyTreeCheckpointer(), options=options
         )
         params_checkpointer = orbax.checkpoint.CheckpointManager(
-            save_dir,
+            tf.io.gfile.join(save_dir, "params"),
             orbax.checkpoint.PyTreeCheckpointer(),
         )
 
