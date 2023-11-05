@@ -204,16 +204,14 @@ def main(_):
     # pretrained weights to load
     pretrained_loaders = [weights_loaders[w] for w in FLAGS.config.pretrained_weights]
 
-    optimizer_kwargs = FLAGS.config.optimizer.to_dict()
-    if isinstance(optimizer_kwargs["learning_rate"], dict):
-        optimizer_kwargs["learning_rate"] = optax.warmup_cosine_decay_schedule(
-            **optimizer_kwargs["learning_rate"]
-        )
-    tx = optax.chain(
-        optax.clip_by_global_norm(optimizer_kwargs.pop("clip_gradient")),
-        optax.adamw(mu_dtype=jnp.bfloat16, **optimizer_kwargs),
+    lr_schedule = optax.warmup_cosine_decay_schedule(
+        init_value=0.0,
+        peak_value=FLAGS.config.optimizer.learning_rate,
+        warmup_steps=FLAGS.config.optimizer.warmup_steps,
+        decay_steps=FLAGS.config.optimizer.decay_steps,
+        end_value=0.0,
     )
-
+    tx = optax.adam(lr_schedule)
     rng = jax.random.PRNGKey(FLAGS.config.seed)
     rng, construct_rng = jax.random.split(rng)
 
@@ -258,29 +256,36 @@ def main(_):
     else:
         start_step = FLAGS.config.start_step or 0
 
-    horizon = (
-        FLAGS.config.dataset_kwargs.common_kwargs.window_size
-        - FLAGS.config.model.heads["action"]["kwargs"]["pred_horizon"]
-        + 1
-    )  # Ensures that there is a full horizon of actions to predict for each timestep
+    # horizon = (
+    #     FLAGS.config.dataset_kwargs.common_kwargs.window_size
+    #     - FLAGS.config.model.heads["action"]["kwargs"]["pred_horizon"]
+    #     + 1
+    # )  # Ensures that there is a full horizon of actions to predict for each timestep
 
     def loss_fn(params, state, batch, rng, train=True):
         def get_loss(model: OrcaModel, observations, tasks, actions, train):
             # only use first horizon timesteps as input to transformer
             # to ensure that there is a full horizon of actions to predict for each timestep
-            observations = jax.tree_map(lambda x: x[:, :horizon], observations)
+            # observations = jax.tree_map(lambda x: x[:, :horizon], observations)
 
             transformer_embeddings = model.orca_transformer(
                 observations, tasks, observations["pad_mask"], train=train
             )
-            action_loss, action_metrics = model.heads["action"].loss(
-                transformer_embeddings,  # Action head knows to pull out the action readout_key
-                actions,
+            # action_loss, action_metrics = model.heads["action"].loss(
+            #     transformer_embeddings,  # Action head knows to pull out the action readout_key
+            #     actions,
+            #     pad_mask=observations["pad_mask"],
+            #     train=train,
+            # )
+            reward_loss, reward_metrics = model.heads["reward"].loss(
+                transformer_embeddings,  # Distance head knows to pull out the distance readout_key
+                observations,
+                tasks,
                 pad_mask=observations["pad_mask"],
                 train=train,
             )
 
-            return action_loss, action_metrics
+            return reward_loss, reward_metrics
 
         return state.apply_fn(
             {"params": params},
@@ -317,49 +322,6 @@ def main(_):
     def eval_step(state, batch):
         loss, info = loss_fn(state.params, state, batch, state.rng, train=False)
         return info
-
-    @partial(
-        jax.jit,
-        in_shardings=(replicated_sharding, dp_sharding, dp_sharding),
-        out_shardings=dp_sharding,
-    )
-    def get_policy_sampled_actions(state, observations, tasks):
-        # only use first horizon timesteps as input to predict_action
-        observations = jax.tree_map(lambda x: x[:, -horizon:], observations)
-
-        def get_actions(model, observations, tasks, train):
-            transformer_embeddings = model.orca_transformer(
-                observations,
-                tasks,
-                observations["pad_mask"],
-                train=train,
-            )
-
-            actions = model.heads["action"].predict_action(
-                transformer_embeddings,  # Action head knows to pull out the action readout_key
-                train=train,
-                argmax=False,
-                sample_shape=(NUM_ACTIONS_FOR_VIS,),
-                rng=state.rng,
-            )
-            return actions
-
-        actions = state.apply_fn(
-            {"params": state.params},
-            observations,
-            tasks,
-            train=False,
-            method=get_actions,
-            rngs={"dropout": state.rng},
-        )  # We could also have used run_head here, but this is easier to read
-
-        # actions is (NUM_ACTIONS_FOR_VIS, batch_size, pred_horizon, action_dim)
-        # where actions[:, :, i] predicts the action at timestep "window_size + i"
-        actions = actions[..., 0, :]
-
-        # viz expects (batch_size, n_samples, action_dim)
-        actions = jnp.moveaxis(actions, 0, 1)
-        return actions
 
     def wandb_log(info, step):
         wandb.log(flatten_dict(info, sep="/"), step=step)
@@ -411,25 +373,6 @@ def main(_):
             )
             wandb_log({"validation_aggregate": agg_metrics}, step=i)
             timer.tock("val")
-
-            logging.info("Visualizing...")
-            timer.tick("visualize")
-            policy_fn = batched_apply(
-                partial(get_policy_sampled_actions, train_state),
-                FLAGS.config.batch_size,
-            )
-            for data_kwargs, visualizer in zip(val_datasets_kwargs, visualizers):
-                raw_infos = visualizer.raw_evaluations(policy_fn, max_trajs=100)
-                metrics = visualizer.metrics_for_wandb(raw_infos)
-                images = visualizer.visualize_for_wandb(policy_fn, max_trajs=8)
-                wandb_log(
-                    {
-                        f"offline_metrics_{data_kwargs['name']}": metrics,
-                        f"visualizations_{data_kwargs['name']}": images,
-                    },
-                    step=i,
-                )
-            timer.tock("visualize")
 
         if (i + 1) % FLAGS.config.save_interval == 0 and save_dir is not None:
             logging.info("Saving checkpoint...")
