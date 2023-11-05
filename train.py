@@ -118,12 +118,16 @@ def main(_):
         save_dir = wandb_run.config["save_dir"]
 
     if save_dir is not None:
-        # make checkpoint manager
+        # make checkpointers
         options = orbax.checkpoint.CheckpointManagerOptions(
-            max_to_keep=1e6,
+            max_to_keep=1, step_prefix="train_state"
         )
-        checkpointer = orbax.checkpoint.CheckpointManager(
+        state_checkpointer = orbax.checkpoint.CheckpointManager(
             save_dir, orbax.checkpoint.PyTreeCheckpointer(), options=options
+        )
+        params_checkpointer = orbax.checkpoint.CheckpointManager(
+            save_dir,
+            orbax.checkpoint.PyTreeCheckpointer(),
         )
 
     codebase_directory = osp.abspath(osp.join(osp.dirname(orca.__file__), ".."))
@@ -262,8 +266,8 @@ def main(_):
         )
 
     if FLAGS.config.wandb_resume_id is not None:
-        train_state = checkpointer.restore(
-            checkpointer.latest_step(), items=train_state
+        train_state = state_checkpointer.restore(
+            state_checkpointer.latest_step(), items=train_state
         )
         checkpoint_step = int(train_state.step)
         logging.info("Restored checkpoint from %s", save_dir)
@@ -450,7 +454,8 @@ def main(_):
 
         if (i + 1) % FLAGS.config.save_interval == 0 and save_dir is not None:
             logging.info("Saving checkpoint...")
-            checkpoint_path = checkpointer.save(i + 1, train_state)
+            params_checkpointer.save(i + 1, train_state.params)
+            checkpoint_path = state_checkpointer.save(i + 1, train_state)
             logging.info("Saved checkpoint to %s", checkpoint_path)
 
         timer.tock("total")
