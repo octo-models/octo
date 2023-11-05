@@ -53,7 +53,15 @@ def get_config(config_string):
     )
 
     base_optimizer_config = dict(
-        learning_rate=3e-4, warmup_steps=2000, decay_steps=int(2e6)
+        learning_rate=dict(
+            init_value=0.0,
+            peak_value=3e-4,
+            warmup_steps=2000,
+            decay_steps=int(2e6),
+            end_value=0.0,
+        ),
+        weight_decay=0.01,
+        clip_gradient=1.0,
     )
 
     base_model_config = dict(
