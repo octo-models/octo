@@ -20,7 +20,7 @@ import tqdm
 import wandb
 
 import orca
-from orca.data.dataset import make_dataset, make_interleaved_dataset
+from orca.data.dataset import make_interleaved_dataset, make_single_dataset
 from orca.data.utils.text_processing import text_processors
 from orca.model import create_model_def, OrcaModel
 from orca.model.components.hf_weight_loaders import weights_loaders
@@ -133,17 +133,14 @@ def main(_):
         if "sample_weights" in FLAGS.config.dataset_kwargs
         else None
     )
-    train_data = (
-        make_interleaved_dataset(
-            FLAGS.config.dataset_kwargs["common_kwargs"],
-            FLAGS.config.dataset_kwargs["data_kwargs_list"],
-            train=True,
-            sample_weights=sample_weights,
-            shuffle_buffer_size=FLAGS.config.shuffle_buffer_size,
-        )
-        .repeat()
-        .batch(FLAGS.config.batch_size)
-    )
+    train_data = make_interleaved_dataset(
+        FLAGS.config.dataset_kwargs["common_kwargs"],
+        FLAGS.config.dataset_kwargs["data_kwargs_list"],
+        FLAGS.config.dataset_kwargs["transform_kwargs"],
+        train=True,
+        sample_weights=sample_weights,
+        shuffle_buffer_size=FLAGS.config.shuffle_buffer_size,
+    ).batch(FLAGS.config.batch_size)
     val_datas = []
     visualizers = []
     val_datasets_kwargs, val_datasets_sample_weights = filter_eval_datasets(
@@ -154,18 +151,22 @@ def main(_):
     for dataset_kwargs in val_datasets_kwargs:
         val_data_kwargs = copy.deepcopy(dataset_kwargs)
         val_data_kwargs.update(**FLAGS.config.dataset_kwargs["common_kwargs"])
-        val_dataset = make_dataset(**val_data_kwargs, train=False)
+        val_data_kwargs["shuffle"] = False
+        val_dataset = make_single_dataset(
+            val_data_kwargs,
+            FLAGS.config.dataset_kwargs["transform_kwargs"],
+            train=False,
+        )
         action_proprio_metadata = val_dataset.action_proprio_metadata
         val_datas.append(
             val_dataset.unbatch()
+            # TODO: doesn't this mean every single tiny dataset has a huge shuffle buffer?
             .shuffle(FLAGS.config.shuffle_buffer_size)
             .repeat()
             .batch(FLAGS.config.batch_size)
         )
         visualizers.append(
-            Visualizer(
-                val_data_kwargs, text_processor=text_processor, cache_trajs=False
-            )
+            Visualizer(val_dataset, text_processor=text_processor, cache_trajs=False)
         )
 
         # save normalization constants for evaluation
@@ -259,7 +260,7 @@ def main(_):
         start_step = FLAGS.config.start_step or 0
 
     horizon = (
-        FLAGS.config.dataset_kwargs.common_kwargs.window_size
+        FLAGS.config.dataset_kwargs.transform_kwargs.window_size
         - FLAGS.config.model.heads["action"]["kwargs"]["pred_horizon"]
         + 1
     )  # Ensures that there is a full horizon of actions to predict for each timestep
