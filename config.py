@@ -5,16 +5,10 @@ from ml_collections.config_dict import placeholder
 
 
 def update_config(config, **kwargs):
+    updates = ConfigDict(kwargs)
     new_config = deepcopy(config)
-    for key, value in kwargs.items():
-        if key in config:
-            if isinstance(config[key], dict) or isinstance(config[key], ConfigDict):
-                new_config[key] = update_config(config[key], **value)
-            else:
-                new_config[key] = value
-        else:
-            new_config[key] = value
-    return ConfigDict(new_config)
+    new_config.update(updates)
+    return new_config
 
 
 def get_config(config_string):
