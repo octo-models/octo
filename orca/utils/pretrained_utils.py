@@ -1,6 +1,7 @@
 from functools import partial
 import json
 import logging
+from typing import Optional
 
 import flax
 import jax
@@ -137,24 +138,25 @@ class PretrainedModel:
     @classmethod
     def load_pretrained(
         cls,
-        checkpoint_dir: str,
-        config_path: str = None,
-        example_batch_path: str = None,
-        step=None,
+        checkpoint_path: str,
+        config_path: Optional[str] = None,
+        example_batch_path: Optional[str] = None,
+        step: Optional[int] = None,
     ):
-        """Loads a pretrained model from a checkpoint.
+        """Loads a pretrained model from a checkpoint. Important: this method expects the
+        params-only checkpoint, not the full TrainState used for resuming training.
 
         Args:
-            checkpoint_dir: Path to directory of checkpoints.
-            config_path: Path to config.json. If None, defaults to checkpoint_dir/config.json
-            example_batch_path: Path to example_batch.msgpack. If None, defaults to checkpoint_dir/example_batch.msgpack
-            step: int or None: If multiple checkpoints are present, which one to load. Defaults to the latest.
+            checkpoint_path (str): A path to either a directory of checkpoints or a single checkpoint.
+            config_path (str): Path to config.json. If None, defaults to checkpoint_path/config.json.
+            example_batch_path (str): Path to example_batch.msgpack. If None, defaults to checkpoint_path/example_batch.msgpack.
+            step (int, optional): If multiple checkpoints are present, which one to load. Defaults to the latest.
         """
         if config_path is None:
-            config_path = tf.io.gfile.join(checkpoint_dir, "config.json")
+            config_path = tf.io.gfile.join(checkpoint_path, "config.json")
         if example_batch_path is None:
             example_batch_path = tf.io.gfile.join(
-                checkpoint_dir, "example_batch.msgpack"
+                checkpoint_path, "example_batch.msgpack"
             )
 
         with tf.io.gfile.GFile(config_path, "r") as f:
@@ -166,10 +168,33 @@ class PretrainedModel:
         )
         with tf.io.gfile.GFile(example_batch_path, "rb") as f:
             example_batch = flax.serialization.msgpack_restore(f.read())
-            logging.warning(
+            logging.info(
                 "Loaded example batch with structure: %s",
                 flax.core.pretty_repr(jax.tree_map(jnp.shape, example_batch)),
             )
+
+        # compute params shape without using any FLOPs
+        params_shape = jax.eval_shape(
+            partial(model_def.init, train=False),
+            jax.random.PRNGKey(0),
+            example_batch["observation"],
+            example_batch["tasks"],
+            example_batch["observation"]["pad_mask"],
+        )["params"]
+
+        all_steps = orbax.checkpoint.utils.checkpoint_steps(checkpoint_path)
+        if all_steps:
+            # assume this is a path to a directory of checkpoints
+            checkpoint_path = orbax.checkpoint.utils.get_save_directory(
+                max(orbax.checkpoint.utils.checkpoint_steps(checkpoint_path))
+                if step is None
+                else step,
+                checkpoint_path,
+            )
+
+        params = orbax.checkpoint.PyTreeCheckpointer().restore(
+            tf.io.gfile.join(checkpoint_path, "default"), params_shape
+        )
 
         if config["text_processor"] is None:
             text_processor = None
@@ -178,18 +203,6 @@ class PretrainedModel:
                 **config["text_processor_kwargs"]
             )
 
-        assert (
-            len(orbax.checkpoint.utils.checkpoint_steps_paths(checkpoint_dir)) > 0
-        ), "checkpoint_dir should be a directory containing checkpoints."
-
-        checkpointer = orbax.checkpoint.CheckpointManager(
-            checkpoint_dir,
-            orbax.checkpoint.PyTreeCheckpointer(),
-        )
-
-        params = checkpointer.restore(
-            checkpointer.latest_step() if step is None else step
-        )
         return cls(
             model_def=model_def,
             params=params,
