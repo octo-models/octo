@@ -36,6 +36,9 @@ flags.DEFINE_multi_string(
     "checkpoint_weights_path", None, "Path to checkpoint", required=True
 )
 flags.DEFINE_multi_string(
+    "checkpoint_step", None, "Checkpoint step", required=True
+)
+flags.DEFINE_multi_string(
     "checkpoint_config_path", None, "Path to checkpoint config JSON", required=True
 )
 flags.DEFINE_multi_string(
@@ -117,9 +120,9 @@ def sample_actions(
     return actions[0] * std + mean
 
 
-def load_checkpoint(weights_path, config_path, metadata_path, example_batch_path):
+def load_checkpoint(weights_path, config_path, metadata_path, example_batch_path, step):
     model = PretrainedModel.load_pretrained(
-        weights_path, config_path, example_batch_path
+        weights_path, config_path, example_batch_path, step
     )
 
     with open(metadata_path, "r") as f:
@@ -146,6 +149,7 @@ def main(_):
         == len(FLAGS.checkpoint_config_path)
         == len(FLAGS.checkpoint_metadata_path)
         == len(FLAGS.checkpoint_example_batch_path)
+        == len(FLAGS.checkpoint_step)
     )
 
     # policies is a dict from run_name to policy function
@@ -155,20 +159,22 @@ def main(_):
         checkpoint_config_path,
         checkpoint_metadata_path,
         checkpoint_example_batch_path,
+        checkpoint_step,
     ) in zip(
         FLAGS.checkpoint_weights_path,
         FLAGS.checkpoint_config_path,
         FLAGS.checkpoint_metadata_path,
         FLAGS.checkpoint_example_batch_path,
+        FLAGS.checkpoint_step,
     ):
         assert tf.io.gfile.exists(checkpoint_weights_path), checkpoint_weights_path
-        checkpoint_num = int(checkpoint_weights_path.split("_")[-1])
         run_name = checkpoint_config_path.split("/")[-2]
-        policies[f"{run_name}-{checkpoint_num}"] = load_checkpoint(
+        policies[f"{run_name}-{checkpoint_step}"] = load_checkpoint(
             checkpoint_weights_path,
             checkpoint_config_path,
             checkpoint_metadata_path,
             checkpoint_example_batch_path,
+            checkpoint_step
         )
 
     if FLAGS.initial_eep is not None:

@@ -123,10 +123,12 @@ def main(_):
             max_to_keep=1,
         )
         state_checkpointer = orbax.checkpoint.CheckpointManager(
-            save_dir, orbax.checkpoint.PyTreeCheckpointer(), options=options
+            tf.io.gfile.join(save_dir, "state"),
+            orbax.checkpoint.PyTreeCheckpointer(),
+            options=options,
         )
         params_checkpointer = orbax.checkpoint.CheckpointManager(
-            tf.io.gfile.join(save_dir, "params"),
+            save_dir,
             orbax.checkpoint.PyTreeCheckpointer(),
         )
 
