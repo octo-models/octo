@@ -7,6 +7,7 @@ import os.path as osp
 
 from absl import app, flags, logging
 import flax
+from flax.training import orbax_utils
 from flax.traverse_util import flatten_dict
 import jax
 import jax.numpy as jnp
@@ -119,14 +120,15 @@ def main(_):
 
     if save_dir is not None:
         # make checkpointers
-        options = orbax.checkpoint.CheckpointManagerOptions(
-            max_to_keep=1,
-        )
+        # only keep latest full TrainState
         state_checkpointer = orbax.checkpoint.CheckpointManager(
             tf.io.gfile.join(save_dir, "state"),
             orbax.checkpoint.PyTreeCheckpointer(),
-            options=options,
+            options=orbax.checkpoint.CheckpointManagerOptions(
+                max_to_keep=1,
+            ),
         )
+        # keep every params checkpoint
         params_checkpointer = orbax.checkpoint.CheckpointManager(
             save_dir,
             orbax.checkpoint.PyTreeCheckpointer(),
@@ -458,8 +460,16 @@ def main(_):
             timer.tock("visualize")
 
         if (i + 1) % FLAGS.config.save_interval == 0 and save_dir is not None:
-            params_checkpointer.save(i + 1, train_state.params)
-            state_checkpointer.save(i + 1, train_state)
+            params_checkpointer.save(
+                i + 1,
+                train_state.params,
+                {"save_args": orbax_utils.save_args_from_target(train_state.params)},
+            )
+            state_checkpointer.save(
+                i + 1,
+                train_state,
+                {"save_args": orbax_utils.save_args_from_target(train_state)},
+            )
 
         timer.tock("total")
 
