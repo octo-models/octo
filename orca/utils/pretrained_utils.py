@@ -24,7 +24,7 @@ class PretrainedModel:
     """Recommended way of interacting with a pretrained model.
 
     Usage (example):
-        model = PretrainedModel.load_pretrained(checkpoint_path)
+        model = PretrainedModel.load_pretrained(checkpoint_dir)
 
         # Create the task dict
         tasks = model.create_tasks(texts=["go to the red room"])
@@ -137,26 +137,24 @@ class PretrainedModel:
     @classmethod
     def load_pretrained(
         cls,
-        checkpoint_path: str,
+        checkpoint_dir: str,
         config_path: str = None,
         example_batch_path: str = None,
-        skip_verification: bool = False,
         step=None,
     ):
         """Loads a pretrained model from a checkpoint.
 
         Args:
-            checkpoint_path: Checkpoint path (can either be a specific checkpoint or directory of all checkpoints)
-            config_path: Path to config.json. If None, defaults to checkpoint_path/config.json
-            example_batch_path: Path to example_batch.msgpack. If None, defaults to checkpoint_path/example_batch.msgpack
-            skip_verification: If True, doesn't check the loaded params have the correct shape. Faster, but more dangerous!
+            checkpoint_dir: Path to directory of checkpoints.
+            config_path: Path to config.json. If None, defaults to checkpoint_dir/config.json
+            example_batch_path: Path to example_batch.msgpack. If None, defaults to checkpoint_dir/example_batch.msgpack
             step: int or None: If multiple checkpoints are present, which one to load. Defaults to the latest.
         """
         if config_path is None:
-            config_path = tf.io.gfile.join(checkpoint_path, "config.json")
+            config_path = tf.io.gfile.join(checkpoint_dir, "config.json")
         if example_batch_path is None:
             example_batch_path = tf.io.gfile.join(
-                checkpoint_path, "example_batch.msgpack"
+                checkpoint_dir, "example_batch.msgpack"
             )
 
         with tf.io.gfile.GFile(config_path, "r") as f:
@@ -180,55 +178,21 @@ class PretrainedModel:
                 **config["text_processor_kwargs"]
             )
 
+        assert (
+            len(orbax.checkpoint.utils.checkpoint_steps_paths(checkpoint_dir)) > 0
+        ), "checkpoint_dir should be a directory containing checkpoints."
+
         checkpointer = orbax.checkpoint.CheckpointManager(
-            checkpoint_path, orbax.checkpoint.PyTreeCheckpointer()
+            checkpoint_dir,
+            orbax.checkpoint.PyTreeCheckpointer(),
         )
 
-        if skip_verification:
-            loaded = checkpointer.restore(
-                checkpointer.latest_step() if step is None else step
-            )
-            return cls(
-                model_def=model_def,
-                params=loaded["params"],
-                text_processor=text_processor,
-                example_batch=example_batch,
-                config=flax.core.freeze(config.to_dict()),
-            )
-
-        # create train_state
-        rng = jax.random.PRNGKey(0)
-        rng, construct_rng = jax.random.split(rng)
-
-        lr_schedule = optax.warmup_cosine_decay_schedule(
-            init_value=0.0,
-            peak_value=config["optimizer"]["learning_rate"],
-            warmup_steps=config["optimizer"]["warmup_steps"],
-            decay_steps=config["optimizer"]["decay_steps"],
-            end_value=0.0,
+        params = checkpointer.restore(
+            checkpointer.latest_step() if step is None else step
         )
-
-        tx = optax.adam(lr_schedule)
-        train_state = create_train_state(
-            construct_rng,
-            model_def,
-            tx,
-            init_args=(
-                example_batch["observation"],
-                example_batch["tasks"],
-                example_batch["observation"]["pad_mask"],
-            ),
-            init_kwargs={"train": False},
-        )
-
-        train_state = checkpointer.restore(
-            step=checkpointer.latest_step() if step is None else step,
-            items=train_state,
-        )
-
         return cls(
             model_def=model_def,
-            params=train_state.params,
+            params=params,
             text_processor=text_processor,
             example_batch=example_batch,
             config=flax.core.freeze(config.to_dict()),
