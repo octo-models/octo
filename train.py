@@ -458,10 +458,8 @@ def main(_):
             timer.tock("visualize")
 
         if (i + 1) % FLAGS.config.save_interval == 0 and save_dir is not None:
-            logging.info("Saving checkpoint...")
             params_checkpointer.save(i + 1, train_state.params)
-            checkpoint_path = state_checkpointer.save(i + 1, train_state)
-            logging.info("Saved checkpoint to %s", checkpoint_path)
+            state_checkpointer.save(i + 1, train_state)
 
         timer.tock("total")
 
