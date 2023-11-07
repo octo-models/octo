@@ -184,11 +184,13 @@ class PretrainedModel:
 
         all_steps = orbax.checkpoint.utils.checkpoint_steps(checkpoint_path)
         if all_steps:
+            if step is not None and step not in all_steps:
+                raise ValueError(
+                    f"Step {step} not found in checkpoint path {checkpoint_path}."
+                )
             # assume this is a path to a directory of checkpoints
             checkpoint_path = orbax.checkpoint.utils.get_save_directory(
-                max(orbax.checkpoint.utils.checkpoint_steps(checkpoint_path))
-                if step is None
-                else step,
+                max(all_steps) if step is None else step,
                 checkpoint_path,
             )
 
