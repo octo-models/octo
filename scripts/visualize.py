@@ -11,7 +11,6 @@ from functools import partial
 import os
 
 from absl import app, flags, logging
-from flax.training import checkpoints
 from flax.traverse_util import flatten_dict
 import jax
 import jax.numpy as jnp
@@ -22,6 +21,7 @@ import orbax.checkpoint as ocp
 import tensorflow as tf
 import wandb
 
+from orca.data.dataset import make_single_dataset
 from orca.utils.jax_utils import initialize_compilation_cache
 from orca.utils.pretrained_utils import PretrainedModel
 from orca.utils.train_utils import batched_apply, filter_eval_datasets
@@ -98,14 +98,18 @@ def main(_):
         val_data_kwargs = {
             **dataset_kwargs,
             **FLAGS.config.dataset_kwargs["common_kwargs"],
+            "shuffle": False,
         }
+        val_dataset = make_single_dataset(
+            val_data_kwargs,
+            FLAGS.config.dataset_kwargs["transform_kwargs"],
+            train=False,
+        )
         visualizers.append(
-            Visualizer(
-                val_data_kwargs, text_processor=text_processor, cache_trajs=False
-            )
+            Visualizer(val_dataset, text_processor=text_processor, cache_trajs=False)
         )
 
-    list_of_checkpoints = checkpoints._all_checkpoints(FLAGS.checkpoints)
+    list_of_checkpoints = ocp.utils.checkpoint_steps_paths(FLAGS.checkpoints)
 
     @partial(jax.jit, static_argnames=("argmax", "n"))
     def get_policy_sampled_actions(
@@ -152,7 +156,7 @@ def main(_):
     custom_restore_args = orbax_utils.restore_args_from_target(model)
 
     for checkpoint in list_of_checkpoints:
-        step = int(checkpoints._checkpoint_path_step(checkpoint))
+        step = int(ocp.utils.step_from_checkpoint_name(checkpoint))
         if FLAGS.eval_every is not None and step % FLAGS.eval_every != 0:
             continue
         print(f"Loading checkpoint {step}: ", checkpoint)
