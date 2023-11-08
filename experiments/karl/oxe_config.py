@@ -20,14 +20,14 @@ def get_config(config_string):
         log_interval=100,
         eval_interval=10000000,
         save_interval=10000,
-        save_dir='gs://karl-central-2',
+        save_dir="gs://karl-central-2",
         resume_path=placeholder(str),
         seed=42,
         text_processor=None,
         text_processor_kwargs=dict(),
         pretrained_weights=[],
         wandb=base_wandb_config,
-        eval_datasets=['bridge_dataset'],
+        eval_datasets=["bridge_dataset"],
     )
 
     # params that need to be specified multiple places
@@ -50,11 +50,18 @@ def get_config(config_string):
             ],
         ),
         goal_relabeling_strategy="uniform",
-        action_proprio_normalization_type=normalization_type,
     )
 
     base_optimizer_config = dict(
-        learning_rate=3e-4, warmup_steps=2000, decay_steps=int(2e6)
+        learning_rate=dict(
+            init_value=0.0,
+            peak_value=3e-4,
+            warmup_steps=2000,
+            decay_steps=int(2e6),
+            end_value=0.0,
+        ),
+        weight_decay=0.01,
+        clip_gradient=1.0,
     )
 
     base_model_config = dict(
@@ -82,7 +89,7 @@ def get_config(config_string):
     )
 
     base_tokenizer_kwargs = dict(
-        encoder="resnetv1-34-bridge",
+        encoder="resnetv1-34-bridge-film",
         encoder_kwargs=dict(
             pooling_method="none", add_spatial_coordinates=True, act="swish"
         ),
@@ -91,14 +98,12 @@ def get_config(config_string):
         ],  # by default, early fuse goal images into visual encoder
     )
 
-    dataset_kwargs_list, dataset_sampling_weights = (
-        make_oxe_dataset_kwargs_and_weights(
-            RT_X_MIX + OXE_FRANKA_MIX,
-            data_dir='gs://rail-orca-central2/resize_336_336',
-            n_third_person_cameras=1,
-            n_wrist_cameras=1,
-            load_depth=False,
-        )
+    dataset_kwargs_list, dataset_sampling_weights = make_oxe_dataset_kwargs_and_weights(
+        RT_X_MIX + OXE_FRANKA_MIX,
+        data_dir="gs://rail-orca-central2/resize_336_336",
+        n_third_person_cameras=1,
+        n_wrist_cameras=1,
+        load_depth=False,
     )
 
     possible_structures = {
@@ -109,27 +114,37 @@ def get_config(config_string):
                     observation_tokenizers=[
                         (
                             "image_tokenizer",
-                            {"num_tokens": 64,
-                             "task_film_keys": ["language_instruction"], **base_tokenizer_kwargs},
+                            {
+                                "num_tokens": 64,
+                                "task_film_keys": ["language_instruction"],
+                                **base_tokenizer_kwargs,
+                            },
                         ),
                     ],
                     task_tokenizers=[],
                 ),
                 optimizer=base_optimizer_config,
                 dataset_kwargs={
-                    "common_kwargs": update_config(
+                    # common_kwargs override specific kwargs from data_kwargs_list
+                    "common_kwargs": dict(
+                        ram_budget=1,  # limit RAM per dataset
+                        num_parallel_reads=8,  # for reading from GCS
+                        num_parallel_calls=16,  # for the less CPU-intensive ops in initial dataset construction
+                        action_proprio_normalization_type=normalization_type,
+                    ),
+                    "data_kwargs_list": dataset_kwargs_list,
+                    "transform_kwargs": update_config(
                         base_data_config,
                         resize_size=(256, 256),
-                        ram_budget=1,       # limit RAM per dataset
+                        num_parallel_calls=16,  # for the most CPU-intensive ops (decoding, resizing, augmenting)
                         task_augmentation_strategy="switch_keys",
-                        task_augmentation_kwargs = dict(
-                            switch_key_groups_probs = [
+                        task_augmentation_kwargs=dict(
+                            switch_key_groups_probs=[
                                 (["image_0"], 0.5),
                                 (["language_instruction"], 0.5),
                             ],
                         ),
                     ),
-                    "data_kwargs_list": dataset_kwargs_list,
                     "sample_weights": dataset_sampling_weights,
                 },
                 **update_config(

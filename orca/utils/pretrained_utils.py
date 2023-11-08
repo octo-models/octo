@@ -1,13 +1,14 @@
 from functools import partial
 import json
 import logging
+from typing import Optional
 
 import flax
-import flax.training.checkpoints as checkpoints
 import jax
 import jax.numpy as jnp
 from ml_collections import ConfigDict
 import optax
+import orbax.checkpoint
 import tensorflow as tf
 
 from orca.data.utils.text_processing import text_processors
@@ -24,7 +25,7 @@ class PretrainedModel:
     """Recommended way of interacting with a pretrained model.
 
     Usage (example):
-        model = PretrainedModel.load_pretrained(checkpoint_path)
+        model = PretrainedModel.load_pretrained(checkpoint_dir)
 
         # Create the task dict
         tasks = model.create_tasks(texts=["go to the red room"])
@@ -138,19 +139,18 @@ class PretrainedModel:
     def load_pretrained(
         cls,
         checkpoint_path: str,
-        config_path: str = None,
-        example_batch_path: str = None,
-        skip_verification: bool = False,
-        step=None,
+        config_path: Optional[str] = None,
+        example_batch_path: Optional[str] = None,
+        step: Optional[int] = None,
     ):
-        """Loads a pretrained model from a checkpoint.
+        """Loads a pretrained model from a checkpoint. Important: this method expects the
+        params-only checkpoint, not the full TrainState used for resuming training.
 
         Args:
-            checkpoint_path: Checkpoint path (can either be a specific checkpoint or directory of all checkpoints)
-            config_path: Path to config.json. If None, defaults to checkpoint_path/config.json
-            example_batch_path: Path to example_batch.msgpack. If None, defaults to checkpoint_path/example_batch.msgpack
-            skip_verification: If True, doesn't check the loaded params have the correct shape. Faster, but more dangerous!
-            step: int or None: If multiple checkpoints are present, which one to load. Defaults to the latest.
+            checkpoint_path (str): A path to either a directory of checkpoints or a single checkpoint.
+            config_path (str): Path to config.json. If None, defaults to checkpoint_path/config.json.
+            example_batch_path (str): Path to example_batch.msgpack. If None, defaults to checkpoint_path/example_batch.msgpack.
+            step (int, optional): If multiple checkpoints are present, which one to load. Defaults to the latest.
         """
         if config_path is None:
             config_path = tf.io.gfile.join(checkpoint_path, "config.json")
@@ -168,10 +168,35 @@ class PretrainedModel:
         )
         with tf.io.gfile.GFile(example_batch_path, "rb") as f:
             example_batch = flax.serialization.msgpack_restore(f.read())
-            logging.warning(
+            logging.info(
                 "Loaded example batch with structure: %s",
                 flax.core.pretty_repr(jax.tree_map(jnp.shape, example_batch)),
             )
+
+        # compute params shape without using any FLOPs
+        params_shape = jax.eval_shape(
+            partial(model_def.init, train=False),
+            jax.random.PRNGKey(0),
+            example_batch["observation"],
+            example_batch["tasks"],
+            example_batch["observation"]["pad_mask"],
+        )["params"]
+
+        all_steps = orbax.checkpoint.utils.checkpoint_steps(checkpoint_path)
+        if all_steps:
+            if step is not None and step not in all_steps:
+                raise ValueError(
+                    f"Step {step} not found in checkpoint path {checkpoint_path}."
+                )
+            # assume this is a path to a directory of checkpoints
+            checkpoint_path = orbax.checkpoint.utils.get_save_directory(
+                max(all_steps) if step is None else step,
+                checkpoint_path,
+            )
+
+        params = orbax.checkpoint.PyTreeCheckpointer().restore(
+            tf.io.gfile.join(checkpoint_path, "default"), params_shape
+        )
 
         if config["text_processor"] is None:
             text_processor = None
@@ -180,50 +205,9 @@ class PretrainedModel:
                 **config["text_processor_kwargs"]
             )
 
-        if skip_verification:
-            loaded = checkpoints.restore_checkpoint(
-                checkpoint_path, target=None, step=step
-            )
-            return cls(
-                model_def=model_def,
-                params=loaded["params"],
-                text_processor=text_processor,
-                example_batch=example_batch,
-                config=flax.core.freeze(config.to_dict()),
-            )
-
-        # create train_state
-        rng = jax.random.PRNGKey(0)
-        rng, construct_rng = jax.random.split(rng)
-
-        lr_schedule = optax.warmup_cosine_decay_schedule(
-            init_value=0.0,
-            peak_value=config["optimizer"]["learning_rate"],
-            warmup_steps=config["optimizer"]["warmup_steps"],
-            decay_steps=config["optimizer"]["decay_steps"],
-            end_value=0.0,
-        )
-
-        tx = optax.adam(lr_schedule)
-        train_state = create_train_state(
-            construct_rng,
-            model_def,
-            tx,
-            init_args=(
-                example_batch["observation"],
-                example_batch["tasks"],
-                example_batch["observation"]["pad_mask"],
-            ),
-            init_kwargs={"train": False},
-        )
-
-        train_state = checkpoints.restore_checkpoint(
-            checkpoint_path, train_state, step=step
-        )
-
         return cls(
             model_def=model_def,
-            params=train_state.params,
+            params=params,
             text_processor=text_processor,
             example_batch=example_batch,
             config=flax.core.freeze(config.to_dict()),
