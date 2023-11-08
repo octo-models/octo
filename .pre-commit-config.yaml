@@ -31,9 +31,9 @@ repos:
         exclude: ^experiments/
         args: ["--profile", "black", "--src", "orca", "--src", "experiments"]
   - repo: https://github.com/srstevenson/nb-clean
-      rev: 3.1.0
-      hooks:
-        - id: nb-clean
-          args:
-            - --remove-empty-cells
-            - --preserve-cell-outputs
+    rev: 3.1.0
+    hooks:
+      - id: nb-clean
+        args:
+          - --remove-empty-cells
+          - --preserve-cell-outputs
