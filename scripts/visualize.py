@@ -11,7 +11,6 @@ from functools import partial
 import os
 
 from absl import app, flags, logging
-from flax.training import checkpoints
 from flax.traverse_util import flatten_dict
 import jax
 import jax.numpy as jnp
@@ -110,7 +109,7 @@ def main(_):
             Visualizer(val_dataset, text_processor=text_processor, cache_trajs=False)
         )
 
-    list_of_checkpoints = checkpoints._all_checkpoints(FLAGS.checkpoints)
+    list_of_checkpoints = ocp.utils.checkpoint_steps_paths(FLAGS.checkpoints)
 
     @partial(jax.jit, static_argnames=("argmax", "n"))
     def get_policy_sampled_actions(
@@ -157,7 +156,7 @@ def main(_):
     custom_restore_args = orbax_utils.restore_args_from_target(model)
 
     for checkpoint in list_of_checkpoints:
-        step = int(checkpoints._checkpoint_path_step(checkpoint))
+        step = int(ocp.utils.step_from_checkpoint_name(checkpoint))
         if FLAGS.eval_every is not None and step % FLAGS.eval_every != 0:
             continue
         print(f"Loading checkpoint {step}: ", checkpoint)
