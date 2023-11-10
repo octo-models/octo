@@ -46,23 +46,6 @@ def pprint_data_mixture(
     )
 
 
-def maybe_decode_depth_images(
-    x: Dict[str, Any], match: Union[str, Sequence[str]] = "depth"
-) -> Dict[str, Any]:
-    """Can operate on nested dicts. Decodes any leaves that have `match` anywhere in their path."""
-    if isinstance(match, str):
-        match = [match]
-
-    return selective_tree_map(
-        x,
-        lambda keypath, value: any([s in keypath for s in match])
-        and value.dtype == tf.string,
-        lambda e: tf.io.decode_image(e, expand_animations=False, dtype=tf.float32)[
-            ..., 0
-        ],
-    )
-
-
 def load_action_proprio_stats(path: str) -> Dict[str, Dict[str, List[float]]]:
     # assert that path exists
     assert tf.io.gfile.exists(path), f"{path} does not exist!"
