@@ -1,32 +1,23 @@
-import sys
 import os
 import time
+import flax
 from datetime import datetime
-import traceback
-from collections import deque
 import json
 
 from absl import app, flags, logging
 
 import numpy as np
-import tensorflow as tf
 
 import cv2
 import jax
 import jax.numpy as jnp
-import imageio
 from functools import partial
 
-from flax.training import checkpoints
-from orca.model import create_model_def
-from orca.utils.train_utils import create_train_state
-from orca.data.utils.text_processing import text_processors
+from orca.utils.pretrained_utils import PretrainedModel
+from orca.data.utils.data_utils import StateEncoding
 import optax
 
 # r2d2 robot imports
-from r2d2.controllers.oculus_controller import VRPolicy
-from r2d2.robot_env import RobotEnv
-from r2d2.user_interface.data_collector import DataCollecter
 from r2d2.user_interface.eval_gui import EvalGUI
 
 
@@ -35,14 +26,8 @@ np.set_printoptions(suppress=True)
 logging.set_verbosity(logging.WARNING)
 
 FLAGS = flags.FLAGS
-
-flags.DEFINE_string("video_save_path", None, "Path to save video")
-flags.DEFINE_integer("num_timesteps", 120, "num timesteps")
-flags.DEFINE_bool("blocking", False, "Use the blocking controller")
-flags.DEFINE_spaceseplist("goal_eep", None, "Goal position")
-flags.DEFINE_spaceseplist("initial_eep", None, "Initial position")
-flags.DEFINE_integer("act_exec_horizon", 1, "Action sequence length")
 flags.DEFINE_bool("deterministic", False, "Whether to sample action deterministically")
+flags.DEFINE_float("temperature", 1.0, "Temperature for sampling actions")
 
 
 def stack_and_pad_obs(fn, horizon):
@@ -101,113 +86,58 @@ def _null_goal():
 
 @partial(jax.jit, static_argnames="argmax")
 def sample_actions(
-    observations, tasks, state, mean, std, rng, argmax=False, temperature=1.0
+    pretrained_model: PretrainedModel,
+    observations,
+    tasks,
+    mean,
+    std,
+    rng,
+    argmax=False,
+    temperature=1.0,
 ):
-    # add batch dim
+    # add batch dim to observations
     observations = jax.tree_map(lambda x: x[None], observations)
-    tasks = jax.tree_map(lambda x: x[None], tasks)
-    actions = state.apply_fn(
-        {"params": state.params},
+    # tasks = jax.tree_map(lambda x: x[None], tasks)
+    logging.warning(
+        "observations: %s", flax.core.pretty_repr(jax.tree_map(jnp.shape, observations))
+    )
+    logging.warning("tasks: %s", flax.core.pretty_repr(jax.tree_map(jnp.shape, tasks)))
+    actions = pretrained_model.sample_actions(
         observations,
         tasks,
-        train=False,
-        argmax=argmax,
         rng=rng,
+        argmax=argmax,
         temperature=temperature,
-        method="predict_action",
     )
     # remove batch dim
     return actions[0] * std + mean
 
 
-def load_checkpoint(weights_path, config_path, metadata_path):
-    with open(config_path, "r") as f:
-        config = json.load(f)
-
-    window_size = config["dataset_kwargs"]["common_kwargs"]["window_size"]
-    horizon = window_size - config["model"]["policy_kwargs"]["pred_horizon"] + 1
-
-    example_actions = jnp.zeros((1, window_size, 7), dtype=np.float32)
-    example_obs = {
-        "image_0": jnp.zeros(
-            (1, window_size, 180, 320, 3), dtype=np.uint8
-        ),
-        "pad_mask": jnp.ones((1, window_size)),
-    }
-
-    if config["text_processor"] is None:
-        text_processor = None
-        language_embed = None
-    else:
-        text_processor = text_processors[config["text_processor"]](
-            **config["text_processor_kwargs"]
-        )
-        language_embed = text_processor.encode([[""]])
-
-    example_batch = {
-        "observations": example_obs,
-        "tasks": {
-            "image_0": jnp.zeros((1, 180, 320, 3), dtype=np.uint8),
-            "language_instruction": language_embed,
-        },
-        "actions": example_actions,
-    }
-
-    # create train_state
-    rng = jax.random.PRNGKey(0)
-    rng, construct_rng = jax.random.split(rng)
-
-    model_def = create_model_def(
-        action_dim=example_batch["actions"].shape[-1],
-        window_size=example_batch["observations"]["image_0"].shape[1],
-        **config["model"],
+def load_checkpoint(weights_path, config_path, metadata_path, example_batch_path):
+    model = PretrainedModel.load_pretrained(
+        weights_path, config_path, example_batch_path
     )
-
-    lr_schedule = optax.warmup_cosine_decay_schedule(
-        init_value=0.0,
-        peak_value=config["optimizer"]["learning_rate"],
-        warmup_steps=config["optimizer"]["warmup_steps"],
-        decay_steps=config["optimizer"]["decay_steps"],
-        end_value=0.0,
-    )
-
-    tx = optax.adam(lr_schedule)
-    train_state = create_train_state(
-        construct_rng,
-        model_def,
-        tx,
-        init_args=(
-            example_batch["observations"],
-            example_batch["tasks"],
-            example_batch["actions"],
-        ),
-    )
-
-    # hydrate train_state with parameters from checkpoint
-    train_state = checkpoints.restore_checkpoint(weights_path, train_state)
 
     with open(metadata_path, "r") as f:
         action_proprio_metadata = json.load(f)
     action_mean = jnp.array(action_proprio_metadata["action"]["mean"])
     action_std = jnp.array(action_proprio_metadata["action"]["std"])
 
-    rng, policy_rng = jax.random.split(rng)
-
     policy_fn = stack_and_pad_obs(
         supply_rng(
             partial(
                 sample_actions,
-                state=train_state,
+                model,
                 argmax=FLAGS.deterministic,
                 mean=action_mean,
                 std=action_std,
+                temperature=FLAGS.temperature,
             ),
-            rng=policy_rng,
         ),
-        horizon=horizon,
+        horizon=model.config["dataset_kwargs"]["common_kwargs"]["window_size"],
     )
+    return (policy_fn, model)
 
-    return policy_fn, text_processor
 
 class OrcaPolicy:
     def __init__(self, policy_fn, img_key='16291792_left'):
@@ -217,11 +147,13 @@ class OrcaPolicy:
         self._last_time = None
 
     def set_goal(self, goal_img):
-        self.task = dict(image_0=goal_img)
+        self.task = dict(image_0=goal_img[None].copy())
 
     def _convert_obs(self, observation):
         image = _resize_img(observation['image'][self.img_key])
-        state = np.array(observation['robot_state']['joint_positions']).astype(np.float32)
+        obs = [StateEncoding.NONE] + observation['robot_state']['joint_positions']
+        state = np.array(obs).astype(np.float32)
+        print(image.shape, image.dtype, state.shape, state.dtype)
         return {"image_0": image, "proprio": state}
 
     def forward(self, observation):
@@ -246,12 +178,13 @@ class OrcaPolicy:
 
 
 def main(_):
-    checkpoint_weights_path  = '/home/sdasari/orca/checkpoints/orca/orca_r2d2_pen_mix_20231011_164455/checkpoint_40000/'
-    checkpoint_config_path   = '/home/sdasari/orca/checkpoints/orca/orca_r2d2_pen_mix_20231011_164455/config.json'
-    checkpoint_metadata_path = '/home/sdasari/orca/checkpoints/orca/orca_r2d2_pen_mix_20231011_164455/action_proprio_metadata_r2_d2_pen_ourlab.json'
+    checkpoint_weights_path  = '/home/sdasari/orca/reverify/orca/test_20231102_024636/checkpoint_40000/'
+    checkpoint_config_path   = '/home/sdasari/orca/reverify/orca/test_20231102_024636/config.json'
+    checkpoint_metadata_path = '/home/sdasari/orca/reverify/orca/test_20231102_024636/action_proprio_metadata_r2_d2_pen_ourlab.json'
+    checkpoint_example_batch = '/home/sdasari/orca/reverify/orca/test_20231102_024636/example_batch.msgpack'
 
     policy_fn, _ = load_checkpoint(
-            checkpoint_weights_path, checkpoint_config_path, checkpoint_metadata_path
+            checkpoint_weights_path, checkpoint_config_path, checkpoint_metadata_path, checkpoint_example_batch
         )
 
     policy = OrcaPolicy(policy_fn)
