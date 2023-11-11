@@ -17,7 +17,7 @@ def get_config(config_string):
         num_val_batches=8,
         num_steps=int(2e6),
         start_step=placeholder(int),
-        log_interval=100,
+        log_interval=1000,
         eval_interval=10000,
         save_interval=10000,
         save_dir="gs://karl-central-2",
@@ -27,14 +27,15 @@ def get_config(config_string):
         text_processor_kwargs=dict(),
         pretrained_weights=[],
         wandb=base_wandb_config,
-        #eval_datasets=["bridge_dataset"],
+        wandb_resume_id=placeholder(str),
+        eval_datasets=None,
     )
 
     # params that need to be specified multiple places
     normalization_type = "normal"
 
     base_data_config = dict(
-        window_size=4,
+        window_size=1,
         image_augment_kwargs=dict(
             random_resized_crop=dict(scale=[0.8, 1.0], ratio=[0.9, 1.1]),
             random_brightness=[0.2],
@@ -118,7 +119,7 @@ def get_config(config_string):
                 dataset_kwargs={
                     # common_kwargs override specific kwargs from data_kwargs_list
                     "common_kwargs": dict(
-                        # ram_budget=1,  # limit RAM per dataset
+                        ram_budget=1,  # limit RAM per dataset
                         num_parallel_reads=8,  # for reading from GCS
                         num_parallel_calls=16,  # for the less CPU-intensive ops in initial dataset construction
                         action_proprio_normalization_type=normalization_type,
@@ -140,7 +141,7 @@ def get_config(config_string):
                         resize_size=(128, 128),
                         num_parallel_calls=16,  # for the most CPU-intensive ops (decoding, resizing, augmenting)
                     ),
-                    "sample_weights": [1.0, 1.0, 1.0],
+                    "sample_weights": [1.0, 0.01, 0.01],
                 },
                 **base_config,
             )
