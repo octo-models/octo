@@ -140,9 +140,10 @@ class ImageTokenizer(nn.Module):
         d = image_tokens.shape[-1]
         image_tokens = jnp.reshape(image_tokens, (b, t, -1, d))
         if self.early_fusion:
+            n_tokens = image_tokens.shape[2]
             assert (
-                image_tokens.shape[2] == self.num_tokens
-            ), f"encoder should produce {self.num_tokens} tokens!"
+                n_tokens == self.num_tokens
+            ), f"encoder must produce {self.num_tokens} tokens not {n_tokens}!"
             return image_tokens
 
         if task_inputs is not None:
