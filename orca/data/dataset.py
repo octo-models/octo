@@ -1,6 +1,5 @@
 import copy
 from functools import partial
-import logging
 from typing import List, Optional, Sequence, Tuple, Union
 
 import dlimp as dl
@@ -14,7 +13,6 @@ from orca.data.utils.data_utils import (
     ActionEncoding,
     get_action_proprio_stats,
     load_action_proprio_stats,
-    maybe_decode_depth_images,
     normalize_action_and_proprio,
     pprint_data_mixture,
     StateEncoding,
@@ -36,10 +34,70 @@ def _chunk_act_obs(traj, window_size):
         traj[key] = tf.nest.map_structure(
             lambda x: tf.gather(x, floored_chunk_indices), traj[key]
         )
-    # out of bounds indices will be masked in transformer
+    # indicates whether or not an entire observation is padding
     traj["observation"]["pad_mask"] = chunk_indices >= 0
 
     return traj
+
+
+def _decode_images(frame):
+    """Decodes images and depth images, marking empty strings as padding."""
+    obs = frame["observation"]
+    # indicates which keys in the observation dict are padding
+    pad_mask_dict = {}
+    for key in obs:
+        if "image" in key:
+            if obs[key].dtype == tf.string:
+                if tf.strings.length(obs[key]) == 0:
+                    # this is a padding image
+                    obs[key] = tf.zeros((1, 1, 3), dtype=tf.uint8)
+                    pad_mask_dict[key] = False
+                else:
+                    obs[key] = tf.io.decode_image(
+                        obs[key], expand_animations=False, dtype=tf.uint8
+                    )
+                    pad_mask_dict[key] = True
+            elif obs[key].dtype == tf.uint8:
+                pad_mask_dict[key] = True
+            else:
+                raise ValueError(
+                    f"Unsupported image dtype: found {key} with dtype {obs[key].dtype}"
+                )
+        elif "depth" in key:
+            if obs[key].dtype == tf.string:
+                if tf.strings.length(obs[key]) == 0:
+                    # this is a padding image
+                    obs[key] = tf.zeros((1, 1), dtype=tf.float32)
+                    pad_mask_dict[key] = False
+                else:
+                    obs[key] = tf.io.decode_image(
+                        obs[key], expand_animations=False, dtype=tf.float32
+                    )[..., 0]
+                    pad_mask_dict[key] = True
+            elif obs[key].dtype == tf.float32:
+                pad_mask_dict[key] = True
+            else:
+                raise ValueError(
+                    f"Unsupported depth dtype: found {key} with dtype {obs[key].dtype}"
+                )
+
+    frame["observation"] = obs
+    frame["observation"]["pad_mask_dict"] = pad_mask_dict
+    return frame
+
+
+def _augment(frame, augment_kwargs):
+    """Augments images, skipping padding images. Augments all images in a trajectory identically."""
+    obs = frame["observation"]
+    seed = [frame["_traj_index"], frame["_traj_index"]]
+    for key in obs:
+        if "image" in key:
+            if obs["pad_mask_dict"][key]:
+                obs[key] = dl.transforms.augment_image(
+                    obs[key], **augment_kwargs, seed=seed
+                )
+    frame["observation"] = obs
+    return frame
 
 
 def apply_common_transforms(
@@ -80,9 +138,8 @@ def apply_common_transforms(
             lambda x: tf.math.reduce_any(x["language_instruction"] != "")
         )
 
-    # decodes string keys with names "image" & "depth", resizes "image" and "depth"
-    dataset = dataset.frame_map(dl.transforms.decode_images, num_parallel_calls)
-    dataset = dataset.frame_map(maybe_decode_depth_images, num_parallel_calls)
+    dataset = dataset.frame_map(_decode_images, num_parallel_calls)
+
     if resize_size:
         dataset = dataset.frame_map(
             partial(dl.transforms.resize_images, size=resize_size),
@@ -96,11 +153,7 @@ def apply_common_transforms(
     if train:
         # augments the entire trajectory with the same seed
         dataset = dataset.frame_map(
-            partial(
-                dl.transforms.augment,
-                augment_kwargs=image_augment_kwargs,
-            ),
-            num_parallel_calls,
+            partial(_augment, augment_kwargs=image_augment_kwargs), num_parallel_calls
         )
 
     # adds the "tasks" key
@@ -119,7 +172,7 @@ def apply_common_transforms(
 
         dataset = dataset.map(move_language_instruction_to_tasks, num_parallel_calls)
 
-    if task_augmentation_strategy is not None:
+    if train and task_augmentation_strategy is not None:
         dataset = dataset.map(
             partial(
                 getattr(task_augmentation, task_augmentation_strategy),
@@ -145,7 +198,6 @@ def make_dataset_from_rlds(
     depth_obs_keys: Union[str, List[str]] = [],
     state_obs_keys: Union[str, List[str]] = [],
     action_proprio_metadata: Optional[Union[dict, str]] = None,
-    resize_size: Optional[Tuple[int, int]] = None,
     state_encoding: StateEncoding = StateEncoding.NONE,
     action_encoding: ActionEncoding = ActionEncoding.EEF_POS,
     ram_budget: Optional[int] = None,
@@ -169,7 +221,6 @@ def make_dataset_from_rlds(
             Get concatenated and mapped to "proprio". Inserts 1d padding for each None key.
         action_proprio_metadata (dict, str, optional): dict (or path to previously dumped json dict) with
             min/max/mean/std for action and proprio normalization. If not provided, will get computed on the fly.
-        resize_size (tuple, optional): target (height, width) for all RGB and depth images. Only used for padding.
         state_encoding (StateEncoding): type of state encoding used, e.g. joint angles vs EEF pose.
         action_encoding (ActionEncoding): type of action encoding used, e.g. joint delta vs EEF delta.
         ram_budget (int, optional): limits the RAM used by tf.data.AUTOTUNE, unit: GB, forwarded to AutotuneOptions.
@@ -235,32 +286,21 @@ def make_dataset_from_rlds(
         traj["observation"] = {}
         for i, key in enumerate(image_obs_keys):
             if key is None:
-                pad_shape = (
-                    (traj_len, resize_size[0], resize_size[1], 3)
-                    if resize_size
-                    else traj["observation"]["image_0"].shape
-                )
-                traj["observation"][f"image_{i}"] = tf.io.encode_png(
-                    tf.zeros(pad_shape, dtype=tf.uint8)
-                )
+                # pad with empty string
+                traj["observation"][f"image_{i}"] = tf.repeat("", traj_len)
             else:
                 traj["observation"][f"image_{i}"] = orig_obs[key]
         for i, key in enumerate(depth_obs_keys):
             if key is None:
-                pad_shape = (
-                    (traj_len, resize_size[0], resize_size[1])
-                    if resize_size
-                    else traj["observation"]["depth_0"].shape
-                )
-                traj["observation"][f"depth_{i}"] = tf.zeros(
-                    pad_shape, dtype=tf.float32
-                )
+                # pad with empty string
+                traj["observation"][f"depth_{i}"] = tf.repeat("", traj_len)
             else:
                 traj["observation"][f"depth_{i}"] = orig_obs[key]
         if state_obs_keys:
             proprio = []
             for key in state_obs_keys:
                 if key is None:
+                    # pad with zero
                     proprio.append(tf.zeros((traj_len, 1), dtype=tf.float32))
                 else:
                     proprio.append(tf.cast(orig_obs[key], tf.float32))
@@ -321,12 +361,6 @@ def make_single_dataset(
     """
     dataset_kwargs = copy.deepcopy(dataset_kwargs)
     transform_kwargs = copy.deepcopy(transform_kwargs)
-    # SPECIAL CASE: only allow specifying `resize_size` in `transform_kwargs`
-    if "resize_size" in dataset_kwargs:
-        raise ValueError(
-            "Please specify `resize_size` in `transform_kwargs` instead of `dataset_kwargs`."
-        )
-    dataset_kwargs["resize_size"] = transform_kwargs.get("resize_size", None)
 
     # SPECIAL CASE: if `num_parallel_calls` is not in `transform_kwargs`, use
     # same value as in `dataset_kwargs`
@@ -377,14 +411,6 @@ def make_interleaved_dataset(
         dataset_kwargs_list, desc="Generating individual datasets..."
     ):
         dataset_kwargs.update(**common_dataset_kwargs)
-
-        # SPECIAL CASE: only allow specifying `resize_size` in `transform_kwargs`
-        if "resize_size" in dataset_kwargs:
-            raise ValueError(
-                "Please specify `resize_size` in `transform_kwargs` instead of `dataset_kwargs`."
-            )
-        dataset_kwargs["resize_size"] = transform_kwargs.get("resize_size", None)
-
         dataset, _ = make_dataset_from_rlds(**dataset_kwargs, train=train)
         datasets.append(dataset.repeat())
 
