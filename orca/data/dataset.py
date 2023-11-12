@@ -6,7 +6,6 @@ import dlimp as dl
 import numpy as np
 import tensorflow as tf
 import tensorflow_datasets as tfds
-import tqdm
 
 from orca.data.dataset_transforms import RLDS_TRAJECTORY_MAP_TRANSFORMS
 from orca.data.utils import bc_goal_relabeling, task_augmentation
@@ -408,7 +407,8 @@ def make_interleaved_dataset(
         transform_kwargs: kwargs passed to 'apply_common_transforms'.
         train: whether this is a training or validation dataset.
         sample_weights: sampling weights for each dataset in list. If None, defaults to uniform.
-        balance_weights: whether to rebalance sampling weights by number of transitions in each dataset.
+        balance_weights: whether to rebalance sampling weights by number of transitions in each dataset,
+            such that larger datasets are sampled more often.
         shuffle_buffer_size: size of the dataset shuffle buffer for interleaved dataset.
     """
     common_dataset_kwargs = copy.deepcopy(common_dataset_kwargs)
@@ -420,22 +420,31 @@ def make_interleaved_dataset(
 
     datasets = []
     dataset_sizes = []
+    avg_traj_lens = []
     for dataset_kwargs in dataset_kwargs_list:
         dataset_kwargs.update(**common_dataset_kwargs)
         dataset, dataset_statistics = make_dataset_from_rlds(
             **dataset_kwargs, train=train
         )
         dataset_sizes.append(dataset_statistics["num_transitions"])
+        avg_traj_lens.append(
+            dataset_statistics["num_transitions"]
+            / dataset_statistics["num_trajectories"]
+        )
         datasets.append(dataset.repeat())
 
     if balance_weights:
         sample_weights = np.array(sample_weights) * np.array(dataset_sizes)
+    # normalize to sum to one
     sample_weights = np.array(sample_weights) / np.sum(sample_weights)
     pprint_data_mixture(dataset_kwargs_list, sample_weights)
 
     # interleave datasets at the trajectory level with sampling weights
     # (doing it this way saves memory compared to interleaving at the step level)
-    dataset = dl.DLataset.sample_from_datasets(datasets, sample_weights)
+    # must compensate for different trajectory lengths
+    dataset = dl.DLataset.sample_from_datasets(
+        datasets, sample_weights / np.array(avg_traj_lens)
+    )
 
     # SPECIAL CASE: if `num_parallel_calls` is not in `transform_kwargs`, use
     # same value as in `dataset_kwargs`
