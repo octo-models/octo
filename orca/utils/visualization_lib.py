@@ -71,7 +71,7 @@ class Visualizer:
     text_processor: object = None
 
     def __post_init__(self):
-        self.action_proprio_stats = self.dataset.action_proprio_metadata
+        self.action_proprio_stats = self.dataset.dataset_statistics
         self.trajs, self.viz_trajs = [], []
         self.visualized_trajs = False
 

@@ -3,10 +3,10 @@ import hashlib
 import inspect
 import json
 import logging
-from typing import Any, Dict, List, Sequence, Union
+from typing import Any, Callable, Dict, List, Sequence
 
 import dlimp as dl
-from dlimp.transforms import selective_tree_map
+import jax
 import numpy as np
 import tensorflow as tf
 from tensorflow_datasets.core.dataset_builder import DatasetBuilder
@@ -46,72 +46,91 @@ def pprint_data_mixture(
     )
 
 
-def load_action_proprio_stats(path: str) -> Dict[str, Dict[str, List[float]]]:
-    # assert that path exists
-    assert tf.io.gfile.exists(path), f"{path} does not exist!"
-
-    # get statistics from an arbitrary (user supplied) path
-    logging.info(f"Loading existing statistics for normalization from {path}.")
-    with tf.io.gfile.GFile(path, "r") as f:
-        metadata = json.load(f)
-
-    return {
-        k: {k2: tf.convert_to_tensor(v2, dtype=tf.float32) for k2, v2 in v.items()}
-        for k, v in metadata.items()
-    }
-
-
-def get_action_proprio_stats(
+def get_dataset_statistics(
     builder: DatasetBuilder,
-    dataset: tf.data.Dataset,
-    proprio_keys: List[str],
-    transform_fcn: Any,
-) -> Dict[str, Dict[str, List[float]]]:
-    # get statistics file path --> embed unique hash that catches if dataset info / keys / transform changed
-    transform_str = inspect.getsource(transform_fcn) if transform_fcn else ""
+    state_obs_keys: List[str],
+    restructure_fn: Callable,
+    transform_fn: Callable,
+) -> dict:
+    """Either computes the statistics of a dataset or loads them from a cache file if this function
+    has been called before with the same arguments. Currently, the statistics include the
+    min/max/mean/std of the actions and proprio as well as the number of transitions and
+    trajectories in the dataset.
+    """
+    # compute a hash of the dataset info, state observation keys, and transform function
+    # to determine the name of the cache file
     data_info_hash = hashlib.sha256(
-        (str(builder.info) + str(proprio_keys) + str(transform_str)).encode("utf-8")
+        (
+            str(builder.info)
+            + str(state_obs_keys)
+            + str(inspect.getsource(restructure_fn))
+            + str(inspect.getsource(transform_fn))
+        ).encode("utf-8")
     ).hexdigest()
     path = tf.io.gfile.join(
-        builder.info.data_dir, f"action_proprio_stats_{data_info_hash}.json"
+        builder.info.data_dir, f"dataset_statistics_{data_info_hash}.json"
     )
 
-    # check if stats already exist and load, otherwise compute
+    # check if cache file exists and load
     if tf.io.gfile.exists(path):
-        return load_action_proprio_stats(path)
+        logging.info(f"Loading existing dataset statistics from {path}.")
+        with tf.io.gfile.GFile(path, "r") as f:
+            metadata = json.load(f)
+        return jax.tree_map(
+            np.array, metadata, is_leaf=lambda x: isinstance(x, Sequence)
+        )
 
-    logging.info("Computing action/proprio statistics for normalization...")
+    if "val" not in builder.info.splits:
+        split = "train[:95%]"
+    else:
+        split = "train"
+    dataset = (
+        dl.DLataset.from_rlds(builder, split=split, shuffle=False)
+        .map(restructure_fn)
+        .map(
+            lambda traj: {
+                "action": traj["action"],
+                "proprio": traj["observation"]["proprio"],
+            }
+        )
+    )
+    logging.info(
+        f"Computing dataset statistics for {builder.name}. This may take awhile, "
+        "but should only need to happen once."
+    )
     actions = []
     proprios = []
-    for episode in tqdm.tqdm(dataset.take(1000)):
-        actions.append(episode["action"].numpy())
-        proprios.append(episode["observation"]["proprio"].numpy())
+    num_transitions = 0
+    num_trajectories = 0
+    for traj in tqdm.tqdm(
+        dataset.iterator(), total=builder.info.splits["train"].num_examples
+    ):
+        actions.append(traj["action"])
+        proprios.append(traj["proprio"])
+        num_transitions += traj["action"].shape[0]
+        num_trajectories += 1
     actions = np.concatenate(actions)
     proprios = np.concatenate(proprios)
     metadata = {
         "action": {
-            "mean": [float(e) for e in actions.mean(0)],
-            "std": [float(e) for e in actions.std(0)],
-            "max": [float(e) for e in actions.max(0)],
-            "min": [float(e) for e in actions.min(0)],
+            "mean": actions.mean(0).tolist(),
+            "std": actions.std(0).tolist(),
+            "max": actions.max(0).tolist(),
+            "min": actions.min(0).tolist(),
         },
         "proprio": {
-            "mean": [float(e) for e in proprios.mean(0)],
-            "std": [float(e) for e in proprios.std(0)],
-            "max": [float(e) for e in proprios.max(0)],
-            "min": [float(e) for e in proprios.min(0)],
+            "mean": proprios.mean(0).tolist(),
+            "std": proprios.std(0).tolist(),
+            "max": proprios.max(0).tolist(),
+            "min": proprios.min(0).tolist(),
         },
+        "num_transitions": num_transitions,
+        "num_trajectories": num_trajectories,
     }
-    del actions
-    del proprios
     with tf.io.gfile.GFile(path, "w") as f:
         json.dump(metadata, f)
-    logging.info("Done!")
 
-    return {
-        k: {k2: tf.convert_to_tensor(v2, dtype=tf.float32) for k2, v2 in v.items()}
-        for k, v in metadata.items()
-    }
+    return jax.tree_map(np.array, metadata, is_leaf=lambda x: isinstance(x, Sequence))
 
 
 def normalize_action_and_proprio(traj, metadata, normalization_type):
