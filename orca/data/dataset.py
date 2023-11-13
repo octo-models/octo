@@ -338,6 +338,9 @@ def make_dataset_from_rlds(
         # add timestep info
         traj["observation"]["timestep"] = tf.range(traj_len) + 1
 
+        # add name of dataset
+        traj["dataset_name"] = tf.repeat(name, traj_len)
+
         return traj
 
     dataset = dataset.map(restructure, num_parallel_calls)
