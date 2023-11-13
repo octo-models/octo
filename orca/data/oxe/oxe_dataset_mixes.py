@@ -9,6 +9,10 @@ import tqdm
 from orca.data.oxe import oxe_dataset_configs
 from orca.data.utils.data_utils import ActionEncoding
 
+BRIDGE_MIX = [
+    ("bridge_dataset", 1.0),
+]
+
 RT_X_MIX = [
     ("fractal20220817_data", 1.0),
     ("kuka", 0.1),
