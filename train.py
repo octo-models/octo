@@ -408,7 +408,7 @@ def main(_):
         out_shardings=dp_sharding,
         static_argnames=("policy_mode",),
     )
-    def get_policy_sampled_actions(state, observations, tasks, policy_mode=None):
+    def _get_policy_sampled_actions(state, observations, tasks, policy_mode=None):
         # only use first horizon timesteps as input to predict_action
         observations = jax.tree_map(lambda x: x[:, -horizon:], observations)
 
@@ -452,6 +452,10 @@ def main(_):
         # viz expects (batch_size, n_samples, action_dim)
         actions = jnp.moveaxis(actions, 0, 1)
         return actions
+
+    def get_policy_sampled_actions(state, observations, tasks, policy_mode=None):
+        # jax.jit doesn't mesh well with batched_apply + sharding, so need a small wrapper
+        return _get_policy_sampled_actions(state, observations, tasks, policy_mode)
 
     def wandb_log(info, step):
         wandb.log(flatten_dict(info, sep="/"), step=step)
