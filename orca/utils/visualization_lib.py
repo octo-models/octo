@@ -17,16 +17,47 @@ import tqdm
 import wandb
 
 BASE_METRIC_KEYS = {
-    "mse": ("mse", tuple()),
-    "xyz_angle": ("xyz_angle", ("moving",)),
-    "xyz_angle_accuracy": ("xyz_angle_accuracy", ("moving",)),
+    "mse": ("mse", tuple()),  # What is the MSE
+    ####
+    #
+    # XYZ delta metrics
+    #
+    ####
+    # Angle between true and predicted XYZ delta when moving
+    "xyz_angle": (
+        "xyz_angle",
+        ("moving",),
+    ),
+    # Did we predict the XYZ delta within 0.5 radians when moving
+    "xyz_angle_accuracy": (
+        "xyz_angle_accuracy",
+        ("moving",),
+    ),
+    # Did we predict the XYZ delta within 0.5 radians and 50% norm when moving
+    "xyz_accuracy": (
+        "xyz_accuracy",
+        ("moving",),
+    ),
+    ####
+    #
+    # Gripper metrics
+    #
+    ####
+    # What % of timesteps (near the actual gripper changes) is the predicted gripper correct?
     "gripping_accuracy": ("gripper_correct", ("gripper_changing",)),
+    # Gripper prediction accuracy
+    # "gripping_accuracy_full": ("gripper_correct", tuple()),
+    # What is the relative height (in m) that we try to grip at, compared to the data?
+    "grip_height": ("height_to_grip", ("is_first_grip",)),
+    # "early_gripped": ("early_gripped", ("is_first_grip",)),
+    # What percentage of grips do we attempt early (early = higher than the height gripped at in the data)
+    "early_gripped_height_aware": ("early_gripped_height_aware", ("is_first_grip",)),
+    # What timestep do we attempt to grip at (relative to the first timestep we should at)
+    "grip_timestep_early": ("timestep_to_grip", ("is_first_grip",)),
 }
 
-BASE_SUB_CONDITIONS = {
-    "when_far": (">20_to_end",),
-    "when_close": ("<10_to_end",),
-}
+
+BASE_SUB_CONDITIONS = dict()
 
 
 def run_policy_on_trajectory(policy_fn, traj, *, text_processor=None):
@@ -267,6 +298,7 @@ def add_manipulation_metrics(info):
             **_mse_info(**kwargs),
             **_xyz_info(**kwargs),
             **_condition_info(**kwargs),
+            **_gripping_early_metrics(**kwargs),
         }
 
     new_metrics = jax.vmap(per_sample_info, in_axes=(1, None), out_axes=1)(
@@ -435,6 +467,18 @@ def _xyz_angle(unnorm_actions, unnorm_pred_actions, **kwargs):
     )
 
 
+def _xyz_close(unnorm_actions, unnorm_pred_actions, **kwargs):
+    norm1 = jnp.linalg.norm(_get_xyz(unnorm_actions), axis=-1)
+    norm2 = jnp.linalg.norm(_get_xyz(unnorm_pred_actions), axis=-1)
+    angle = _xyz_angle(
+        unnorm_actions=unnorm_actions, unnorm_pred_actions=unnorm_pred_actions
+    )
+    return jnp.logical_and(
+        angle < 0.5,
+        (norm1 > 0.5 * norm2) & (norm2 > 0.5 * norm1),
+    )
+
+
 def _mse(actions, pred_actions, dims=None, **kwargs):
     # Note: this is the MSE of the normalized actions (not the unnormalized actions)
     delta = actions - pred_actions
@@ -456,6 +500,7 @@ def _xyz_info(**kwargs):
     return {
         "xyz_angle": angle,
         "xyz_angle_accuracy": angle < 0.5,
+        "xyz_accuracy": _xyz_close(**kwargs),
     }
 
 
@@ -465,6 +510,76 @@ def _mse_info(**kwargs):
         "mse_xyz": _mse(dims=[0, 1, 2], **kwargs),  # hard-coded
         "mse_gripper": _mse(dims=[6], **kwargs),  # hard-coded
         "mse_xyzrotation": _mse(dims=[3, 4, 5], **kwargs),  # hard-coded
+    }
+
+
+def _gripping_early_metrics(
+    unnorm_actions, unnorm_proprio, unnorm_pred_actions, **kwargs
+):
+    gripper_closed = _gripper_closed(unnorm_actions)
+    pred_gripper_closed = _gripper_closed(unnorm_pred_actions)
+
+    unnorm_proprio = unnorm_proprio[:, 1:]  # Remove special dimension
+    z_position = unnorm_proprio[:, 2]
+
+    first_grip = jnp.logical_and(
+        gripper_closed, jnp.logical_not(jnp.roll(gripper_closed, 1, axis=0))
+    )  # Was the gripper closed at the last timestep?
+
+    gripped_i_steps_early = {
+        i: jnp.logical_and(
+            first_grip,
+            jnp.roll(pred_gripper_closed, i, axis=0),  # Predicted a grip i steps early
+        )
+        for i in range(1, 5)
+    }
+    early_gripped = sum(gripped_i_steps_early.values()) > 0
+
+    gripped_i_steps_early_height_aware = {
+        i: jnp.logical_and(
+            gripped_i_steps_early[i],
+            jnp.roll(z_position, i, axis=0) - z_position > 0.005,
+        )
+        for i in range(1, 5)
+    }  # also check that the z position increased
+    early_gripped_height_aware = sum(gripped_i_steps_early_height_aware.values()) > 0
+
+    height_to_grip = jnp.zeros_like(z_position)
+    timestep_to_grip = jnp.zeros_like(z_position)
+    for i in range(1, 5):
+        new_height_to_grip = jnp.where(
+            jnp.roll(pred_gripper_closed, i, axis=0),
+            jnp.roll(z_position, i, axis=0) - z_position,
+            0,
+        )
+        height_to_grip = jnp.maximum(height_to_grip, new_height_to_grip)
+        timestep_to_grip = jnp.maximum(
+            timestep_to_grip,
+            jnp.where(
+                jnp.roll(pred_gripper_closed, i, axis=0),
+                i,
+                0,
+            ),
+        )
+    height_to_grip = jnp.where(first_grip, height_to_grip, 0)
+    timestep_to_grip = jnp.where(first_grip, timestep_to_grip, 0)
+
+    gripped_within_two_steps = jnp.logical_and(
+        first_grip,
+        jnp.logical_or(
+            pred_gripper_closed,  # Predicted at this timestep
+            jnp.roll(
+                pred_gripper_closed, -1, axis=0
+            ),  # Predicted at the next timestep. Note that the image of the gripper may already be closed, so this might not be a very reliable metric
+        ),
+    )
+    return {
+        "is_first_grip": first_grip,
+        "height_to_grip": height_to_grip,
+        "early_gripped": early_gripped,
+        "early_gripped_height_aware": early_gripped_height_aware,
+        "timestep_to_grip": timestep_to_grip,
+        "gripped_on_time": gripped_within_two_steps,
     }
 
 
