@@ -357,6 +357,18 @@ def main(_):
         (loss, info), grads = jax.value_and_grad(loss_fn, has_aux=True)(
             state.params, state, batch, dropout_rng, train=True
         )
+        grad_norm = optax.global_norm(grads)
+        param_norm = optax.global_norm(state.params)
+        updates, _ = state.tx.update(grads, state.opt_state, state.params)
+        update_norm = optax.global_norm(updates)
+        info.update(
+            {
+                "grad_norm": grad_norm,
+                "param_norm": param_norm,
+                "update_norm": update_norm,
+                "learning_rate": optimizer_kwargs["learning_rate"](state.step),
+            }
+        )
         new_state = state.apply_gradients(grads=grads, rng=rng)
         return new_state, info
 
