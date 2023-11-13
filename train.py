@@ -232,29 +232,53 @@ def main(_):
     # pretrained weights to load
     pretrained_loaders = [weights_loaders[w] for w in FLAGS.config.pretrained_weights]
 
+    rng = jax.random.PRNGKey(FLAGS.config.seed)
+    rng, construct_rng = jax.random.split(rng)
+    model_init_args = (
+        example_batch["observation"],
+        example_batch["tasks"],
+        example_batch["observation"]["pad_mask"],
+    )
+    print(
+        model_def.tabulate(
+            construct_rng,
+            *model_init_args,
+            train=False,
+            verbose=True,
+            depth=2,
+        )
+    )  # Prints out the parameter count of our model
+
+    params_shape = jax.eval_shape(
+        partial(model_def.init, train=False),
+        construct_rng,
+        *model_init_args,
+    )[
+        "params"
+    ]  # Needed to determine weight decay mask
+
     optimizer_kwargs = FLAGS.config.optimizer.to_dict()
     if isinstance(optimizer_kwargs["learning_rate"], dict):
         optimizer_kwargs["learning_rate"] = optax.warmup_cosine_decay_schedule(
             **optimizer_kwargs["learning_rate"]
         )
-    tx = optax.chain(
-        optax.clip_by_global_norm(optimizer_kwargs.pop("clip_gradient")),
-        optax.adamw(mu_dtype=jnp.bfloat16, **optimizer_kwargs),
+
+    wd_mask = jax.tree_util.tree_map_with_path(
+        lambda path, x: "kernel" in jax.tree_util.keystr(path), params_shape
     )
-
-    rng = jax.random.PRNGKey(FLAGS.config.seed)
-    rng, construct_rng = jax.random.split(rng)
-
+    clip_gradient = optimizer_kwargs.pop("clip_gradient")
+    tx = optax.adamw(mu_dtype=jnp.bfloat16, **optimizer_kwargs, mask=wd_mask)
+    if clip_gradient is not None:
+        tx = optax.chain(
+            optax.clip_by_global_norm(clip_gradient),
+            tx,
+        )
     train_state = create_train_state(
         construct_rng,
         model_def,
         tx,
-        init_args=(
-            example_batch["observation"],
-            example_batch["tasks"],
-            example_batch["observation"]["pad_mask"],
-        ),
-        init_kwargs=dict(train=False, verbose=True),
+        init_args=model_init_args,
+        init_kwargs=dict(train=False),
         pretrained_loaders=pretrained_loaders,
     )
 
