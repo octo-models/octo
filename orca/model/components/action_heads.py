@@ -2,13 +2,20 @@
 from typing import Any
 
 import distrax
+from einops import rearrange
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
 import numpy as np
 
 from orca.model.components.tokenizers import BinTokenizer
-from orca.utils.typing import PRNGKey
+from orca.model.components.transformer import MAPHead
+from orca.utils.typing import Optional, PRNGKey
+
+
+def masked_mean(x, mask):
+    mask = jnp.broadcast_to(mask, x.shape)
+    return jnp.mean(x * mask) / jnp.clip(jnp.mean(mask), a_min=1e-5, a_max=None)
 
 
 class BasicActionHead(nn.Module):
@@ -28,10 +35,16 @@ class BasicActionHead(nn.Module):
     vocab_size: int = 256
     normalization_type: str = "bounds"
     readout_key: str = None
+    use_map: bool = False
 
     def setup(self):
+        if self.use_map:
+            self.map_head = MAPHead()
+
         self.vocab_proj = nn.Dense(
-            self.vocab_size * self.pred_horizon * self.action_dim
+            self.vocab_size * self.pred_horizon * self.action_dim,
+            kernel_init=jax.nn.initializers.zeros,
+            bias_init=jax.nn.initializers.constant(-1 * jnp.log(self.vocab_size)),
         )
         self.action_tokenizer = BinTokenizer(
             n_bins=self.vocab_size,
@@ -51,10 +64,12 @@ class BasicActionHead(nn.Module):
             ), "Must specify readout_key if passing in a dictionary of OrcaTransformer embeddings"
             embeddings = embeddings[self.readout_key]
         batch_size, horizon, n_tokens, embedding_size = embeddings.shape
+        if self.use_map:
+            embeddings = self.map_head(embeddings, train=train)[:, :, 0]
+        else:
+            embeddings = embeddings.mean(axis=-2)
+        # Now, embeddings is (batch_size, horizon, embedding_size)
 
-        embeddings = embeddings.mean(
-            axis=-2
-        )  # Now, embeddings is (batch_size, horizon, embedding_size)
         logits = self.vocab_proj(
             embeddings
         )  # (batch_size, horizon, vocab_size * pred_horizon * action_dim)
@@ -179,7 +194,14 @@ class TokenPerDimActionHead(BasicActionHead):
     """
 
     def setup(self):
-        self.vocab_proj = nn.Dense(self.vocab_size)
+        if self.use_map:
+            self.map_head = MAPHead(num_readouts=self.pred_horizon * self.action_dim)
+
+        self.vocab_proj = nn.Dense(
+            self.vocab_size,
+            kernel_init=jax.nn.initializers.zeros,
+            bias_init=jax.nn.initializers.constant(-1 * jnp.log(self.vocab_size)),
+        )
         self.action_tokenizer = BinTokenizer(
             n_bins=self.vocab_size,
             bin_type="uniform"
@@ -199,23 +221,116 @@ class TokenPerDimActionHead(BasicActionHead):
             embeddings = embeddings[self.readout_key]
 
         batch_size, horizon, n_tokens, embedding_size = embeddings.shape
-        assert n_tokens == self.pred_horizon * self.action_dim
-        # (batch_size, horizon, pred_horizon * action_dim, vocab_size)
+        if self.use_map:
+            embeddings = self.map_head(embeddings, train=train)
+        else:
+            assert n_tokens == self.pred_horizon * self.action_dim
+
+        # embeddings is now (batch_size, horizon, pred_horizon * action_dim, vocab_size)
         logits = self.vocab_proj(embeddings)
-        logits = jnp.reshape(
-            logits,
-            (
-                batch_size,
-                horizon,
-                self.pred_horizon,
-                self.action_dim,
-                self.vocab_size,
-            ),
+        logits = rearrange(
+            logits, "b h (p a) d -> b h p a d", p=self.pred_horizon, a=self.action_dim
         )
         return logits
+
+
+class MSEActionHead(BasicActionHead):
+    """Predicts continuous actions instead of discretized actions.
+
+    Use Multi-head attention pooling when decoding from the observation token stream
+    rather than the action readout token stream.
+    """
+
+    max_action: float = 5.0  # Handles OOD actions during training / eval
+    use_map: bool = True
+
+    def setup(self):
+        if self.use_map:
+            self.map_head = MAPHead()
+        self.mean_proj = nn.Dense(self.pred_horizon * self.action_dim)
+
+    def __call__(self, embeddings, train=True) -> Any:
+        """
+        Args:
+            embeddings: jnp.ndarray w/ shape (batch_size, horizon, n_tokens, embedding_size)
+        """
+        if isinstance(embeddings, dict):
+            assert (
+                self.readout_key is not None
+            ), "Must specify readout_key if passing in a dictionary of OrcaTransformer embeddings"
+            embeddings = embeddings[self.readout_key]
+        if self.use_map:
+            embeddings = self.map_head(embeddings, train=train)[:, :, 0]
+        else:
+            embeddings = embeddings.mean(axis=-2)
+        mean = self.mean_proj(embeddings)
+        mean = rearrange(
+            mean, "b h (p a) -> b h p a", p=self.pred_horizon, a=self.action_dim
+        )
+        mean = jnp.tanh(mean / self.max_action) * self.max_action
+        return mean
+
+    def loss(self, embeddings, actions, pad_mask, train=True):
+        """
+        Trains the mean head with MSE and the logstd head with KL divergence.
+
+        Args:
+            embeddings: jnp.ndarray w/ shape (batch_size, horizon, num_tokens, embedding_size)
+            actions: jnp.ndarray w/ shape (batch_size, >= horizon + pred_horizon - 1, action_dim)
+            pad_mask: boolean array (batch, window_size) which is True if the timestep is not a padding timestep.
+
+        Returns:
+            loss: float
+            metrics: dict
+        """
+        # (batch, horizon, pred_horizon, action_dim)
+        mean = self.__call__(embeddings, train=train)
+
+        # chunk the target actions to match the predicted actions
+        # only use first horizon timesteps from the window
+        actions = jnp.clip(actions, -self.max_action, self.max_action)
+        actions_chunked = self._chunk_actions(actions)
+        horizon = mean.shape[1]
+        actions_chunked = actions_chunked[:, :horizon]
+
+        action_mse = jnp.square(actions_chunked - mean).sum(axis=-1)
+        action_mse_hist = (action_mse * pad_mask[:, :, None]).reshape(-1)
+        action_mse = masked_mean(action_mse, pad_mask[:, :, None])
+
+        action_loss = action_mse
+
+        return action_loss, {
+            "loss": action_loss,
+            "mse": action_mse,
+            "mse_hist": action_mse_hist,
+        }
+
+    def predict_action(
+        self,
+        embeddings,
+        train: bool = True,
+        argmax: bool = False,
+        sample_shape: tuple = (),
+        rng: PRNGKey = None,
+        temperature: float = 1.0,
+    ):
+        # get the logits for the last action by taking the action tokens of the last timestep,
+        # unfolding the pred_horizon dim, and projecting to the vocab size
+        # (batch, tokens_per_action, token_embedding_size)
+        mean = self.__call__(embeddings, train=train)
+        mean = mean[:, -1]
+        logstd = jnp.full_like(mean, -10.0)
+
+        if argmax:
+            action = mean
+        else:
+            dist = distrax.MultivariateNormalDiag(mean, jnp.exp(logstd) * temperature)
+            action = dist.sample(seed=rng, sample_shape=sample_shape)
+        return action
 
 
 ACTION_HEADS = {
     "basic_action_head": BasicActionHead,
     "token_per_dim_action_head": TokenPerDimActionHead,
+    "mse_action_head": MSEActionHead,
 }
