@@ -152,6 +152,7 @@ def main(_):
             batch["tasks"]["language_instruction"] = text_processor.encode(
                 [s.decode("utf-8") for s in batch["tasks"]["language_instruction"]]
             )
+        del batch["dataset_name"]
         return batch
 
     # load datasets
