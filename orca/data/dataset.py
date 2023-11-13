@@ -410,8 +410,10 @@ def make_interleaved_dataset(
         transform_kwargs: kwargs passed to 'apply_common_transforms'.
         train: whether this is a training or validation dataset.
         sample_weights: sampling weights for each dataset in list. If None, defaults to uniform.
-        balance_weights: whether to rebalance sampling weights by number of transitions in each dataset,
-            such that larger datasets are sampled more often.
+        balance_weights: if True, the sample weights are multiplied by the number of transitions in
+            each dataset. This makes it so that, if all the sample weights are equal, one full iteration
+            through the interleaved dataset will correspond to one full iteration through each
+            individual dataset (only in expectation, since in practice the sampling is random).
         shuffle_buffer_size: size of the dataset shuffle buffer for interleaved dataset.
     """
     common_dataset_kwargs = copy.deepcopy(common_dataset_kwargs)
