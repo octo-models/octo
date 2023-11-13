@@ -36,8 +36,15 @@ class StdConv(nn.Conv):
 
 
 class PatchEncoder(nn.Module):
+    """Takes an image and breaks it up into patches of size (patch_size x patch_size),
+    applying a fully connected network to each patch individually.
+
+    The default "encoder" used by most ViTs in practice.
+    """
+
     use_film: bool = False
     patch_size: int = 32
+    num_features: int = 512
 
     @nn.compact
     def __call__(self, observations: jnp.ndarray, train: bool = True, cond_var=None):
@@ -48,7 +55,7 @@ class PatchEncoder(nn.Module):
         ), "Only pass in cond var iff model expecting cond var"
         x = observations.astype(jnp.float32) / 127.5 - 1.0
         x = nn.Conv(
-            features=512,
+            features=self.num_features,
             kernel_size=(self.patch_size, self.patch_size),
             strides=(self.patch_size, self.patch_size),
             padding="VALID",
@@ -61,12 +68,19 @@ class PatchEncoder(nn.Module):
 
 
 class SmallStem(nn.Module):
+    """Passes the image through a few light-weight convolutional layers,
+    before patchifying the image. Empirically useful for many computer vision tasks.
+
+    See Xiao et al: Early Convolutions Help Transformers See Better
+    """
+
     use_film: bool = False
     patch_size: int = 32
     kernel_sizes: tuple = (3, 3, 3, 3)
     strides: tuple = (2, 2, 2, 2)
     features: tuple = (32, 96, 192, 384)
     padding: tuple = (1, 1, 1, 1)
+    num_features: int = 512
 
     @nn.compact
     def __call__(self, observations: jnp.ndarray, train: bool = True, cond_var=None):
@@ -94,7 +108,7 @@ class SmallStem(nn.Module):
             x = nn.relu(x)
 
         x = nn.Conv(
-            features=512,
+            features=self.num_features,
             kernel_size=(self.patch_size // 16, self.patch_size // 16),
             strides=(self.patch_size // 16, self.patch_size // 16),
             padding="VALID",
@@ -167,6 +181,13 @@ class ResNetStage(nn.Module):
 
 
 class ViTResnet(nn.Module):
+    """Resnet-v2 architecture used in the original ViT paper for hybrid (Resnet+ViT) architectures
+
+    Mostly copied from https://github.com/google-research/vision_transformer/blob/main/vit_jax/models_vit.py
+
+    There exist pre-trained parameters here: github.com/google-research/vision_transformer/
+    """
+
     use_film: bool = False
     width: int = 1
     num_layers: tuple = tuple()
@@ -220,7 +241,7 @@ class ViTResnet(nn.Module):
         return x
 
 
-simple_encoder_configs = {
+vit_encoder_configs = {
     "patchify-32-film": ft.partial(
         PatchEncoder,
         use_film=True,
