@@ -3,14 +3,20 @@ import hashlib
 import inspect
 import json
 import logging
-from typing import Any, Callable, Dict, List, Sequence
+from typing import Any, Callable, Dict, List
 
 import dlimp as dl
-import jax
 import numpy as np
 import tensorflow as tf
 from tensorflow_datasets.core.dataset_builder import DatasetBuilder
 import tqdm
+
+
+def _tree_map(fn: Callable, tree: dict) -> dict:
+    """Maps a function over a nested dictionary."""
+    return {
+        k: _tree_map(fn, v) if isinstance(v, dict) else fn(v) for k, v in tree.items()
+    }
 
 
 class StateEncoding(IntEnum):
@@ -76,9 +82,7 @@ def get_dataset_statistics(
         logging.info(f"Loading existing dataset statistics from {path}.")
         with tf.io.gfile.GFile(path, "r") as f:
             metadata = json.load(f)
-        return jax.tree_map(
-            np.array, metadata, is_leaf=lambda x: isinstance(x, Sequence)
-        )
+        return _tree_map(np.array, metadata)
 
     if "val" not in builder.info.splits:
         split = "train[:95%]"
@@ -130,7 +134,7 @@ def get_dataset_statistics(
     with tf.io.gfile.GFile(path, "w") as f:
         json.dump(metadata, f)
 
-    return jax.tree_map(np.array, metadata, is_leaf=lambda x: isinstance(x, Sequence))
+    return _tree_map(np.array, metadata)
 
 
 def normalize_action_and_proprio(traj, metadata, normalization_type):
