@@ -112,6 +112,8 @@ def apply_common_transforms(
     window_size: int = 1,
     resize_size: Optional[Tuple[int, int]] = None,
     skip_unlabeled: bool = False,
+    max_action: Optional[float] = None,
+    max_proprio: Optional[float] = None,
     num_parallel_calls: int = tf.data.AUTOTUNE,
 ) -> dl.DLataset:
     """Common transforms shared between all datasets. Takes and returns a dataset of trajectories. Includes
@@ -131,11 +133,27 @@ def apply_common_transforms(
         resize_size (tuple, optional): target (height, width) for all RGB and depth images, default to no resize.
         window_size (int, optional): The length of the snippets that trajectories are chunked into.
         skip_unlabeled (bool, optional): Whether to skip trajectories with no language labels.
+        max_action: (float, optional): If provided, trajectories in which *any* action dimension
+            of *any* transition has an absolute value larger than this will be skipped.
+        max_proprio: (float, optional): If provided, trajectories in which *any* proprio dimension
+            of *any* transition has an absolute value larger than this will be skipped.
         num_parallel_calls (int, optional): number of parallel calls for map operations. Default to AUTOTUNE.
     """
     if skip_unlabeled:
         dataset = dataset.filter(
             lambda x: tf.math.reduce_any(x["language_instruction"] != "")
+        )
+
+    if max_action is not None:
+        dataset = dataset.filter(
+            lambda x: tf.math.reduce_all(tf.math.abs(x["action"]) <= max_action)
+        )
+
+    if max_proprio is not None:
+        dataset = dataset.filter(
+            lambda x: tf.math.reduce_all(
+                tf.math.abs(x["observation"]["proprio"]) <= max_proprio
+            )
         )
 
     dataset = dataset.frame_map(_decode_images, num_parallel_calls)
