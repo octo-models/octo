@@ -126,7 +126,8 @@ def normalize_action_and_proprio(traj, metadata, normalization_type):
             traj = dl.transforms.selective_tree_map(
                 traj,
                 match=traj_key,
-                map_fn=lambda x: (x - metadata[key]["mean"]) / metadata[key]["std"],
+                map_fn=lambda x: (x - metadata[key]["mean"])
+                / (metadata[key]["std"] + 1e-8),
             )
         return traj
 
@@ -139,7 +140,7 @@ def normalize_action_and_proprio(traj, metadata, normalization_type):
                 map_fn=lambda x: tf.clip_by_value(
                     2
                     * (x - metadata[key]["min"])
-                    / (metadata[key]["max"] - metadata[key]["min"])
+                    / (metadata[key]["max"] - metadata[key]["min"] + 1e-8)
                     - 1,
                     -1,
                     1,
