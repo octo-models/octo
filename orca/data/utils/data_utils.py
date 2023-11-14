@@ -13,10 +13,10 @@ from tensorflow_datasets.core.dataset_builder import DatasetBuilder
 import tqdm
 
 
-def _tree_map(fn: Callable, tree: dict) -> dict:
+def tree_map(fn: Callable, tree: dict) -> dict:
     """Maps a function over a nested dictionary."""
     return {
-        k: _tree_map(fn, v) if isinstance(v, dict) else fn(v) for k, v in tree.items()
+        k: tree_map(fn, v) if isinstance(v, dict) else fn(v) for k, v in tree.items()
     }
 
 
@@ -93,13 +93,13 @@ def get_dataset_statistics(
         logging.info(f"Loading existing dataset statistics from {path}.")
         with tf.io.gfile.GFile(path, "r") as f:
             metadata = json.load(f)
-        return _tree_map(np.array, metadata)
+        return metadata
 
     if os.path.exists(local_path):
         logging.info(f"Loading existing dataset statistics from {local_path}.")
         with open(local_path, "r") as f:
             metadata = json.load(f)
-        return _tree_map(np.array, metadata)
+        return metadata
 
     if "val" not in builder.info.splits:
         split = "train[:95%]"
@@ -161,7 +161,7 @@ def get_dataset_statistics(
         with open(local_path, "w") as f:
             json.dump(metadata, f)
 
-    return _tree_map(np.array, metadata)
+    return metadata
 
 
 def normalize_action_and_proprio(traj, metadata, normalization_type):
