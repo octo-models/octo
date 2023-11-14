@@ -1,5 +1,6 @@
 import copy
 import datetime
+from fnmatch import fnmatch
 from functools import partial
 import json
 import os
@@ -301,14 +302,59 @@ def main(_):
             transformer_embeddings = model.orca_transformer(
                 observations, tasks, observations["pad_mask"], train=train
             )
-            action_loss, action_metrics = model.heads["action"].loss(
-                transformer_embeddings,  # Action head knows to pull out the action readout_key
-                actions,
-                pad_mask=observations["pad_mask"],
-                train=train,
-            )
 
-            return action_loss, action_metrics
+            def is_action_head(head_name):
+                return any(
+                    [fnmatch(head_name, p) for p in FLAGS.config.action_head_patterns]
+                )
+
+            def is_reward_head(head_name):
+                return any(
+                    [fnmatch(head_name, p) for p in FLAGS.config.reward_head_patterns]
+                )
+
+            def is_value_head(head_name):
+                return any(
+                    [fnmatch(head_name, p) for p in FLAGS.config.value_head_patterns]
+                )
+
+            total_loss, total_metrics = 0.0, {}
+            for head_name, head in model.heads.items():
+                if is_action_head(head_name):  # These are action_heads
+                    logging.info(f"Computing loss on head: {head_name}")
+                    embeddings = transformer_embeddings
+                    loss, metrics = head.loss(
+                        embeddings,  # Action head knows to pull out the action readout_key
+                        actions,
+                        pad_mask=observations["pad_mask"],
+                        train=train,
+                    )
+                elif is_reward_head(head_name):  # These are reward_heads
+                    logging.info(f"Computing loss on head: {head_name}")
+                    embeddings = transformer_embeddings
+                    loss, metrics = head.loss(
+                        embeddings,  # Reward head knows to pull out the action readout_key
+                        observations,
+                        tasks,
+                        pad_mask=observations["pad_mask"],
+                        train=train,
+                    )
+                elif is_value_head(head_name):  # These are value_heads
+                    logging.info(f"Computing loss on head: {head_name}")
+                    embeddings = transformer_embeddings
+                    loss, metrics = head.loss(
+                        embeddings,  # Value head knows to pull out the action readout_key
+                        observations,
+                        tasks,
+                        pad_mask=observations["pad_mask"],
+                        train=train,
+                    )
+                else:
+                    raise NotImplementedError("This heads are not supported atm")
+
+                total_loss += loss
+                total_metrics[head_name] = metrics
+            return total_loss, total_metrics
 
         return state.apply_fn(
             {"params": params},

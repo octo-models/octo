@@ -33,6 +33,9 @@ def get_config(config_string):
         wandb=base_wandb_config,
         wandb_resume_id=placeholder(str),
         eval_datasets=None,
+        action_head_patterns=("action*",),
+        reward_head_patterns=("reward*",),
+        value_head_patterns=("value*",),
     )
 
     # params that need to be specified multiple places
@@ -102,7 +105,7 @@ def get_config(config_string):
                     normalization_type=normalization_type,
                     readout_key="action",
                 ),
-            )
+            ),
         ),
     )
 

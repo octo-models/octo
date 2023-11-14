@@ -11,10 +11,10 @@ from orca.model.components.base_head import BaseTemporalHead
 from orca.utils.typing import PRNGKey
 
 
-class TemporalDistanceRewardHead(BaseTemporalHead):
+class TemporalDistanceValueHead(BaseTemporalHead):
     pass
 
 
 REWARD_HEADS = {
-    "temporal_distance_reward_head": TemporalDistanceRewardHead,
+    "temporal_distance_reward_head": TemporalDistanceValueHead,
 }
