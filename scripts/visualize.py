@@ -180,6 +180,7 @@ def main(_):
             argmax=argmax,
             sample_shape=(n,),
             rng=jax.random.PRNGKey(0),
+            temperature=FLAGS.temperature,
         )
         actions = actions[..., 0, :]  # get first prediction
 
@@ -216,8 +217,9 @@ def main(_):
             tf.io.gfile.join(checkpoint, "default"), model.params
         )
         model = model.replace(params=params)
-
-        if text_processor is not None:
+        if FLAGS.policy_modes is not None:
+            modes_to_evaluate = FLAGS.policy_modes
+        elif text_processor is not None:
             modes_to_evaluate = [
                 "text_conditioned",
                 "image_conditioned",
