@@ -74,7 +74,7 @@ def main(_):
     tf.config.set_visible_devices([], "GPU")
 
     # set up wandb and logging
-    if FLAGS.config.wandb_resume_id is None:
+    if FLAGS.config.get("wandb_resume_id", None) is None:
         name = format_name_with_config(
             FLAGS.name,
             FLAGS.config.to_dict(),
@@ -152,6 +152,7 @@ def main(_):
             batch["tasks"]["language_instruction"] = text_processor.encode(
                 [s.decode("utf-8") for s in batch["tasks"]["language_instruction"]]
             )
+        del batch["dataset_name"]
         return batch
 
     # load datasets
@@ -184,7 +185,7 @@ def main(_):
             FLAGS.config.dataset_kwargs["transform_kwargs"],
             train=False,
         )
-        action_proprio_metadata = val_dataset.action_proprio_metadata
+        dataset_statistics = val_dataset.dataset_statistics
         val_datas.append(
             val_dataset.unbatch()
             # TODO: doesn't this mean every single tiny dataset has a huge shuffle buffer?
@@ -200,14 +201,12 @@ def main(_):
         if save_dir is not None:
             with tf.io.gfile.GFile(
                 os.path.join(
-                    save_dir, f"action_proprio_metadata_{val_data_kwargs['name']}.json"
+                    save_dir, f"dataset_statistics_{val_data_kwargs['name']}.json"
                 ),
                 "w",
             ) as f:
                 json.dump(
-                    jax.tree_map(
-                        lambda x: [float(e) for e in x.numpy()], action_proprio_metadata
-                    ),
+                    jax.tree_map(lambda x: x.tolist(), dataset_statistics),
                     f,
                 )
 
@@ -297,7 +296,7 @@ def main(_):
             dict(example_batch_spec=example_batch_spec), allow_val_change=True
         )
 
-    if FLAGS.config.wandb_resume_id is not None:
+    if FLAGS.config.get("wandb_resume_id", None) is not None:
         train_state = state_checkpointer.restore(
             state_checkpointer.latest_step(), items=train_state
         )

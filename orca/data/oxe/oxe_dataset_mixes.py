@@ -107,7 +107,6 @@ def make_oxe_dataset_kwargs_and_weights(
     data_mix: List[Tuple[str, float]],
     data_dir: str,
     deduplicate: bool = True,
-    balance_sampling_ratios: bool = True,
     n_third_person_cameras: int = 1,
     n_wrist_cameras: int = 0,
     load_depth: bool = True,
@@ -120,8 +119,6 @@ def make_oxe_dataset_kwargs_and_weights(
          data_mix: List of (dataset name, sampling weight) tuples.
          data_dir: Base data directory that gets registered in each dataset.
          deduplicate: If True, discards any duplicate dataset entries based on dataset name.
-         balance_sampling_ratios: If True, multiplies sampling weights by weights that compensate for the number
-            of episodes in each dataset.
          n_third_person_cameras: Number of RGB third person camera input streams to load.
          n_wrist_cameras: Number of RGB wrist camera input streams to load.
          load_depth: If True, loads corresponding depth channels for each RGB channel.
@@ -175,23 +172,6 @@ def make_oxe_dataset_kwargs_and_weights(
         )
         weights.append(weight)
 
-    if balance_sampling_ratios:
-        # compute number of samples in each dataset
-        print(
-            "Balancing dataset sampling ratios based on #episodes, computing sampling weights..."
-        )
-        n_samples_per_dataset = []
-        for data_kwargs in tqdm.tqdm(data_kwargs_list):
-            builder = tfds.builder(data_kwargs["name"], data_dir=data_dir)
-            n_samples_per_dataset.append(builder.info.splits["train"].num_examples)
-        n_samples_per_dataset = np.array(n_samples_per_dataset)
-        weights = list(
-            np.array(weights) * n_samples_per_dataset / n_samples_per_dataset.sum()
-        )
-        print("... Done!")
-
-    # normalize weights to 1
-    weights = list(weights / np.sum(weights))
     return data_kwargs_list, weights
 
 
