@@ -1,5 +1,6 @@
 import copy
 from functools import partial
+import json
 from typing import List, Optional, Sequence, Tuple, Union
 
 import dlimp as dl
@@ -15,6 +16,7 @@ from orca.data.utils.data_utils import (
     normalize_action_and_proprio,
     pprint_data_mixture,
     StateEncoding,
+    tree_map,
 )
 
 
@@ -218,6 +220,7 @@ def make_dataset_from_rlds(
     action_encoding: ActionEncoding = ActionEncoding.EEF_POS,
     ram_budget: Optional[int] = None,
     action_proprio_normalization_type: Optional[str] = None,
+    dataset_statistics: Optional[Union[dict, str]] = None,
     num_parallel_reads: int = tf.data.AUTOTUNE,
     num_parallel_calls: int = tf.data.AUTOTUNE,
 ) -> Tuple[dl.DLataset, Optional[dict]]:
@@ -240,6 +243,13 @@ def make_dataset_from_rlds(
         ram_budget (int, optional): limits the RAM used by tf.data.AUTOTUNE, unit: GB, forwarded to AutotuneOptions.
         action_proprio_normalization_type (Optional[str], optional): The type of normalization to perform on the action,
             proprio, or both. Can be "normal" (mean 0, std 1) or "bounds" (normalized to [-1, 1]).
+        dataset_statistics: (dict|str, optional): dict (or path to JSON file) that contains dataset
+            statistics for normalization. If `action_proprio_normalization_type` is "normal", this
+            should contain "mean" and "std" keys. If `action_proprio_normalization_type` is "bounds",
+            this should contain "min" and "max" keys. May also provide "num_transitions" and
+            "num_trajectories" keys for downstream usage (e.g., for `make_interleaved_dataset`). If
+            not provided, the statistics will be computed on the fly based on the train split of the
+            dataset.
         num_parallel_reads: number of parallel read workers. Default to AUTOTUNE.
         num_parallel_calls: number of parallel calls for map operations. Default to AUTOTUNE.
     Returns:
@@ -345,10 +355,15 @@ def make_dataset_from_rlds(
 
     dataset = dataset.map(restructure, num_parallel_calls)
 
-    # tries to load from cache, otherwise computes on the fly
-    dataset_statistics = get_dataset_statistics(
-        builder, state_obs_keys, restructure, RLDS_TRAJECTORY_MAP_TRANSFORMS[name]
-    )
+    if isinstance(dataset_statistics, str):
+        with open(dataset_statistics, "r") as f:
+            dataset_statistics = json.load(f)
+    elif dataset_statistics is None:
+        # tries to load from cache, otherwise computes on the fly
+        dataset_statistics = get_dataset_statistics(
+            builder, state_obs_keys, restructure, RLDS_TRAJECTORY_MAP_TRANSFORMS[name]
+        )
+    dataset_statistics = tree_map(np.array, dataset_statistics)
 
     dataset = dataset.map(
         partial(
@@ -444,6 +459,8 @@ def make_interleaved_dataset(
     sample_weights = np.array(sample_weights) / np.sum(sample_weights)
     pprint_data_mixture(dataset_kwargs_list, sample_weights)
 
+    print("===========")
+    print(np.array(avg_traj_lens))
     # interleave datasets at the trajectory level with sampling weights
     # (doing it this way saves memory compared to interleaving at the step level)
     # must compensate for different trajectory lengths
