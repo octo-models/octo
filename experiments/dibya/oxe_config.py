@@ -33,7 +33,7 @@ def get_config(
     )
 
     base_config = dict(
-        batch_size=256,
+        batch_size=1024,
         shuffle_buffer_size=100000,
         num_val_batches=16,
         num_steps=int(2e6),
@@ -59,7 +59,7 @@ def get_config(
     normalization_type = "normal"
 
     base_data_config = dict(
-        window_size=4,
+        window_size=1,
         image_augment_kwargs=dict(
             random_resized_crop=dict(scale=[0.8, 1.0], ratio=[0.9, 1.1]),
             random_brightness=[0.2],
