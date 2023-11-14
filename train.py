@@ -263,6 +263,7 @@ def main(_):
             **optimizer_kwargs["learning_rate"]
         )
 
+    # Following ViT, timm, MAE: this mask skips weight decay on biases and LayerNorm parameters
     wd_mask = jax.tree_util.tree_map_with_path(
         lambda path, x: "kernel" in jax.tree_util.keystr(path), params_shape
     )
