@@ -66,6 +66,12 @@ flags.DEFINE_bool("show_image", False, "Show image")
 
 ##############################################################################
 
+"""
+Bridge data was collected with non-blocking control and a step duration of 0.2s. 
+However, we relabel the actions to make it look like the data was collected with blocking control and we evaluate with blocking control. 
+We also use a step duration of 0.4s to reduce the jerkiness of the policy. 
+Be sure to change the step duration back to 0.2 if evaluating with non-blocking control.
+"""
 STEP_DURATION = 0.4
 STICKY_GRIPPER_NUM_STEPS = 1
 WORKSPACE_BOUNDS = [[0.1, -0.15, -0.01, -1.57, 0], [0.45, 0.25, 0.25, 1.57, 0]]
