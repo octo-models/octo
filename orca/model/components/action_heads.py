@@ -23,7 +23,8 @@ class BasicActionHead(nn.Module):
     A basic action decoding head that predicts discretized actions using
     an arbitrary group of token embeddings.
 
-    Pools all the token embeddings for a timestep together before predicting
+    Pools all the token embeddings for a timestep together (either via mean pooling
+    or via multi-head attention pooling (specified by `use_map`). Then, predictins
     logits for each action dimension and prediction horizon simultaneously
     using a linear projection on a shared embedding.
 
@@ -237,8 +238,12 @@ class TokenPerDimActionHead(BasicActionHead):
 class MSEActionHead(BasicActionHead):
     """Predicts continuous actions instead of discretized actions.
 
-    Use Multi-head attention pooling when decoding from the observation token stream
-    rather than the action readout token stream.
+    Continuous actions are predicted, tanh squashed to [-max_action, max_action],
+    and then regressed using MSE error.
+
+    As in BasicActionHead, you may create an embedding by either mean-pooling across
+    tokens or using multi-head attention pooling (use_map). It is recommended
+    when decoding from the observation token stream to use MAP.
     """
 
     max_action: float = 5.0  # Handles OOD actions during training / eval
