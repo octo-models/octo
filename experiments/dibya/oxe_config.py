@@ -1,32 +1,14 @@
 from copy import deepcopy
 
+from config import update_config
 from ml_collections import ConfigDict
 from ml_collections.config_dict import placeholder
 
-from config import update_config
-from orca.data.oxe.oxe_dataset_mixes import *
-
 
 def get_config(
-    config_string="nonexistentdataset,main,multimodal,vanilla",
+    transformer_size="vanilla",
 ):
-    mixture_type, observation_mode, task_modes, transformer_size = config_string.split(
-        ","
-    )
-    HELP_STRING = """
-    This config takes in 4 parameters which must be comma-separated. Use as
-    python train.py --config=oxe_config.py:bridge,main,multimodal,vanilla
-
-    The first option specifies which dataset to train on (["bridge", "rtx", "oxe"])
-    The second option specifies which camera angles are used (["main", "main_and_wrist"])
-    The third option specifies how tasks are specified (["gc", "multimodal"])
-    The fourth option specifies the size of the model (["vanilla", "vit_s", "vit_b"])
-    """
-
-    assert mixture_type in ["bridge", "rtx", "oxe"], HELP_STRING
-    assert observation_mode in ["main", "main_and_wrist"], HELP_STRING
-    assert task_modes in ["gc", "multimodal"], HELP_STRING
-    assert transformer_size in ["vanilla", "vit_s", "vit_b"], HELP_STRING
+    assert transformer_size in ["vanilla", "vit_s", "vit_b"]
 
     base_wandb_config = dict(
         project="orca", group=placeholder(str), entity=placeholder(str)
@@ -153,89 +135,60 @@ def get_config(
         ],  # by default, early fuse goal images into visual encoder
     )
 
-    MIXES = {
-        "bridge": BRIDGE_MIX,
-        "rtx": RT_X_MIX,
-        "oxe": RT_X_MIX + OXE_FRANKA_MIX,
-    }
-    MIX = MIXES[mixture_type]
-
-    observation_modes = {
-        "main_and_wrist": dict(
-            n_third_person_cameras=1, n_wrist_cameras=1, load_depth=False
-        ),
-        "main": dict(n_third_person_cameras=1, n_wrist_cameras=0, load_depth=False),
-    }
-    observation_mode_kwargs = observation_modes[observation_mode]
-
-    dataset_kwargs_list, dataset_sampling_weights = make_oxe_dataset_kwargs_and_weights(
-        MIX,
-        data_dir="gs://rail-orca-central2/resize_336_336",
-        **observation_mode_kwargs,
+    oxe_kwargs = ConfigDict(
+        dict(
+            data_mix=placeholder(str),
+            # for v4 TPUs: "gs://rail-orca-central2/resize_336_336"
+            data_dir=placeholder(str),
+            n_third_person_cameras=1,
+            n_wrist_cameras=0,
+            load_depth=False,
+        )
     )
 
-    n_cameras = (
-        observation_mode_kwargs["n_third_person_cameras"]
-        + observation_mode_kwargs["n_wrist_cameras"]
+    return ConfigDict(
+        dict(
+            model=update_config(
+                base_model_config,
+                observation_tokenizers=[
+                    (
+                        "image_tokenizer",
+                        {
+                            "num_tokens": 64,
+                            "task_film_keys": ["language_instruction"],
+                            **base_tokenizer_kwargs,
+                        },
+                    ),
+                ],
+                task_tokenizers=[],
+            ),
+            optimizer=base_optimizer_config,
+            dataset_kwargs={
+                "oxe_kwargs": oxe_kwargs,  # this will generate data_kwargs_list and sampling weights
+                # common_kwargs override specific kwargs from data_kwargs_list
+                "common_kwargs": dict(
+                    ram_budget=1,  # limit RAM per dataset
+                    num_parallel_reads=8,  # for reading from GCS
+                    num_parallel_calls=16,  # for the less CPU-intensive ops in initial dataset construction
+                    action_proprio_normalization_type=normalization_type,
+                ),
+                "transform_kwargs": update_config(
+                    base_data_config,
+                    resize_size=(256, 256),
+                    num_parallel_calls=16,  # for the most CPU-intensive ops (decoding, resizing, augmenting)
+                    task_augmentation_strategy="drop_keys_independent",
+                    task_augmentation_kwargs=dict(
+                        drop_key_groups_probs=[
+                            (["image_0"], 0.5),
+                            (["language_instruction"], 0.5),
+                        ],
+                        allow_drop_all=True,
+                    ),
+                ),
+            },
+            **update_config(
+                base_config,
+                text_processor="muse_embedding",
+            ),
+        )
     )
-    gc_drop_keys = [
-        ([f"image_{i}" for i in range(n_cameras)], 0.0),
-        (["language_instruction"], 1.0),
-    ]
-    multimodal_drop_keys = [
-        ([f"image_{i}" for i in range(n_cameras)], 0.5),
-        (["language_instruction"], 0.5),
-    ]
-    drop_keys = {
-        "gc": gc_drop_keys,
-        "multimodal": multimodal_drop_keys,
-    }[task_modes]
-
-    possible_structures = {
-        "multimodal": ConfigDict(
-            dict(
-                model=update_config(
-                    base_model_config,
-                    observation_tokenizers=[
-                        (
-                            "image_tokenizer",
-                            {
-                                "num_tokens": 64,
-                                "task_film_keys": ["language_instruction"],
-                                **base_tokenizer_kwargs,
-                            },
-                        ),
-                    ],
-                    task_tokenizers=[],
-                ),
-                optimizer=base_optimizer_config,
-                dataset_kwargs={
-                    # common_kwargs override specific kwargs from data_kwargs_list
-                    "common_kwargs": dict(
-                        ram_budget=1,  # limit RAM per dataset
-                        num_parallel_reads=8,  # for reading from GCS
-                        num_parallel_calls=16,  # for the less CPU-intensive ops in initial dataset construction
-                        action_proprio_normalization_type=normalization_type,
-                    ),
-                    "data_kwargs_list": dataset_kwargs_list,
-                    "transform_kwargs": update_config(
-                        base_data_config,
-                        resize_size=(256, 256),
-                        num_parallel_calls=16,  # for the most CPU-intensive ops (decoding, resizing, augmenting)
-                        task_augmentation_strategy="drop_keys_independent",
-                        task_augmentation_kwargs=dict(
-                            drop_key_groups_probs=drop_keys,
-                            allow_drop_all=True,
-                        ),
-                    ),
-                    "sample_weights": dataset_sampling_weights,
-                },
-                **update_config(
-                    base_config,
-                    text_processor="muse_embedding",
-                ),
-            )
-        ),
-    }
-
-    return possible_structures["multimodal"]
