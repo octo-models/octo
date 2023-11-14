@@ -1,4 +1,4 @@
-NAMES=(
+PATHS=(
     "gs://rail-dibya-central2/experiment_output/oxe_sweep/bridge_vits_20231111_165439"
     "gs://rail-dibya-central2/experiment_output/oxe_sweep/bridge_baseline_20231112_025236"
     "gs://rail-dibya-central2/experiment_output/oxe_sweep/bridge_jaxrlm_baseline_20231112_073307"
