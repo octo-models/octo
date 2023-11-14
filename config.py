@@ -82,7 +82,7 @@ def get_config(config_string):
             end_value=0.0,
         ),
         weight_decay=0.01,
-        clip_gradient=1.0,
+        clip_gradient=placeholder(float),
     )
 
     base_model_config = dict(
