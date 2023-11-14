@@ -3,6 +3,7 @@ import hashlib
 import inspect
 import json
 import logging
+import os
 from typing import Any, Callable, Dict, List
 
 import dlimp as dl
@@ -76,11 +77,27 @@ def get_dataset_statistics(
     path = tf.io.gfile.join(
         builder.info.data_dir, f"dataset_statistics_{data_info_hash}.json"
     )
+    # fallback local path for when data_dir is not writable
+    local_path = os.path.expanduser(
+        os.path.join(
+            "~",
+            ".cache",
+            "orca",
+            builder.name,
+            f"dataset_statistics_{data_info_hash}.json",
+        )
+    )
 
     # check if cache file exists and load
     if tf.io.gfile.exists(path):
         logging.info(f"Loading existing dataset statistics from {path}.")
         with tf.io.gfile.GFile(path, "r") as f:
+            metadata = json.load(f)
+        return _tree_map(np.array, metadata)
+
+    if os.path.exists(local_path):
+        logging.info(f"Loading existing dataset statistics from {local_path}.")
+        with open(local_path, "r") as f:
             metadata = json.load(f)
         return _tree_map(np.array, metadata)
 
@@ -131,8 +148,18 @@ def get_dataset_statistics(
         "num_transitions": num_transitions,
         "num_trajectories": num_trajectories,
     }
-    with tf.io.gfile.GFile(path, "w") as f:
-        json.dump(metadata, f)
+
+    try:
+        with tf.io.gfile.GFile(path, "w") as f:
+            json.dump(metadata, f)
+    except tf.errors.PermissionDeniedError:
+        logging.warning(
+            f"Could not write dataset statistics to {path}. "
+            f"Writing to {local_path} instead."
+        )
+        os.makedirs(os.path.dirname(local_path), exist_ok=True)
+        with open(local_path, "w") as f:
+            json.dump(metadata, f)
 
     return _tree_map(np.array, metadata)
 
