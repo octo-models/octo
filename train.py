@@ -22,6 +22,7 @@ import wandb
 
 import orca
 from orca.data.dataset import make_interleaved_dataset, make_single_dataset
+from orca.data.oxe.oxe_dataset_mixes import make_oxe_dataset_kwargs_and_weights, mixes
 from orca.data.utils.text_processing import text_processors
 from orca.model import create_model_def, OrcaModel
 from orca.model.components.hf_weight_loaders import weights_loaders
@@ -157,6 +158,18 @@ def main(_):
         return batch
 
     # load datasets
+    if "oxe_kwargs" in FLAGS.config.dataset_kwargs:
+        #
+        oxe_kwargs = FLAGS.config.dataset_kwargs["oxe_kwargs"].to_dict()
+        del FLAGS.config.dataset_kwargs["oxe_kwargs"]
+        oxe_kwargs["data_mix"] = mixes.get(oxe_kwargs["data_mix"])
+        (
+            dataset_kwargs_list,
+            dataset_sampling_weights,
+        ) = make_oxe_dataset_kwargs_and_weights(**oxe_kwargs)
+        FLAGS.config.dataset_kwargs["data_kwargs_list"] = dataset_kwargs_list
+        FLAGS.config.dataset_kwargs["sample_weights"] = dataset_sampling_weights
+
     sample_weights = (
         FLAGS.config.dataset_kwargs["sample_weights"]
         if "sample_weights" in FLAGS.config.dataset_kwargs
