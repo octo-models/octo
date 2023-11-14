@@ -15,6 +15,6 @@ class TemporalDistanceValueHead(BaseTemporalHead):
     pass
 
 
-REWARD_HEADS = {
-    "temporal_distance_reward_head": TemporalDistanceValueHead,
+VALUE_HEADS = {
+    "temporal_distance_value_head": TemporalDistanceValueHead,
 }
