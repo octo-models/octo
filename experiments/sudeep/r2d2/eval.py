@@ -28,6 +28,8 @@ logging.set_verbosity(logging.WARNING)
 FLAGS = flags.FLAGS
 flags.DEFINE_bool("deterministic", False, "Whether to sample action deterministically")
 flags.DEFINE_float("temperature", 1.0, "Temperature for sampling actions")
+flags.DEFINE_integer("img_width", 128, "Width of input image")
+flags.DEFINE_integer("img_height", 128, "Height of input image")
 
 
 def stack_and_pad_obs(fn, horizon):
@@ -75,13 +77,26 @@ def supply_rng(f, rng=jax.random.PRNGKey(0)):
     return wrapped
 
 
+_CAMERA_MAPPINGS = {
+    '16291792_left': 'image_0',
+}
+
+
 def _resize_img(img):
-    img = cv2.resize(img[:,:,:3], (320, 180), interpolation=cv2.INTER_AREA)
+    img = cv2.resize(img[:,:,:3], (FLAGS.img_width, FLAGS.img_height), interpolation=cv2.INTER_AREA)
     return img
 
 
 def _null_goal():
-    return np.zeros((180, 320, 3), dtype=np.uint8)
+    obs = {k: np.zeros((FLAGS.img_height, FLAGS.img_width, 3), dtype=np.uint8) for k in _CAMERA_MAPPINGS.keys()}
+    return obs
+
+
+def _null_obs():
+    obs = dict()
+    obs['image'] = {k: np.zeros((FLAGS.img_height, FLAGS.img_width, 3), dtype=np.uint8) for k in _CAMERA_MAPPINGS.keys()}
+    obs['robot_state'] = dict(joint_positions=[0 for _ in range(7)])
+    return obs
 
 
 @partial(jax.jit, static_argnames="argmax")
@@ -140,25 +155,21 @@ def load_checkpoint(weights_path, config_path, metadata_path, example_batch_path
 
 
 class OrcaPolicy:
-    def __init__(self, policy_fn, img_key='16291792_left'):
+    def __init__(self, policy_fn, img_mapping=_CAMERA_MAPPINGS):
         self.policy_fn = policy_fn
-        self.set_goal(_null_goal())
-        self.img_key = img_key
+        self.img_mapping = img_mapping
+        self.load_goal_imgs(_null_goal())
         self._last_time = None
 
-    def set_goal(self, goal_img):
-        self.task = dict(image_0=goal_img[None].copy())
-
     def _convert_obs(self, observation):
-        image = _resize_img(observation['image'][self.img_key])
-        obs = [StateEncoding.NONE] + observation['robot_state']['joint_positions']
-        state = np.array(obs).astype(np.float32)
-        print(image.shape, image.dtype, state.shape, state.dtype)
-        return {"image_0": image, "proprio": state}
+        obs = {v: _resize_img(observation['image'][k]) for k, v in self.img_mapping.items()}
+        raw_proprio = [StateEncoding.NONE] + observation['robot_state']['joint_positions']
+        obs['proprio'] = np.array(raw_proprio).astype(np.float32)
+        return obs
 
     def forward(self, observation):
         obs_hist = [self._convert_obs(observation)]
-        action   = np.array(self.policy_fn(obs_hist, self.task))[0]
+        action   = np.array(self.policy_fn(obs_hist, self.goal))[0]
 
         cur_time = time.time()
         if self._last_time is not None:
@@ -167,14 +178,14 @@ class OrcaPolicy:
 
         return np.clip(action, -1, 1)
 
-    def load_goal_img_dir(self, goal_img_dir):
-        print(f"loaded goal imag dir: {goal_img_dir}")
-        img_path = os.path.join(goal_img_dir, '0.png')
-        goal_img = _resize_img(cv2.imread(img_path))
-        self.set_goal(goal_img)
+    def load_goal_imgs(self, goal_dict):
+        self.goal = {v: _resize_img(goal_dict[k])[None].copy() for k, v in self.img_mapping.items()}
+        if 'robot_state' in goal_dict:
+            raw_proprio = [StateEncoding.NONE] + goal_dict['robot_state']['joint_positions']
+            self.goal['proprio'] = np.array(raw_proprio).astype(np.float32)
 
-    def load_lang_conditioning(self, text):
-        return
+    def load_lang(self, text):
+        pass
 
 
 def main(_):
@@ -188,11 +199,8 @@ def main(_):
         )
 
     policy = OrcaPolicy(policy_fn)
-
-    # compile model
-    observation = dict(image={policy.img_key: np.ones((180, 320, 3), dtype=np.uint8) * 255},
-                       robot_state=dict(joint_positions=[0 for _ in range(7)]))
-    policy.forward(observation)
+    # compile the policy and run through with a null observation
+    policy.forward(_null_obs())
 
     # start up R2D2 eval gui
     EvalGUI(policy=policy)
