@@ -6,7 +6,7 @@ from ml_collections.config_dict import placeholder
 
 
 def get_config(
-    transformer_size="vanilla",
+    transformer_size,
 ):
     assert transformer_size in ["vanilla", "vit_s", "vit_b", "vit_l"]
 
