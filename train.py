@@ -74,7 +74,7 @@ def main(_):
     tf.config.set_visible_devices([], "GPU")
 
     # set up wandb and logging
-    if FLAGS.config.wandb_resume_id is None:
+    if FLAGS.config.get("wandb_resume_id", None) is None:
         name = format_name_with_config(
             FLAGS.name,
             FLAGS.config.to_dict(),
@@ -153,6 +153,7 @@ def main(_):
             batch["tasks"]["language_instruction"] = text_processor.encode(
                 [s.decode("utf-8") for s in batch["tasks"]["language_instruction"]]
             )
+        del batch["dataset_name"]
         return batch
 
     # load datasets
@@ -198,11 +199,10 @@ def main(_):
             val_transform_kwargs,
             train=False,
         )
-        action_proprio_metadata = val_dataset.action_proprio_metadata
-        val_shuffle_buffer_size = FLAGS.config.val_shuffle_buffer_size
+        dataset_statistics = val_dataset.dataset_statistics
         val_datas.append(
             val_dataset.unbatch()
-            .shuffle(val_shuffle_buffer_size)
+            .shuffle(FLAGS.config.val_shuffle_buffer_size)
             .repeat()
             .batch(FLAGS.config.batch_size)
         )
@@ -214,14 +214,12 @@ def main(_):
         if save_dir is not None:
             with tf.io.gfile.GFile(
                 os.path.join(
-                    save_dir, f"action_proprio_metadata_{val_data_kwargs['name']}.json"
+                    save_dir, f"dataset_statistics_{val_data_kwargs['name']}.json"
                 ),
                 "w",
             ) as f:
                 json.dump(
-                    jax.tree_map(
-                        lambda x: [float(e) for e in x.numpy()], action_proprio_metadata
-                    ),
+                    jax.tree_map(lambda x: x.tolist(), dataset_statistics),
                     f,
                 )
 
@@ -246,29 +244,54 @@ def main(_):
     # pretrained weights to load
     pretrained_loaders = [weights_loaders[w] for w in FLAGS.config.pretrained_weights]
 
+    rng = jax.random.PRNGKey(FLAGS.config.seed)
+    rng, construct_rng = jax.random.split(rng)
+    model_init_args = (
+        example_batch["observation"],
+        example_batch["tasks"],
+        example_batch["observation"]["pad_mask"],
+    )
+    print(
+        model_def.tabulate(
+            construct_rng,
+            *model_init_args,
+            train=False,
+            verbose=True,
+            depth=2,
+        )
+    )  # Prints out the parameter count of our model
+
+    params_shape = jax.eval_shape(
+        partial(model_def.init, train=False),
+        construct_rng,
+        *model_init_args,
+    )[
+        "params"
+    ]  # Needed to determine weight decay mask
+
     optimizer_kwargs = FLAGS.config.optimizer.to_dict()
     if isinstance(optimizer_kwargs["learning_rate"], dict):
         optimizer_kwargs["learning_rate"] = optax.warmup_cosine_decay_schedule(
             **optimizer_kwargs["learning_rate"]
         )
-    tx = optax.chain(
-        optax.clip_by_global_norm(optimizer_kwargs.pop("clip_gradient")),
-        optax.adamw(mu_dtype=jnp.bfloat16, **optimizer_kwargs),
+
+    # Following ViT, timm, MAE: this mask skips weight decay on biases and LayerNorm parameters
+    wd_mask = jax.tree_util.tree_map_with_path(
+        lambda path, x: "kernel" in jax.tree_util.keystr(path), params_shape
     )
-
-    rng = jax.random.PRNGKey(FLAGS.config.seed)
-    rng, construct_rng = jax.random.split(rng)
-
+    clip_gradient = optimizer_kwargs.pop("clip_gradient")
+    tx = optax.adamw(mu_dtype=jnp.bfloat16, **optimizer_kwargs, mask=wd_mask)
+    if clip_gradient is not None:
+        tx = optax.chain(
+            optax.clip_by_global_norm(clip_gradient),
+            tx,
+        )
     train_state = create_train_state(
         construct_rng,
         model_def,
         tx,
-        init_args=(
-            example_batch["observation"],
-            example_batch["tasks"],
-            example_batch["observation"]["pad_mask"],
-        ),
-        init_kwargs=dict(train=False, verbose=True),
+        init_args=model_init_args,
+        init_kwargs=dict(train=False),
         pretrained_loaders=pretrained_loaders,
     )
 
@@ -286,7 +309,7 @@ def main(_):
             dict(example_batch_spec=example_batch_spec), allow_val_change=True
         )
 
-    if FLAGS.config.wandb_resume_id is not None:
+    if FLAGS.config.get("wandb_resume_id", None) is not None:
         train_state = state_checkpointer.restore(
             state_checkpointer.latest_step(), items=train_state
         )
@@ -346,6 +369,18 @@ def main(_):
         rng, dropout_rng = jax.random.split(state.rng)
         (loss, info), grads = jax.value_and_grad(loss_fn, has_aux=True)(
             state.params, state, batch, dropout_rng, train=True
+        )
+        grad_norm = optax.global_norm(grads)
+        param_norm = optax.global_norm(state.params)
+        updates, _ = state.tx.update(grads, state.opt_state, state.params)
+        update_norm = optax.global_norm(updates)
+        info.update(
+            {
+                "grad_norm": grad_norm,
+                "param_norm": param_norm,
+                "update_norm": update_norm,
+                "learning_rate": optimizer_kwargs["learning_rate"](state.step),
+            }
         )
         new_state = state.apply_gradients(grads=grads, rng=rng)
         return new_state, info

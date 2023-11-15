@@ -1,21 +1,22 @@
 import copy
 from functools import partial
+import json
 from typing import List, Optional, Sequence, Tuple, Union
 
 import dlimp as dl
+import numpy as np
 import tensorflow as tf
 import tensorflow_datasets as tfds
-import tqdm
 
 from orca.data.dataset_transforms import RLDS_TRAJECTORY_MAP_TRANSFORMS
 from orca.data.utils import bc_goal_relabeling, task_augmentation
 from orca.data.utils.data_utils import (
     ActionEncoding,
-    get_action_proprio_stats,
-    load_action_proprio_stats,
+    get_dataset_statistics,
     normalize_action_and_proprio,
     pprint_data_mixture,
     StateEncoding,
+    tree_map,
 )
 
 
@@ -215,11 +216,11 @@ def make_dataset_from_rlds(
     image_obs_keys: Union[str, List[str]] = [],
     depth_obs_keys: Union[str, List[str]] = [],
     state_obs_keys: Union[str, List[str]] = [],
-    action_proprio_metadata: Optional[Union[dict, str]] = None,
     state_encoding: StateEncoding = StateEncoding.NONE,
     action_encoding: ActionEncoding = ActionEncoding.EEF_POS,
     ram_budget: Optional[int] = None,
     action_proprio_normalization_type: Optional[str] = None,
+    dataset_statistics: Optional[Union[dict, str]] = None,
     num_parallel_reads: int = tf.data.AUTOTUNE,
     num_parallel_calls: int = tf.data.AUTOTUNE,
 ) -> Tuple[dl.DLataset, Optional[dict]]:
@@ -237,13 +238,18 @@ def make_dataset_from_rlds(
             Inserts padding image for each None key.
         state_obs_keys (str, List[str], optional): List of low-dim observation keys to be decoded.
             Get concatenated and mapped to "proprio". Inserts 1d padding for each None key.
-        action_proprio_metadata (dict, str, optional): dict (or path to previously dumped json dict) with
-            min/max/mean/std for action and proprio normalization. If not provided, will get computed on the fly.
         state_encoding (StateEncoding): type of state encoding used, e.g. joint angles vs EEF pose.
         action_encoding (ActionEncoding): type of action encoding used, e.g. joint delta vs EEF delta.
         ram_budget (int, optional): limits the RAM used by tf.data.AUTOTUNE, unit: GB, forwarded to AutotuneOptions.
         action_proprio_normalization_type (Optional[str], optional): The type of normalization to perform on the action,
             proprio, or both. Can be "normal" (mean 0, std 1) or "bounds" (normalized to [-1, 1]).
+        dataset_statistics: (dict|str, optional): dict (or path to JSON file) that contains dataset
+            statistics for normalization. If `action_proprio_normalization_type` is "normal", this
+            should contain "mean" and "std" keys. If `action_proprio_normalization_type` is "bounds",
+            this should contain "min" and "max" keys. May also provide "num_transitions" and
+            "num_trajectories" keys for downstream usage (e.g., for `make_interleaved_dataset`). If
+            not provided, the statistics will be computed on the fly based on the train split of the
+            dataset.
         num_parallel_reads: number of parallel read workers. Default to AUTOTUNE.
         num_parallel_calls: number of parallel calls for map operations. Default to AUTOTUNE.
     Returns:
@@ -342,27 +348,33 @@ def make_dataset_from_rlds(
         # add timestep info
         traj["observation"]["timestep"] = tf.range(traj_len) + 1
 
+        # add name of dataset
+        traj["dataset_name"] = tf.repeat(name, traj_len)
+
         return traj
 
     dataset = dataset.map(restructure, num_parallel_calls)
 
-    # normalize actions and proprioceptive inputs
-    if action_proprio_metadata is None:
-        action_proprio_metadata = get_action_proprio_stats(
-            builder, dataset, state_obs_keys, RLDS_TRAJECTORY_MAP_TRANSFORMS[name]
+    if isinstance(dataset_statistics, str):
+        with open(dataset_statistics, "r") as f:
+            dataset_statistics = json.load(f)
+    elif dataset_statistics is None:
+        # tries to load from cache, otherwise computes on the fly
+        dataset_statistics = get_dataset_statistics(
+            builder, state_obs_keys, restructure, RLDS_TRAJECTORY_MAP_TRANSFORMS[name]
         )
-    elif isinstance(action_proprio_metadata, str):
-        action_proprio_metadata = load_action_proprio_stats(action_proprio_metadata)
+    dataset_statistics = tree_map(np.array, dataset_statistics)
+
     dataset = dataset.map(
         partial(
             normalize_action_and_proprio,
-            metadata=action_proprio_metadata,
+            metadata=dataset_statistics,
             normalization_type=action_proprio_normalization_type,
         ),
         num_parallel_calls,
     )
 
-    return dataset, action_proprio_metadata
+    return dataset, dataset_statistics
 
 
 def make_single_dataset(
@@ -387,13 +399,11 @@ def make_single_dataset(
             "num_parallel_calls", tf.data.AUTOTUNE
         )
 
-    dataset, action_proprio_metadata = make_dataset_from_rlds(
-        **dataset_kwargs, train=train
-    )
+    dataset, dataset_statistics = make_dataset_from_rlds(**dataset_kwargs, train=train)
     dataset = apply_common_transforms(dataset, **transform_kwargs, train=train)
 
     # save for later
-    dataset.action_proprio_metadata = action_proprio_metadata
+    dataset.dataset_statistics = dataset_statistics
     return dataset
 
 
@@ -403,6 +413,7 @@ def make_interleaved_dataset(
     transform_kwargs: dict,
     train: bool,
     sample_weights: Optional[List[float]] = None,
+    balance_weights: bool = True,
     shuffle_buffer_size: int = 10000,
 ) -> dl.DLataset:
     """Creates an interleaved dataset from list of dataset kwargs.
@@ -413,7 +424,11 @@ def make_interleaved_dataset(
         dataset_kwargs_list: list of kwargs, each element is passed to `make_dataset_from_rlds` for a single dataset.
         transform_kwargs: kwargs passed to 'apply_common_transforms'.
         train: whether this is a training or validation dataset.
-        sample_weights: sampling weights for each dataset in list, values need to be >= 1.
+        sample_weights: sampling weights for each dataset in list. If None, defaults to uniform.
+        balance_weights: if True, the sample weights are multiplied by the number of transitions in
+            each dataset. This makes it so that, if all the sample weights are equal, one full iteration
+            through the interleaved dataset will correspond to one full iteration through each
+            individual dataset (only in expectation, since in practice the sampling is random).
         shuffle_buffer_size: size of the dataset shuffle buffer for interleaved dataset.
     """
     common_dataset_kwargs = copy.deepcopy(common_dataset_kwargs)
@@ -422,19 +437,36 @@ def make_interleaved_dataset(
     if not sample_weights:
         sample_weights = [1.0] * len(dataset_kwargs_list)
     assert len(sample_weights) == len(dataset_kwargs_list)
-    pprint_data_mixture(dataset_kwargs_list, sample_weights)
 
     datasets = []
-    for dataset_kwargs in tqdm.tqdm(
-        dataset_kwargs_list, desc="Generating individual datasets..."
-    ):
+    dataset_sizes = []
+    avg_traj_lens = []
+    for dataset_kwargs in dataset_kwargs_list:
         dataset_kwargs.update(**common_dataset_kwargs)
-        dataset, _ = make_dataset_from_rlds(**dataset_kwargs, train=train)
+        dataset, dataset_statistics = make_dataset_from_rlds(
+            **dataset_kwargs, train=train
+        )
+        dataset_sizes.append(dataset_statistics["num_transitions"])
+        avg_traj_lens.append(
+            dataset_statistics["num_transitions"]
+            / dataset_statistics["num_trajectories"]
+        )
         datasets.append(dataset.repeat())
 
+    if balance_weights:
+        sample_weights = np.array(sample_weights) * np.array(dataset_sizes)
+    # normalize to sum to one
+    sample_weights = np.array(sample_weights) / np.sum(sample_weights)
+    pprint_data_mixture(dataset_kwargs_list, sample_weights)
+
+    print("===========")
+    print(np.array(avg_traj_lens))
     # interleave datasets at the trajectory level with sampling weights
     # (doing it this way saves memory compared to interleaving at the step level)
-    dataset = dl.DLataset.sample_from_datasets(datasets, sample_weights)
+    # must compensate for different trajectory lengths
+    dataset = dl.DLataset.sample_from_datasets(
+        datasets, sample_weights / np.array(avg_traj_lens)
+    )
 
     # SPECIAL CASE: if `num_parallel_calls` is not in `transform_kwargs`, use
     # same value as in `dataset_kwargs`
