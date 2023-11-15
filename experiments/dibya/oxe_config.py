@@ -16,7 +16,9 @@ def get_config(
 
     base_config = dict(
         batch_size=1024,
+        eval_batch_size=128,
         shuffle_buffer_size=100000,
+        val_shuffle_buffer_size=1000,
         num_val_batches=16,
         num_steps=int(2e6),
         start_step=placeholder(int),
@@ -176,13 +178,12 @@ def get_config(
                     base_data_config,
                     resize_size=(256, 256),
                     num_parallel_calls=16,  # for the most CPU-intensive ops (decoding, resizing, augmenting)
-                    task_augmentation_strategy="drop_keys_independent",
+                    task_augmentation_strategy="delete_task_conditioning",
                     task_augmentation_kwargs=dict(
-                        drop_key_groups_probs=[
-                            (["image_0"], 0.5),
+                        delete_key_groups_probs=[
+                            (["image_*"], 0.5),
                             (["language_instruction"], 0.5),
                         ],
-                        allow_drop_all=True,
                     ),
                 ),
             },
