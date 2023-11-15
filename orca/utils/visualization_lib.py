@@ -3,6 +3,7 @@ import matplotlib
 matplotlib.use("Agg")
 from dataclasses import dataclass
 
+import dlimp as dl
 import flax
 import jax
 import jax.numpy as jnp
@@ -14,8 +15,6 @@ import plotly.graph_objects as go
 import tensorflow_datasets as tfds
 import tqdm
 import wandb
-
-from orca.data.dataset import get_action_proprio_stats, make_dataset
 
 BASE_METRIC_KEYS = {
     "mse": ("mse", tuple()),
@@ -64,7 +63,7 @@ def run_policy_on_trajectory(policy_fn, traj, *, text_processor=None):
 
 @dataclass
 class Visualizer:
-    dataset_kwargs: dict  # TODO: maybe replace with a dataset object
+    dataset: dl.DLataset
     metric_keys: dict = None
     sub_conditions: dict = None
     cache_trajs: bool = True  # Use the same trajectories for metrics every time
@@ -72,7 +71,6 @@ class Visualizer:
     text_processor: object = None
 
     def __post_init__(self):
-        self.dataset = make_dataset(**self.dataset_kwargs, train=False, shuffle=False)
         self.action_proprio_stats = self.dataset.action_proprio_metadata
         self.trajs, self.viz_trajs = [], []
         self.visualized_trajs = False
