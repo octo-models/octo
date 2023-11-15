@@ -2,6 +2,7 @@
 Contains basic logic for randomly zero-ing out keys in the task specification.
 """
 
+from fnmatch import fnmatch
 from typing import Any, Dict, List, Tuple
 
 import tensorflow as tf
@@ -53,15 +54,15 @@ def drop_keys_independent(
     return traj
 
 
-def switch_keys(
+def delete_task_conditioning(
     traj: Dict[str, Any],
-    switch_key_groups_probs: List[Tuple[List[str], float]],
+    delete_key_groups_probs: List[Tuple[List[str], float]],
 ):
     """
-    Randomly switch between keys in the tasks dictionary. Other keys are zeroed out.
+    Randomly chooses one group, and deletes all the keys in the tasks dictionary matching this pattern.
 
     :param traj: A dictionary containing trajectory data. should have a "tasks" key.
-    :param switch_key_groups_probs: A list of tuples, where each tuple contains a list of keys and their probability.
+    :param switch_key_groups_probs: A list of tuples, where each tuple contains a list of patterns and their probability.
     :return: A dictionary with keys zeroed out according to the specified probabilities.
     """
     if tf.math.reduce_all(traj["tasks"]["language_instruction"] == ""):
@@ -70,18 +71,18 @@ def switch_keys(
     tasks = traj["tasks"]
     new_tasks = tasks.copy()
 
-    switch_probs = [prob for _, prob in switch_key_groups_probs]
-    switch_group_idx = tf.random.categorical(tf.math.log([switch_probs]), 1)[0, 0]
+    delete_probs = [prob for _, prob in delete_key_groups_probs]
+    delete_group_idx = tf.random.categorical(tf.math.log([delete_probs]), 1)[0, 0]
 
-    for i, (key_group, _) in enumerate(switch_key_groups_probs):
-        if not all(key in tasks for key in key_group):
-            raise KeyError(
-                f"keys {key_group} are not all present in tasks dictionary. tasks keys: {tasks.keys()}"
-            )
-
-        for key in key_group:
+    for i, (delete_key_patterns, _) in enumerate(delete_key_groups_probs):
+        matching_keys = [
+            key
+            for key in tasks.key()
+            if any(fnmatch(key, pattern) for pattern in delete_key_patterns)
+        ]
+        for key in matching_keys:
             new_tasks[key] = tf.where(
-                i == switch_group_idx,
+                i == delete_group_idx,
                 tf.zeros_like(tasks[key])
                 if tf.debugging.is_numeric_tensor(tasks[key])
                 else "",
