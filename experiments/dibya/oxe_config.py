@@ -8,7 +8,7 @@ from ml_collections.config_dict import placeholder
 def get_config(
     transformer_size="vanilla",
 ):
-    assert transformer_size in ["vanilla", "vit_s", "vit_b"]
+    assert transformer_size in ["vanilla", "vit_s", "vit_b", "vit_l"]
 
     base_wandb_config = dict(
         project="orca", group=placeholder(str), entity=placeholder(str)
@@ -92,11 +92,19 @@ def get_config(
             num_attention_heads=12,
             dropout_rate=0.0,
         ),
+        "vit_l": dict(
+            num_layers=24,
+            mlp_dim=4096,
+            num_attention_heads=16,
+            dropout_rate=0.1,
+        ),
     }
+
     TOKEN_DIMS = {
         "vanilla": 256,
         "vit_s": 384,
         "vit_b": 768,
+        "vit_l": 1024,
     }
 
     base_model_config = dict(
