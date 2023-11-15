@@ -9,18 +9,22 @@ import tqdm
 from orca.data.oxe import oxe_dataset_configs
 from orca.data.utils.data_utils import ActionEncoding
 
+BRIDGE_MIX = [
+    ("bridge_dataset", 1.0),
+]
+
 RT_X_MIX = [
-    ("fractal20220817_data", 1.0),
-    ("kuka", 0.1),
+    ("fractal20220817_data", 0.54087122203),
+    ("kuka", 0.8341046294),
     ("bridge_dataset", 1.0),
     ("taco_play", 2.0),
-    ("jaco_play", 4.0),
-    ("berkeley_cable_routing", 2.0),
-    ("roboturk", 2.0),
-    ("nyu_door_opening_surprising_effectiveness", 10.0),
-    ("viola", 10.0),
-    ("berkeley_autolab_ur5", 4.0),
-    ("toto", 4.0),
+    ("jaco_play", 2.0),
+    ("berkeley_cable_routing", 3.0),
+    ("roboturk", 1.0),
+    ("nyu_door_opening_surprising_effectiveness", 5.0),
+    ("viola", 2.0),
+    ("berkeley_autolab_ur5", 1.0),
+    ("toto", 1.0),
 ]
 
 
@@ -29,21 +33,21 @@ OXE_FRANKA_MIX = [
     ("berkeley_cable_routing", 1.0),
     ("viola", 1.0),
     ("toto", 1.0),
-    ("stanford_hydra_dataset_converted_externally_to_rlds", 5.0),
-    ("austin_buds_dataset_converted_externally_to_rlds", 5.0),
-    ("nyu_franka_play_dataset_converted_externally_to_rlds", 10.0),
-    ("maniskill_dataset_converted_externally_to_rlds", 0.2),
-    ("furniture_bench_dataset_converted_externally_to_rlds", 1.0),
+    ("stanford_hydra_dataset_converted_externally_to_rlds", 1.0),
+    ("austin_buds_dataset_converted_externally_to_rlds", 3.0),
+    ("nyu_franka_play_dataset_converted_externally_to_rlds", 3.0),
+    ("maniskill_dataset_converted_externally_to_rlds", 0.1),
+    ("furniture_bench_dataset_converted_externally_to_rlds", 0.1),
     ("cmu_franka_exploration_dataset_converted_externally_to_rlds", 5.0),
-    ("austin_sailor_dataset_converted_externally_to_rlds", 5.0),
-    ("austin_sirius_dataset_converted_externally_to_rlds", 5.0),
+    ("austin_sailor_dataset_converted_externally_to_rlds", 1.0),
+    ("austin_sirius_dataset_converted_externally_to_rlds", 1.0),
     ("berkeley_rpt_converted_externally_to_rlds", 1.0),
-    ("kaist_nonprehensile_converted_externally_to_rlds", 2.0),
+    ("kaist_nonprehensile_converted_externally_to_rlds", 3.0),
     ("stanford_robocook_converted_externally_to_rlds", 1.0),
     ("iamlab_cmu_pickup_insert_converted_externally_to_rlds", 1.0),
-    ("utaustin_mutex", 2.0),
+    ("utaustin_mutex", 1.0),
     # ("cmu_playing_with_food", 1.0),
-    ("cmu_play_fusion", 4.0),
+    ("cmu_play_fusion", 1.0),
 ]
 
 
@@ -101,6 +105,8 @@ OXE_FULL_MIX = [
     ("berkeley_gnm_cory_hall", 1.0),
     ("berkeley_gnm_sac_son", 1.0),
 ]
+
+mixes = {"bridge": BRIDGE_MIX, "rtx": RT_X_MIX, "oxe": RT_X_MIX + OXE_FRANKA_MIX}
 
 
 def make_oxe_dataset_kwargs_and_weights(

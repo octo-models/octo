@@ -459,8 +459,6 @@ def make_interleaved_dataset(
     sample_weights = np.array(sample_weights) / np.sum(sample_weights)
     pprint_data_mixture(dataset_kwargs_list, sample_weights)
 
-    print("===========")
-    print(np.array(avg_traj_lens))
     # interleave datasets at the trajectory level with sampling weights
     # (doing it this way saves memory compared to interleaving at the step level)
     # must compensate for different trajectory lengths

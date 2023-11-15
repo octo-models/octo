@@ -11,6 +11,7 @@ from functools import partial
 import os
 
 from absl import app, flags, logging
+import flax
 from flax.traverse_util import flatten_dict
 import jax
 import jax.numpy as jnp
@@ -40,6 +41,19 @@ flags.DEFINE_integer(
 flags.DEFINE_integer(
     "samples_per_timestep", 8, "Number of action samples to use at each timestep"
 )
+flags.DEFINE_integer(
+    "horizon",
+    None,
+    "What horizon policies should be evaluated at. Defaults to the horizon it was trained at",
+)
+flags.DEFINE_float("temperature", 1.0, "Temperature to sample actions at")
+flags.DEFINE_list(
+    "policy_modes",
+    None,
+    "Which policy modes to evaluate. Defaults to the modes that the policy was trained for",
+)
+
+
 config_dir = os.path.join(os.path.dirname(__file__), "configs")
 config_flags.DEFINE_config_file(
     "config",
@@ -87,6 +101,8 @@ def main(_):
     tf.config.set_visible_devices([], "GPU")
     model = PretrainedModel.load_pretrained(FLAGS.checkpoints)
     text_processor = model.text_processor
+    if text_processor is not None:
+        zero_text = text_processor.encode([""])[0]
 
     visualizers = []
     val_datasets_kwargs, _ = filter_eval_datasets(
@@ -110,17 +126,53 @@ def main(_):
         )
 
     list_of_checkpoints = ocp.utils.checkpoint_steps_paths(FLAGS.checkpoints)
+    list_of_checkpoints = sorted(
+        list_of_checkpoints,
+        key=lambda path: ocp.utils.step_from_checkpoint_name(path.name),
+    )
+    logging.info(list_of_checkpoints)
 
-    @partial(jax.jit, static_argnames=("argmax", "n"))
+    horizon = FLAGS.horizon or (
+        model.config["dataset_kwargs"]["transform_kwargs"]["window_size"]
+        - model.config["model"]["heads"]["action"]["kwargs"]["pred_horizon"]
+        + 1
+    )  # This is the horizon the model was trained for
+
+    def remove_text(tasks):
+        if text_processor is not None:
+            new_language = jax.tree_map(
+                lambda x, example: jnp.broadcast_to(example[None], x.shape),
+                tasks["language_instruction"],
+                zero_text,
+            )
+            tasks = flax.core.copy(tasks, {"language_instruction": new_language})
+        return tasks
+
+    def remove_images(tasks):
+        new_images = {k: jnp.zeros_like(v) for k, v in tasks.items() if "image" in k}
+        return flax.core.copy(tasks, new_images)
+
+    @partial(jax.jit, static_argnames=("argmax", "n", "policy_mode"))
     def get_policy_sampled_actions(
-        model: PretrainedModel, observations, tasks, *, argmax=False, n=1
+        model: PretrainedModel,
+        observations,
+        tasks,
+        *,
+        argmax=False,
+        n=1,
+        policy_mode=None,
     ):
-        horizon = (
-            model.config["dataset_kwargs"]["common_kwargs"]["window_size"]
-            - model.config["model"]["heads"]["action"]["kwargs"]["pred_horizon"]
-            + 1
-        )  # This is the horizon the model was trained for
         observations = jax.tree_map(lambda x: x[:, -1 * horizon :], observations)
+        if policy_mode is None:
+            pass
+        elif policy_mode == "text_conditioned":
+            tasks = remove_images(tasks)
+        elif policy_mode == "image_conditioned":
+            tasks = remove_text(tasks)
+        elif policy_mode == "unconditioned":
+            tasks = remove_text(remove_images(tasks))
+        else:
+            raise NotImplementedError()
 
         actions = model.sample_actions(
             observations,
@@ -128,6 +180,7 @@ def main(_):
             argmax=argmax,
             sample_shape=(n,),
             rng=jax.random.PRNGKey(0),
+            temperature=FLAGS.temperature,
         )
         actions = actions[..., 0, :]  # get first prediction
 
@@ -151,44 +204,51 @@ def main(_):
         wandb.log(flatten_dict(info, sep="/"), step=step)
 
     checkpointer = ocp.PyTreeCheckpointer()
-    from flax.training import orbax_utils
 
-    custom_restore_args = orbax_utils.restore_args_from_target(model)
-
-    for checkpoint in list_of_checkpoints:
-        step = int(ocp.utils.step_from_checkpoint_name(checkpoint))
+    for path in list_of_checkpoints:
+        step = ocp.utils.step_from_checkpoint_name(path.name)
         if FLAGS.eval_every is not None and step % FLAGS.eval_every != 0:
             continue
-        print(f"Loading checkpoint {step}: ", checkpoint)
-        model = checkpointer.restore(
-            checkpoint,
-            item=model,
-            transforms={},
-            restore_args=custom_restore_args,
-        )
+        print(f"Loading checkpoint {step}: ", path)
+        params = checkpointer.restore(tf.io.gfile.join(path, "default"), model.params)
+        model = model.replace(params=params)
+        if FLAGS.policy_modes is not None:
+            modes_to_evaluate = FLAGS.policy_modes
+        elif text_processor is not None:
+            modes_to_evaluate = [
+                "text_conditioned",
+                "image_conditioned",
+                "unconditioned",
+            ]
+        else:
+            modes_to_evaluate = ["image_conditioned"]
 
-        policy_fn = batched_apply(
-            partial(
-                get_policy_sampled_actions,
-                model,
-                argmax=False,
-                n=FLAGS.samples_per_timestep,
-            ),
-            FLAGS.config.batch_size,
-            devices=jax.devices(),
-        )
+        modal_policy_fns = {
+            k: batched_apply(
+                partial(
+                    get_policy_sampled_actions,
+                    model,
+                    argmax=False,
+                    n=FLAGS.samples_per_timestep,
+                    policy_mode=k,
+                ),
+                min(128, FLAGS.config.batch_size),
+            )
+            for k in modes_to_evaluate
+        }
 
         for data_kwargs, visualizer in zip(val_datasets_kwargs, visualizers):
-            raw_infos = visualizer.raw_evaluations(policy_fn, max_trajs=100)
-            metrics = visualizer.metrics_for_wandb(raw_infos)
-            images = visualizer.visualize_for_wandb(policy_fn, max_trajs=8)
-            wandb_log(
-                {
-                    f"offline_metrics_{data_kwargs['name']}": metrics,
-                    f"visualizations_{data_kwargs['name']}": images,
-                },
-                step=step,
-            )
+            for mode, policy_fn in modal_policy_fns.items():
+                raw_infos = visualizer.raw_evaluations(policy_fn, max_trajs=100)
+                metrics = visualizer.metrics_for_wandb(raw_infos)
+                images = visualizer.visualize_for_wandb(policy_fn, max_trajs=8)
+                wandb_log(
+                    {
+                        f"offline_metrics_{data_kwargs['name']}/{mode}": metrics,
+                        f"visualizations_{data_kwargs['name']}/{mode}": images,
+                    },
+                    step=step,
+                )
 
 
 if __name__ == "__main__":
