@@ -365,10 +365,10 @@ def get_config(config_string):
                 dataset_kwargs=update_config(
                     base_bridge_data_config,
                     transform_kwargs=dict(
-                        task_augmentation_strategy="switch_keys",
+                        task_augmentation_strategy="delete_task_conditioning",
                         task_augmentation_kwargs=dict(
-                            switch_key_groups_probs=[
-                                (["image_0"], 0.5),
+                            delete_key_groups_probs=[
+                                (["image_*"], 0.5),
                                 (["language_instruction"], 0.5),
                             ],
                         ),
