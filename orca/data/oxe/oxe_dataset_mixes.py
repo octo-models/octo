@@ -9,18 +9,22 @@ import tqdm
 from orca.data.oxe import oxe_dataset_configs
 from orca.data.utils.data_utils import ActionEncoding
 
+BRIDGE_MIX = [
+    ("bridge_dataset", 1.0),
+]
+
 RT_X_MIX = [
-    ("fractal20220817_data", 1.0),
-    ("kuka", 0.1),
+    ("fractal20220817_data", 0.54087122203),
+    ("kuka", 0.8341046294),
     ("bridge_dataset", 1.0),
     ("taco_play", 2.0),
-    ("jaco_play", 4.0),
-    ("berkeley_cable_routing", 2.0),
-    ("roboturk", 2.0),
-    ("nyu_door_opening_surprising_effectiveness", 10.0),
-    ("viola", 10.0),
-    ("berkeley_autolab_ur5", 4.0),
-    ("toto", 4.0),
+    ("jaco_play", 2.0),
+    ("berkeley_cable_routing", 3.0),
+    ("roboturk", 1.0),
+    ("nyu_door_opening_surprising_effectiveness", 5.0),
+    ("viola", 2.0),
+    ("berkeley_autolab_ur5", 1.0),
+    ("toto", 1.0),
 ]
 
 
@@ -29,21 +33,21 @@ OXE_FRANKA_MIX = [
     ("berkeley_cable_routing", 1.0),
     ("viola", 1.0),
     ("toto", 1.0),
-    ("stanford_hydra_dataset_converted_externally_to_rlds", 5.0),
-    ("austin_buds_dataset_converted_externally_to_rlds", 5.0),
-    ("nyu_franka_play_dataset_converted_externally_to_rlds", 10.0),
-    ("maniskill_dataset_converted_externally_to_rlds", 0.2),
-    ("furniture_bench_dataset_converted_externally_to_rlds", 1.0),
+    ("stanford_hydra_dataset_converted_externally_to_rlds", 1.0),
+    ("austin_buds_dataset_converted_externally_to_rlds", 3.0),
+    ("nyu_franka_play_dataset_converted_externally_to_rlds", 3.0),
+    ("maniskill_dataset_converted_externally_to_rlds", 0.1),
+    ("furniture_bench_dataset_converted_externally_to_rlds", 0.1),
     ("cmu_franka_exploration_dataset_converted_externally_to_rlds", 5.0),
-    ("austin_sailor_dataset_converted_externally_to_rlds", 5.0),
-    ("austin_sirius_dataset_converted_externally_to_rlds", 5.0),
+    ("austin_sailor_dataset_converted_externally_to_rlds", 1.0),
+    ("austin_sirius_dataset_converted_externally_to_rlds", 1.0),
     ("berkeley_rpt_converted_externally_to_rlds", 1.0),
-    ("kaist_nonprehensile_converted_externally_to_rlds", 2.0),
+    ("kaist_nonprehensile_converted_externally_to_rlds", 3.0),
     ("stanford_robocook_converted_externally_to_rlds", 1.0),
     ("iamlab_cmu_pickup_insert_converted_externally_to_rlds", 1.0),
-    ("utaustin_mutex", 2.0),
+    ("utaustin_mutex", 1.0),
     # ("cmu_playing_with_food", 1.0),
-    ("cmu_play_fusion", 4.0),
+    ("cmu_play_fusion", 1.0),
 ]
 
 
@@ -102,12 +106,13 @@ OXE_FULL_MIX = [
     ("berkeley_gnm_sac_son", 1.0),
 ]
 
+mixes = {"bridge": BRIDGE_MIX, "rtx": RT_X_MIX, "oxe": RT_X_MIX + OXE_FRANKA_MIX}
+
 
 def make_oxe_dataset_kwargs_and_weights(
     data_mix: List[Tuple[str, float]],
     data_dir: str,
     deduplicate: bool = True,
-    balance_sampling_ratios: bool = True,
     n_third_person_cameras: int = 1,
     n_wrist_cameras: int = 0,
     load_depth: bool = True,
@@ -120,8 +125,6 @@ def make_oxe_dataset_kwargs_and_weights(
          data_mix: List of (dataset name, sampling weight) tuples.
          data_dir: Base data directory that gets registered in each dataset.
          deduplicate: If True, discards any duplicate dataset entries based on dataset name.
-         balance_sampling_ratios: If True, multiplies sampling weights by weights that compensate for the number
-            of episodes in each dataset.
          n_third_person_cameras: Number of RGB third person camera input streams to load.
          n_wrist_cameras: Number of RGB wrist camera input streams to load.
          load_depth: If True, loads corresponding depth channels for each RGB channel.
@@ -175,23 +178,6 @@ def make_oxe_dataset_kwargs_and_weights(
         )
         weights.append(weight)
 
-    if balance_sampling_ratios:
-        # compute number of samples in each dataset
-        print(
-            "Balancing dataset sampling ratios based on #episodes, computing sampling weights..."
-        )
-        n_samples_per_dataset = []
-        for data_kwargs in tqdm.tqdm(data_kwargs_list):
-            builder = tfds.builder(data_kwargs["name"], data_dir=data_dir)
-            n_samples_per_dataset.append(builder.info.splits["train"].num_examples)
-        n_samples_per_dataset = np.array(n_samples_per_dataset)
-        weights = list(
-            np.array(weights) * n_samples_per_dataset / n_samples_per_dataset.sum()
-        )
-        print("... Done!")
-
-    # normalize weights to 1
-    weights = list(weights / np.sum(weights))
     return data_kwargs_list, weights
 
 
