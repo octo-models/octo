@@ -127,9 +127,10 @@ def main(_):
 
     list_of_checkpoints = ocp.utils.checkpoint_steps_paths(FLAGS.checkpoints)
     list_of_checkpoints = sorted(
-        list_of_checkpoints, key=lambda x: int(str(x).rpartition("/")[2])
+        list_of_checkpoints,
+        key=lambda path: ocp.utils.step_from_checkpoint_name(path.name),
     )
-    print(list_of_checkpoints)
+    logging.info(list_of_checkpoints)
 
     horizon = FLAGS.horizon or (
         model.config["dataset_kwargs"]["transform_kwargs"]["window_size"]
@@ -149,8 +150,7 @@ def main(_):
 
     def remove_images(tasks):
         new_images = {k: jnp.zeros_like(v) for k, v in tasks.items() if "image" in k}
-        tasks = flax.core.copy(tasks, new_images)
-        return tasks
+        return flax.core.copy(tasks, new_images)
 
     @partial(jax.jit, static_argnames=("argmax", "n", "policy_mode"))
     def get_policy_sampled_actions(
@@ -204,18 +204,13 @@ def main(_):
         wandb.log(flatten_dict(info, sep="/"), step=step)
 
     checkpointer = ocp.PyTreeCheckpointer()
-    from flax.training import orbax_utils
 
-    custom_restore_args = orbax_utils.restore_args_from_target(model)
-
-    for checkpoint in list_of_checkpoints:
-        step = int(str(checkpoint).rpartition("/")[2])
+    for path in list_of_checkpoints:
+        step = ocp.utils.step_from_checkpoint_name(path.name)
         if FLAGS.eval_every is not None and step % FLAGS.eval_every != 0:
             continue
-        print(f"Loading checkpoint {step}: ", checkpoint)
-        params = checkpointer.restore(
-            tf.io.gfile.join(checkpoint, "default"), model.params
-        )
+        print(f"Loading checkpoint {step}: ", path)
+        params = checkpointer.restore(tf.io.gfile.join(path, "default"), model.params)
         model = model.replace(params=params)
         if FLAGS.policy_modes is not None:
             modes_to_evaluate = FLAGS.policy_modes
@@ -237,9 +232,7 @@ def main(_):
                     n=FLAGS.samples_per_timestep,
                     policy_mode=k,
                 ),
-                min(
-                    128, FLAGS.config.batch_size
-                ),  # Most trajectories are below this size
+                min(128, FLAGS.config.batch_size),
             )
             for k in modes_to_evaluate
         }
