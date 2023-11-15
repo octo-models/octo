@@ -1,17 +1,13 @@
 PATHS=(
     "gs://rail-dibya-central2/experiment_output/oxe_sweep/bridge_vits_20231111_165439"
-    "gs://rail-dibya-central2/experiment_output/oxe_sweep/bridge_baseline_20231112_025236"
-    "gs://rail-dibya-central2/experiment_output/oxe_sweep/bridge_jaxrlm_baseline_20231112_073307"
 )
 
 STEPS=(
     "120000"
-    "500000"
-    "300000"
 )
 
-CONDITIONING_MODE="goal"
-VIDEO_DIR="11-12"
+CONDITIONING_MODE="l"
+VIDEO_DIR="11-14"
 
 TIMESTEPS="50"
 
@@ -26,8 +22,8 @@ EXEC_HORIZON="1"
 CMD="python experiments/homer/bridge/eval.py \
     --num_timesteps $TIMESTEPS \
     --video_save_path /mount/harddrive/homer/videos/$VIDEO_DIR \
-    $(for i in "${!NAMES[@]}"; do echo "--checkpoint_weights_path ${NAMES[$i]} "; done) \
-    $(for i in "${!NAMES[@]}"; do echo "--checkpoint_step ${STEPS[$i]} "; done) \
+    $(for i in "${!PATHS[@]}"; do echo "--checkpoint_weights_path ${PATHS[$i]} "; done) \
+    $(for i in "${!PATHS[@]}"; do echo "--checkpoint_step ${STEPS[$i]} "; done) \
     --im_size 256 \
     --temperature $TEMPERATURE \
     --horizon $HORIZON \
