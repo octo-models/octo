@@ -7,7 +7,7 @@ import os.path as osp
 
 from absl import app, flags, logging
 import flax
-from flax.training import orbax_utils
+from flax.training import checkpoints
 from flax.traverse_util import flatten_dict
 import jax
 import jax.numpy as jnp
@@ -15,13 +15,12 @@ from jax.sharding import Mesh, NamedSharding, PartitionSpec
 from ml_collections import config_flags
 import numpy as np
 import optax
-import orbax.checkpoint
 import tensorflow as tf
 import tqdm
 import wandb
 
 import orca
-from orca.data.dataset import make_interleaved_dataset, make_single_dataset
+from orca.data.dataset import make_dataset, make_interleaved_dataset
 from orca.data.utils.text_processing import text_processors
 from orca.model import create_model_def, OrcaModel
 from orca.model.components.hf_weight_loaders import weights_loaders
@@ -74,68 +73,42 @@ def main(_):
     tf.config.set_visible_devices([], "GPU")
 
     # set up wandb and logging
-    if FLAGS.config.wandb_resume_id is None:
-        name = format_name_with_config(
-            FLAGS.name,
-            FLAGS.config.to_dict(),
-        )
-        wandb_id = "{name}_{time}".format(
-            name=name,
-            time=datetime.datetime.now().strftime("%Y%m%d_%H%M%S"),
-        )
-        wandb.init(
-            config=FLAGS.config.to_dict(),
-            id=wandb_id,
-            name=name,
-            mode="disabled" if FLAGS.debug else None,
-            **FLAGS.config.wandb,
-        )
-
-        if FLAGS.config.save_dir is not None:
-            save_dir = tf.io.gfile.join(
-                FLAGS.config.save_dir,
-                FLAGS.config.wandb.project,
-                FLAGS.config.wandb.group or "",
-                wandb_id,
-            )
-            wandb.config.update(dict(save_dir=save_dir), allow_val_change=True)
-            logging.info("Saving to %s", save_dir)
-            tf.io.gfile.makedirs(save_dir)
-            with tf.io.gfile.GFile(
-                os.path.join(save_dir, "config.json"), "w"
-            ) as config_file:
-                config_file.write(FLAGS.config.to_json_best_effort())
-        else:
-            save_dir = None
-            logging.info("save_dir not passed in, not saving checkpoints")
-    else:
-        # resume previous run
-        wandb_run = wandb.Api().run(FLAGS.config.wandb_resume_id)
-        wandb.init(
-            project=wandb_run.project,
-            id=wandb_run.id,
-            resume="must",
-        )
-        save_dir = wandb_run.config["save_dir"]
-
-    if save_dir is not None:
-        # make checkpointers
-        # only keep latest full TrainState
-        state_checkpointer = orbax.checkpoint.CheckpointManager(
-            tf.io.gfile.join(save_dir, "state"),
-            orbax.checkpoint.PyTreeCheckpointer(),
-            options=orbax.checkpoint.CheckpointManagerOptions(
-                max_to_keep=1,
-            ),
-        )
-        # keep every params checkpoint
-        params_checkpointer = orbax.checkpoint.CheckpointManager(
-            save_dir,
-            orbax.checkpoint.PyTreeCheckpointer(),
-        )
+    name = format_name_with_config(
+        FLAGS.name,
+        FLAGS.config.to_dict(),
+    )
+    wandb_id = "{name}_{time}".format(
+        name=name,
+        time=datetime.datetime.now().strftime("%Y%m%d_%H%M%S"),
+    )
+    wandb.init(
+        config=FLAGS.config.to_dict(),
+        id=wandb_id,
+        name=name,
+        mode="disabled" if FLAGS.debug else None,
+        **FLAGS.config.wandb,
+    )
 
     codebase_directory = osp.abspath(osp.join(osp.dirname(orca.__file__), ".."))
     wandb.run.log_code(codebase_directory)  # TODO: replace w/ codesave_library?
+
+    if FLAGS.config.save_dir is not None:
+        save_dir = tf.io.gfile.join(
+            FLAGS.config.save_dir,
+            FLAGS.config.wandb.project,
+            FLAGS.config.wandb.group or "",
+            wandb_id,
+        )
+        wandb.config.update(dict(save_dir=save_dir), allow_val_change=True)
+        logging.info("Saving to %s", save_dir)
+        tf.io.gfile.makedirs(save_dir)
+        with tf.io.gfile.GFile(
+            os.path.join(save_dir, "config.json"), "w"
+        ) as config_file:
+            config_file.write(FLAGS.config.to_json_best_effort())
+    else:
+        save_dir = None
+        logging.info("save_dir not passed in, not saving checkpoints")
 
     # set up text tokenization (this needs to happen after batching but before sharding)
     if FLAGS.config.text_processor is None:
@@ -160,14 +133,17 @@ def main(_):
         if "sample_weights" in FLAGS.config.dataset_kwargs
         else None
     )
-    train_data = make_interleaved_dataset(
-        FLAGS.config.dataset_kwargs["common_kwargs"],
-        FLAGS.config.dataset_kwargs["data_kwargs_list"],
-        FLAGS.config.dataset_kwargs["transform_kwargs"],
-        train=True,
-        sample_weights=sample_weights,
-        shuffle_buffer_size=FLAGS.config.shuffle_buffer_size,
-    ).batch(FLAGS.config.batch_size)
+    train_data = (
+        make_interleaved_dataset(
+            FLAGS.config.dataset_kwargs["common_kwargs"],
+            FLAGS.config.dataset_kwargs["data_kwargs_list"],
+            train=True,
+            sample_weights=sample_weights,
+            shuffle_buffer_size=FLAGS.config.shuffle_buffer_size,
+        )
+        .repeat()
+        .batch(FLAGS.config.batch_size)
+    )
     val_datas = []
     visualizers = []
     val_datasets_kwargs, val_datasets_sample_weights = filter_eval_datasets(
@@ -178,22 +154,18 @@ def main(_):
     for dataset_kwargs in val_datasets_kwargs:
         val_data_kwargs = copy.deepcopy(dataset_kwargs)
         val_data_kwargs.update(**FLAGS.config.dataset_kwargs["common_kwargs"])
-        val_data_kwargs["shuffle"] = False
-        val_dataset = make_single_dataset(
-            val_data_kwargs,
-            FLAGS.config.dataset_kwargs["transform_kwargs"],
-            train=False,
-        )
+        val_dataset = make_dataset(**val_data_kwargs, train=False)
         action_proprio_metadata = val_dataset.action_proprio_metadata
         val_datas.append(
             val_dataset.unbatch()
-            # TODO: doesn't this mean every single tiny dataset has a huge shuffle buffer?
             .shuffle(FLAGS.config.shuffle_buffer_size)
             .repeat()
             .batch(FLAGS.config.batch_size)
         )
         visualizers.append(
-            Visualizer(val_dataset, text_processor=text_processor, cache_trajs=False)
+            Visualizer(
+                val_data_kwargs, text_processor=text_processor, cache_trajs=False
+            )
         )
 
         # save normalization constants for evaluation
@@ -232,16 +204,14 @@ def main(_):
     # pretrained weights to load
     pretrained_loaders = [weights_loaders[w] for w in FLAGS.config.pretrained_weights]
 
-    optimizer_kwargs = FLAGS.config.optimizer.to_dict()
-    if isinstance(optimizer_kwargs["learning_rate"], dict):
-        optimizer_kwargs["learning_rate"] = optax.warmup_cosine_decay_schedule(
-            **optimizer_kwargs["learning_rate"]
-        )
-    tx = optax.chain(
-        optax.clip_by_global_norm(optimizer_kwargs.pop("clip_gradient")),
-        optax.adamw(mu_dtype=jnp.bfloat16, **optimizer_kwargs),
+    lr_schedule = optax.warmup_cosine_decay_schedule(
+        init_value=0.0,
+        peak_value=FLAGS.config.optimizer.learning_rate,
+        warmup_steps=FLAGS.config.optimizer.warmup_steps,
+        decay_steps=FLAGS.config.optimizer.decay_steps,
+        end_value=0.0,
     )
-
+    tx = optax.adam(lr_schedule)
     rng = jax.random.PRNGKey(FLAGS.config.seed)
     rng, construct_rng = jax.random.split(rng)
 
@@ -272,12 +242,12 @@ def main(_):
             dict(example_batch_spec=example_batch_spec), allow_val_change=True
         )
 
-    if FLAGS.config.wandb_resume_id is not None:
-        train_state = state_checkpointer.restore(
-            state_checkpointer.latest_step(), items=train_state
+    if FLAGS.config.resume_path is not None:
+        train_state = checkpoints.restore_checkpoint(
+            FLAGS.config.resume_path, target=train_state
         )
         checkpoint_step = int(train_state.step)
-        logging.info("Restored checkpoint from %s", save_dir)
+        logging.info("Restored checkpoint from %s", FLAGS.config.resume_path)
         if FLAGS.config.start_step is not None:
             start_step = FLAGS.config.start_step  # start_step overrides checkpoint
         else:
@@ -286,29 +256,36 @@ def main(_):
     else:
         start_step = FLAGS.config.start_step or 0
 
-    horizon = (
-        FLAGS.config.dataset_kwargs.transform_kwargs.window_size
-        - FLAGS.config.model.heads["action"]["kwargs"]["pred_horizon"]
-        + 1
-    )  # Ensures that there is a full horizon of actions to predict for each timestep
+    # horizon = (
+    #     FLAGS.config.dataset_kwargs.common_kwargs.window_size
+    #     - FLAGS.config.model.heads["action"]["kwargs"]["pred_horizon"]
+    #     + 1
+    # )  # Ensures that there is a full horizon of actions to predict for each timestep
 
     def loss_fn(params, state, batch, rng, train=True):
         def get_loss(model: OrcaModel, observations, tasks, actions, train):
             # only use first horizon timesteps as input to transformer
             # to ensure that there is a full horizon of actions to predict for each timestep
-            observations = jax.tree_map(lambda x: x[:, :horizon], observations)
+            # observations = jax.tree_map(lambda x: x[:, :horizon], observations)
 
             transformer_embeddings = model.orca_transformer(
                 observations, tasks, observations["pad_mask"], train=train
             )
-            action_loss, action_metrics = model.heads["action"].loss(
-                transformer_embeddings,  # Action head knows to pull out the action readout_key
-                actions,
+            # action_loss, action_metrics = model.heads["action"].loss(
+            #     transformer_embeddings,  # Action head knows to pull out the action readout_key
+            #     actions,
+            #     pad_mask=observations["pad_mask"],
+            #     train=train,
+            # )
+            reward_loss, reward_metrics = model.heads["reward"].loss(
+                transformer_embeddings,  # Distance head knows to pull out the distance readout_key
+                observations,
+                tasks,
                 pad_mask=observations["pad_mask"],
                 train=train,
             )
 
-            return action_loss, action_metrics
+            return reward_loss, reward_metrics
 
         return state.apply_fn(
             {"params": params},
@@ -345,49 +322,6 @@ def main(_):
     def eval_step(state, batch):
         loss, info = loss_fn(state.params, state, batch, state.rng, train=False)
         return info
-
-    @partial(
-        jax.jit,
-        in_shardings=(replicated_sharding, dp_sharding, dp_sharding),
-        out_shardings=dp_sharding,
-    )
-    def get_policy_sampled_actions(state, observations, tasks):
-        # only use first horizon timesteps as input to predict_action
-        observations = jax.tree_map(lambda x: x[:, -horizon:], observations)
-
-        def get_actions(model, observations, tasks, train):
-            transformer_embeddings = model.orca_transformer(
-                observations,
-                tasks,
-                observations["pad_mask"],
-                train=train,
-            )
-
-            actions = model.heads["action"].predict_action(
-                transformer_embeddings,  # Action head knows to pull out the action readout_key
-                train=train,
-                argmax=False,
-                sample_shape=(NUM_ACTIONS_FOR_VIS,),
-                rng=state.rng,
-            )
-            return actions
-
-        actions = state.apply_fn(
-            {"params": state.params},
-            observations,
-            tasks,
-            train=False,
-            method=get_actions,
-            rngs={"dropout": state.rng},
-        )  # We could also have used run_head here, but this is easier to read
-
-        # actions is (NUM_ACTIONS_FOR_VIS, batch_size, pred_horizon, action_dim)
-        # where actions[:, :, i] predicts the action at timestep "window_size + i"
-        actions = actions[..., 0, :]
-
-        # viz expects (batch_size, n_samples, action_dim)
-        actions = jnp.moveaxis(actions, 0, 1)
-        return actions
 
     def wandb_log(info, step):
         wandb.log(flatten_dict(info, sep="/"), step=step)
@@ -440,36 +374,12 @@ def main(_):
             wandb_log({"validation_aggregate": agg_metrics}, step=i)
             timer.tock("val")
 
-            logging.info("Visualizing...")
-            timer.tick("visualize")
-            policy_fn = batched_apply(
-                partial(get_policy_sampled_actions, train_state),
-                FLAGS.config.batch_size,
-            )
-            for data_kwargs, visualizer in zip(val_datasets_kwargs, visualizers):
-                raw_infos = visualizer.raw_evaluations(policy_fn, max_trajs=100)
-                metrics = visualizer.metrics_for_wandb(raw_infos)
-                images = visualizer.visualize_for_wandb(policy_fn, max_trajs=8)
-                wandb_log(
-                    {
-                        f"offline_metrics_{data_kwargs['name']}": metrics,
-                        f"visualizations_{data_kwargs['name']}": images,
-                    },
-                    step=i,
-                )
-            timer.tock("visualize")
-
         if (i + 1) % FLAGS.config.save_interval == 0 and save_dir is not None:
-            params_checkpointer.save(
-                i + 1,
-                train_state.params,
-                {"save_args": orbax_utils.save_args_from_target(train_state.params)},
+            logging.info("Saving checkpoint...")
+            checkpoint_path = checkpoints.save_checkpoint(
+                save_dir, train_state, step=i + 1, keep=1e6
             )
-            state_checkpointer.save(
-                i + 1,
-                train_state,
-                {"save_args": orbax_utils.save_args_from_target(train_state)},
-            )
+            logging.info("Saved checkpoint to %s", checkpoint_path)
 
         timer.tock("total")
 
