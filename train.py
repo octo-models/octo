@@ -144,6 +144,7 @@ def main(_):
         text_processor = text_processors[FLAGS.config.text_processor](
             **FLAGS.config.text_processor_kwargs
         )
+        zero_text = text_processor.encode([""])[0]
 
     def process_text(batch):
         if text_processor is None:
@@ -177,19 +178,31 @@ def main(_):
         FLAGS.config.eval_datasets,
     )
     for dataset_kwargs in val_datasets_kwargs:
-        val_data_kwargs = copy.deepcopy(dataset_kwargs)
-        val_data_kwargs.update(**FLAGS.config.dataset_kwargs["common_kwargs"])
-        val_data_kwargs["shuffle"] = False
+        val_data_kwargs = {
+            **dataset_kwargs,
+            **FLAGS.config.dataset_kwargs["common_kwargs"],
+            **{
+                "num_parallel_reads": 1,
+                "num_parallel_calls": 1,
+                "shuffle": False,
+            },  # Make validation data loading less demanding
+        }
+        val_transform_kwargs = {
+            **FLAGS.config.dataset_kwargs["transform_kwargs"],
+            **{
+                "num_parallel_calls": 1,
+            },
+        }  # Make validation data loading less demanding
+
         val_dataset = make_single_dataset(
             val_data_kwargs,
-            FLAGS.config.dataset_kwargs["transform_kwargs"],
+            val_transform_kwargs,
             train=False,
         )
         dataset_statistics = val_dataset.dataset_statistics
         val_datas.append(
             val_dataset.unbatch()
-            # TODO: doesn't this mean every single tiny dataset has a huge shuffle buffer?
-            .shuffle(FLAGS.config.shuffle_buffer_size)
+            .shuffle(FLAGS.config.val_shuffle_buffer_size)
             .repeat()
             .batch(FLAGS.config.batch_size)
         )
@@ -372,6 +385,20 @@ def main(_):
         new_state = state.apply_gradients(grads=grads, rng=rng)
         return new_state, info
 
+    def remove_text(tasks):
+        if text_processor is not None:
+            new_language = jax.tree_map(
+                lambda x, example: jnp.broadcast_to(example[None], x.shape),
+                tasks["language_instruction"],
+                zero_text,
+            )
+            tasks = flax.core.copy(tasks, {"language_instruction": new_language})
+        return tasks
+
+    def remove_images(tasks):
+        new_images = {k: jnp.zeros_like(v) for k, v in tasks.items() if "image" in k}
+        return flax.core.copy(tasks, new_images)
+
     @partial(
         jax.jit,
         # state is replicated, batch is data-parallel
@@ -379,17 +406,35 @@ def main(_):
         out_shardings=replicated_sharding,
     )
     def eval_step(state, batch):
-        loss, info = loss_fn(state.params, state, batch, state.rng, train=False)
-        return info
+        loss_fn_partial = partial(
+            loss_fn, state.params, state, rng=state.rng, train=False
+        )
+        all_tasks = {"base": batch["tasks"]}
+        if text_processor is not None:
+            all_tasks["text_conditioned"] = remove_images(batch["tasks"])
+            all_tasks["image_conditioned"] = remove_text(batch["tasks"])
+            all_tasks["unconditioned"] = remove_text(remove_images(batch["tasks"]))
+        return {
+            k: loss_fn_partial(flax.core.copy(batch, {"tasks": tasks}))[1]
+            for k, tasks in all_tasks.items()
+        }
 
     @partial(
         jax.jit,
         in_shardings=(replicated_sharding, dp_sharding, dp_sharding),
         out_shardings=dp_sharding,
+        static_argnames=("policy_mode",),
     )
-    def get_policy_sampled_actions(state, observations, tasks):
+    def _get_policy_sampled_actions(state, observations, tasks, policy_mode=None):
         # only use first horizon timesteps as input to predict_action
         observations = jax.tree_map(lambda x: x[:, -horizon:], observations)
+
+        if policy_mode == "text_conditioned":
+            tasks = remove_images(tasks)
+        elif policy_mode == "image_conditioned":
+            tasks = remove_text(tasks)
+        elif policy_mode == "unconditioned":
+            tasks = remove_text(remove_images(tasks))
 
         def get_actions(model, observations, tasks, train):
             transformer_embeddings = model.orca_transformer(
@@ -400,7 +445,7 @@ def main(_):
             )
 
             actions = model.heads["action"].predict_action(
-                transformer_embeddings,  # Action head knows to pull out the action readout_key
+                transformer_embeddings,
                 train=train,
                 argmax=False,
                 sample_shape=(NUM_ACTIONS_FOR_VIS,),
@@ -424,6 +469,10 @@ def main(_):
         # viz expects (batch_size, n_samples, action_dim)
         actions = jnp.moveaxis(actions, 0, 1)
         return actions
+
+    def get_policy_sampled_actions(state, observations, tasks, policy_mode=None):
+        # jax.jit doesn't mesh well with batched_apply + sharding, so need a small wrapper
+        return _get_policy_sampled_actions(state, observations, tasks, policy_mode)
 
     def wandb_log(info, step):
         wandb.log(flatten_dict(info, sep="/"), step=step)
@@ -478,21 +527,36 @@ def main(_):
 
             logging.info("Visualizing...")
             timer.tick("visualize")
-            policy_fn = batched_apply(
-                partial(get_policy_sampled_actions, train_state),
-                FLAGS.config.batch_size,
-            )
-            for data_kwargs, visualizer in zip(val_datasets_kwargs, visualizers):
-                raw_infos = visualizer.raw_evaluations(policy_fn, max_trajs=100)
-                metrics = visualizer.metrics_for_wandb(raw_infos)
-                images = visualizer.visualize_for_wandb(policy_fn, max_trajs=8)
-                wandb_log(
-                    {
-                        f"offline_metrics_{data_kwargs['name']}": metrics,
-                        f"visualizations_{data_kwargs['name']}": images,
-                    },
-                    step=i,
+
+            if text_processor is not None:
+                modes_to_evaluate = [
+                    "text_conditioned",
+                    "image_conditioned",
+                    "unconditioned",
+                ]
+            else:
+                modes_to_evaluate = ["image_conditioned"]
+
+            modal_policy_fns = {
+                k: batched_apply(
+                    partial(get_policy_sampled_actions, train_state, policy_mode=k),
+                    FLAGS.config.eval_batch_size,
                 )
+                for k in modes_to_evaluate
+            }
+
+            for data_kwargs, visualizer in zip(val_datasets_kwargs, visualizers):
+                for mode, policy_fn in modal_policy_fns.items():
+                    raw_infos = visualizer.raw_evaluations(policy_fn, max_trajs=100)
+                    metrics = visualizer.metrics_for_wandb(raw_infos)
+                    images = visualizer.visualize_for_wandb(policy_fn, max_trajs=8)
+                    wandb_log(
+                        {
+                            f"offline_metrics_{data_kwargs['name']}/{mode}": metrics,
+                            f"visualizations_{data_kwargs['name']}/{mode}": images,
+                        },
+                        step=i,
+                    )
             timer.tock("visualize")
 
         if (i + 1) % FLAGS.config.save_interval == 0 and save_dir is not None:
