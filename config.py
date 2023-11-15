@@ -18,7 +18,9 @@ def get_config(config_string):
 
     base_config = dict(
         batch_size=256,
+        eval_batch_size=128,
         shuffle_buffer_size=1000,
+        val_shuffle_buffer_size=1000,
         num_val_batches=8,
         num_steps=int(2e6),
         start_step=placeholder(int),

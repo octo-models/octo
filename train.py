@@ -178,8 +178,8 @@ def main(_):
     )
     for dataset_kwargs in val_datasets_kwargs:
         val_data_kwargs = {
-            **FLAGS.config.dataset_kwargs["common_kwargs"],
             **dataset_kwargs,
+            **FLAGS.config.dataset_kwargs["common_kwargs"],
             **{
                 "num_parallel_reads": 1,
                 "num_parallel_calls": 1,
@@ -199,9 +199,10 @@ def main(_):
             train=False,
         )
         action_proprio_metadata = val_dataset.action_proprio_metadata
+        val_shuffle_buffer_size = FLAGS.config.val_shuffle_buffer_size
         val_datas.append(
             val_dataset.unbatch()
-            .shuffle(min(5000, FLAGS.config.shuffle_buffer_size))
+            .shuffle(val_shuffle_buffer_size)
             .repeat()
             .batch(FLAGS.config.batch_size)
         )
@@ -361,8 +362,7 @@ def main(_):
 
     def remove_images(tasks):
         new_images = {k: jnp.zeros_like(v) for k, v in tasks.items() if "image" in k}
-        tasks = flax.core.copy(tasks, new_images)
-        return tasks
+        return flax.core.copy(tasks, new_images)
 
     @partial(
         jax.jit,
@@ -371,36 +371,18 @@ def main(_):
         out_shardings=replicated_sharding,
     )
     def eval_step(state, batch):
-        _, base_info = loss_fn(state.params, state, batch, state.rng, train=False)
-
-        if text_processor is not None:  # Only being trained on one modality
-            return {"base": base_info}
-
-        text_conditioned_batch = flax.core.copy(
-            batch, {"tasks": remove_images(batch["tasks"])}
+        loss_fn_partial = partial(
+            loss_fn, state.params, state, rng=state.rng, train=False
         )
-        image_conditioned_batch = flax.core.copy(
-            batch, {"tasks": remove_text(batch["tasks"])}
-        )
-        blind_batch = flax.core.copy(
-            batch, {"tasks": remove_text(remove_images(batch["tasks"]))}
-        )
-        _, text_conditioned_info = loss_fn(
-            state.params, state, text_conditioned_batch, state.rng, train=False
-        )
-        _, image_conditioned_info = loss_fn(
-            state.params, state, image_conditioned_batch, state.rng, train=False
-        )
-        _, blind_info = loss_fn(
-            state.params, state, blind_batch, state.rng, train=False
-        )
-        info = {
-            "base": base_info,
-            "text_conditioned": text_conditioned_info,
-            "image_conditioned": image_conditioned_info,
-            "unconditioned": blind_info,
+        all_tasks = {"base": batch["tasks"]}
+        if text_processor is not None:
+            all_tasks["text_conditioned"] = remove_images(batch["tasks"])
+            all_tasks["image_conditioned"] = remove_text(batch["tasks"])
+            all_tasks["unconditioned"] = remove_text(remove_images(batch["tasks"]))
+        return {
+            k: loss_fn_partial(flax.core.copy(batch, {"tasks": tasks}))[1]
+            for k, tasks in all_tasks.items()
         }
-        return info
 
     @partial(
         jax.jit,
@@ -428,7 +410,7 @@ def main(_):
             )
 
             actions = model.heads["action"].predict_action(
-                transformer_embeddings,  # Action head knows to pull out the action readout_key
+                transformer_embeddings,
                 train=train,
                 argmax=False,
                 sample_shape=(NUM_ACTIONS_FOR_VIS,),
@@ -523,9 +505,7 @@ def main(_):
             modal_policy_fns = {
                 k: batched_apply(
                     partial(get_policy_sampled_actions, train_state, policy_mode=k),
-                    min(
-                        128, FLAGS.config.batch_size
-                    ),  # Most trajectories are below this size
+                    FLAGS.config.eval_batch_size,
                 )
                 for k in modes_to_evaluate
             }
