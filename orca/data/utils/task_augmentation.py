@@ -77,7 +77,7 @@ def delete_task_conditioning(
     for i, (delete_key_patterns, _) in enumerate(delete_key_groups_probs):
         matching_keys = [
             key
-            for key in tasks.key()
+            for key in tasks.keys()
             if any(fnmatch(key, pattern) for pattern in delete_key_patterns)
         ]
         for key in matching_keys:
