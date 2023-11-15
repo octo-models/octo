@@ -103,8 +103,10 @@ def get_dataset_statistics(
 
     if "val" not in builder.info.splits:
         split = "train[:95%]"
+        expected_trajs = int(builder.info.splits["train"].num_examples * 0.95)
     else:
         split = "train"
+        expected_trajs = builder.info.splits["train"].num_examples
     dataset = (
         dl.DLataset.from_rlds(builder, split=split, shuffle=False)
         .map(restructure_fn)
@@ -124,7 +126,8 @@ def get_dataset_statistics(
     num_transitions = 0
     num_trajectories = 0
     for traj in tqdm.tqdm(
-        dataset.iterator(), total=builder.info.splits["train"].num_examples
+        dataset.iterator(),
+        total=expected_trajs,
     ):
         actions.append(traj["action"])
         proprios.append(traj["proprio"])
