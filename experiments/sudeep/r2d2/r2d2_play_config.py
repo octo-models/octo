@@ -150,7 +150,7 @@ def get_config(
                     (
                         "image_tokenizer",
                         {
-                            "num_tokens": 64,
+                            "num_tokens": 256,
                             "task_film_keys": ["language_instruction"],
                             **base_tokenizer_kwargs,
                         },

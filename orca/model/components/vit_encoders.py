@@ -117,7 +117,6 @@ class SmallStem(nn.Module):
         if self.use_film:
             assert cond_var is not None, "Cond var is None, nothing to condition on"
             x = FilmConditioning()(x, cond_var)
-        print(x.shape)
         return x
 
 
@@ -259,7 +258,7 @@ vit_encoder_configs = {
         kernel_sizes=(3, 3, 3),
         strides=(2, 2, 2),
         features=(32, 96, 192),
-        padding=(1, 1, 1)
+        padding=(1, 1, 1),
     ),
     "small-stem-16-film": ft.partial(
         SmallStem,
