@@ -182,6 +182,7 @@ def main(_):
         train=True,
         sample_weights=sample_weights,
         shuffle_buffer_size=FLAGS.config.shuffle_buffer_size,
+        balance_weights=FLAGS.config.get("balance_weights", True),
     ).batch(FLAGS.config.batch_size)
     val_datas = []
     visualizers = []

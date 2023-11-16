@@ -131,7 +131,7 @@ def get_config(
             use_film=True,
         )
     else:
-        encoder = "small-stem-16-film"
+        encoder = "small-stem-8-film"
         encoder_kwargs = dict()
 
     base_tokenizer_kwargs = dict(
@@ -182,7 +182,7 @@ def get_config(
                 "sample_weights": [0.8, 0.1, 0.1],
                 "transform_kwargs": update_config(
                     base_data_config,
-                    resize_size=(256, 256),
+                    resize_size=(128, 128),
                     num_parallel_calls=16,  # for the most CPU-intensive ops (decoding, resizing, augmenting)
                     task_augmentation_strategy="delete_task_conditioning",
                     task_augmentation_kwargs=dict(
@@ -193,6 +193,7 @@ def get_config(
                     ),
                 ),
             },
+            balance_weights=False,
             **update_config(
                 base_config,
                 text_processor="muse_embedding",
