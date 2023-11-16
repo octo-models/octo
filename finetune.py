@@ -13,6 +13,7 @@ import jax.numpy as jnp
 from jax.sharding import Mesh, NamedSharding, PartitionSpec
 from ml_collections import config_flags
 import numpy as np
+import optax
 import orbax.checkpoint
 import tensorflow as tf
 import tqdm
@@ -66,16 +67,29 @@ def main(_):
         Modality: {FLAGS.config.modality}
 
         # Devices: {jax.device_count()}
-        Batch size: {FLAGS.config.batch_size} ({FLAGS.config.batch_size / len(devices) } per device)
+        Batch size: {FLAGS.config.batch_size} ({FLAGS.config.batch_size // len(devices) } per device)
         # Steps: {FLAGS.config.num_steps}
     """
     )
+
+    #########
+    #
+    # Setup Jax Data Parallelism
+    #
+    #########
+
     # create a 1D mesh with a single axis named "batch"
     mesh = Mesh(jax.devices(), axis_names="batch")
-    # replicated sharding -- does not shard arrays
-    replicated_sharding = NamedSharding(mesh, PartitionSpec())
-    # data-parallel sharding -- shards arrays along the first axis
+    # Our batches will be data-parallel sharded -- each device will get a slice of the batch
     dp_sharding = NamedSharding(mesh, PartitionSpec("batch"))
+    # Our model will be replicated across devices (we are only doing data parallelism, not model parallelism)
+    replicated_sharding = NamedSharding(mesh, PartitionSpec())
+
+    #########
+    #
+    # Setup WandB
+    #
+    #########
 
     name = format_name_with_config(
         FLAGS.name,
@@ -93,47 +107,23 @@ def main(_):
         **FLAGS.config.wandb,
     )
 
-    if FLAGS.config.save_dir is not None:
-        save_dir = tf.io.gfile.join(
-            FLAGS.config.save_dir,
-            FLAGS.config.wandb.project,
-            FLAGS.config.wandb.group or "",
-            wandb_id,
-        )
-        wandb.config.update(dict(save_dir=save_dir), allow_val_change=True)
-        logging.info("Saving to %s", save_dir)
-        tf.io.gfile.makedirs(save_dir)
-        finetune_config_fname = tf.io.gfile.join(save_dir, "finetune_config.json")
-        with tf.io.gfile.GFile(finetune_config_fname, "w") as config_file:
-            config_file.write(FLAGS.config.to_json_best_effort())
+    #########
+    #
+    # Load Pretrained Model
+    #
+    #########
 
-        for fname in ["config.json", "example_batch.msgpack"]:
-            tf.io.gfile.copy(
-                os.path.join(FLAGS.config.pretrained_path, fname),
-                os.path.join(save_dir, fname),
-            )
-        # only keep latest full TrainState
-        state_checkpointer = orbax.checkpoint.CheckpointManager(
-            tf.io.gfile.join(save_dir, "state"),
-            orbax.checkpoint.PyTreeCheckpointer(),
-            options=orbax.checkpoint.CheckpointManagerOptions(
-                max_to_keep=1,
-            ),
-        )
-        # keep every params checkpoint
-        params_checkpointer = orbax.checkpoint.CheckpointManager(
-            save_dir,
-            orbax.checkpoint.PyTreeCheckpointer(),
-        )
-    else:
-        save_dir = None
-        logging.warning("save_dir not passed in, not saving checkpoints")
-
-    # set up text tokenization (this needs to happen after batching but before sharding)
     model = PretrainedModel.load_pretrained(
         FLAGS.config.pretrained_path,
         step=FLAGS.config.pretrained_step,
     )
+
+    #########
+    #
+    # Setup Data Loader
+    #
+    #########
+
     text_processor = model.text_processor
 
     def process_text(batch):
@@ -159,12 +149,6 @@ def main(_):
         val_dataset, text_processor=text_processor, cache_trajs=False
     )
 
-    if save_dir is not None:
-        fname = os.path.join(save_dir, "dataset_statistics.json")
-        with tf.io.gfile.GFile(fname, "w") as f:
-            stats = jax.tree_map(lambda x: x.tolist(), dataset.dataset_statistics)
-            json.dump(stats, f)
-
     def create_iterator(dataset):
         dataset = (
             dataset.repeat()
@@ -185,6 +169,12 @@ def main(_):
     )
     _verify_shapes(example_batch["tasks"], model.example_batch["tasks"], starting_dim=1)
 
+    #########
+    #
+    # Setup Optimizer and Train State
+    #
+    #########
+
     rng = jax.random.PRNGKey(FLAGS.config.seed)
 
     tx, lr_callable = create_optimizer(model.params, FLAGS.config.optimizer.to_dict())
@@ -195,8 +185,42 @@ def main(_):
         rng=rng,
     )
 
-    if save_dir is not None:
-        # Saving example batch for future checkpoint loading
+    #########
+    #
+    # Save all metadata
+    #
+    #########
+
+    if FLAGS.config.save_dir is not None:
+        save_dir = tf.io.gfile.join(
+            FLAGS.config.save_dir,
+            FLAGS.config.wandb.project,
+            FLAGS.config.wandb.group or "",
+            wandb_id,
+        )
+        wandb.config.update(dict(save_dir=save_dir), allow_val_change=True)
+        logging.info("Saving to %s", save_dir)
+        tf.io.gfile.makedirs(save_dir)
+
+        # Save finetuning config
+        fname = tf.io.gfile.join(save_dir, "finetune_config.json")
+        with tf.io.gfile.GFile(fname, "w") as config_file:
+            config_file.write(FLAGS.config.to_json_best_effort())
+
+        # Copy model config from pretrained model
+        for fname in ["config.json", "example_batch.msgpack"]:
+            tf.io.gfile.copy(
+                os.path.join(FLAGS.config.pretrained_path, fname),
+                os.path.join(save_dir, fname),
+            )
+
+        # Save dataset statistics
+        fname = os.path.join(save_dir, "dataset_statistics.json")
+        with tf.io.gfile.GFile(fname, "w") as f:
+            stats = jax.tree_map(lambda x: x.tolist(), dataset.dataset_statistics)
+            json.dump(stats, f)
+
+        # Save example batch to verify shapes later
         with tf.io.gfile.GFile(
             os.path.join(save_dir, "example_batch.msgpack"), "wb"
         ) as f:
@@ -208,6 +232,28 @@ def main(_):
         wandb.config.update(
             dict(example_batch_spec=example_batch_spec), allow_val_change=True
         )
+        # Setup Orbax checkpointers
+        state_checkpointer = orbax.checkpoint.CheckpointManager(
+            tf.io.gfile.join(save_dir, "state"),
+            orbax.checkpoint.PyTreeCheckpointer(),
+            options=orbax.checkpoint.CheckpointManagerOptions(
+                max_to_keep=1,
+            ),
+        )  # only keep latest full TrainState
+
+        params_checkpointer = orbax.checkpoint.CheckpointManager(
+            save_dir,
+            orbax.checkpoint.PyTreeCheckpointer(),
+        )  # keep every params checkpoint
+    else:
+        save_dir = None
+        logging.warning("save_dir not passed in, not saving checkpoints")
+
+    #########
+    #
+    # Define loss, train_step, and eval_step
+    #
+    #########
 
     def loss_fn(params, state, batch, rng, train=True):
         def get_loss(model):
@@ -231,7 +277,8 @@ def main(_):
             method=get_loss,
         )
 
-    # Data is split across devices, model is replicated across devices
+    # Data parallelism
+    # Model is replicated across devices, data is split across devices
     @partial(
         jax.jit,
         in_shardings=[replicated_sharding, dp_sharding],
@@ -241,7 +288,21 @@ def main(_):
         (loss, info), grads = jax.value_and_grad(loss_fn, has_aux=True)(
             state.params, state, batch, dropout_rng, train=True
         )
-        info.update({"lr": lr_callable(state.step)})
+        # Gradient Metrics (TODO: Does the finetuner need these?) ###
+        grad_norm = optax.global_norm(grads)
+        param_norm = optax.global_norm(state.params)
+        updates, _ = state.tx.update(grads, state.opt_state, state.params)
+        update_norm = optax.global_norm(updates)
+        info.update(
+            {
+                "grad_norm": grad_norm,
+                "param_norm": param_norm,
+                "update_norm": update_norm,
+                "learning_rate": lr_callable(state.step),
+            }
+        )
+        # End Debug Metrics #
+
         new_state = state.apply_gradients(grads=grads, rng=rng)
         return new_state, info
 
@@ -263,11 +324,15 @@ def main(_):
             sample_shape=(SAMPLES_FOR_VIZ,),
             rng=state.rng,
         )
-        actions = actions[..., 0, :]  # get first prediction
-
-        # viz expects (batch_size, n_samples, action_dim)
-        actions = jnp.moveaxis(actions, 0, 1)
+        actions = actions[..., 0, :]  # get prediction for current action
+        actions = jnp.moveaxis(actions, 0, 1)  # (batch_size, n_samples, action_dim)
         return actions
+
+    #########
+    #
+    # Train loop
+    #
+    #########
 
     def wandb_log(info, step):
         wandb.log(flatten_dict(info, sep="/"), step=step)
@@ -287,6 +352,7 @@ def main(_):
             train_state, update_info = train_step(train_state, batch)
 
         timer.tock("total")
+
         if (i + 1) % FLAGS.config.log_interval == 0:
             update_info = jax.device_get(update_info)
             wandb_log(
@@ -320,6 +386,7 @@ def main(_):
                     },
                     step=i,
                 )
+
         if (i + 1) % FLAGS.config.save_interval == 0 and save_dir is not None:
             logging.info("Saving checkpoint...")
 
