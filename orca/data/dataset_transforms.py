@@ -49,6 +49,8 @@ def bridge_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
 
 RLDS_TRAJECTORY_MAP_TRANSFORMS = {
     "r2_d2": r2_d2_dataset_transform,
+    "r2_d2_pen_cmu_rgb": r2_d2_dataset_transform,
+    "r2_d2_play_cmu_rgb": r2_d2_dataset_transform,
     "r2_d2_pen": r2_d2_dataset_transform,
     "fmb_dataset": fmb_dataset_transform,
     "bridge_dataset": bridge_dataset_transform,

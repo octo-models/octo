@@ -301,18 +301,18 @@ def main(_):
             if click.confirm("Take a new instruction?", default=True):
                 text = input("Instruction?")
 
-            task = model.create_tasks(text=[text])
+            task = model.create_tasks(texts=[text])
             goal_instruction = text
             goal_image = jnp.zeros_like(goal_image)
         else:
             raise NotImplementedError()
 
-        input("Press [Enter] to start.")
-
         # reset env
         widowx_client.reset()
         time.sleep(2.5)
         obs, _ = env.reset()
+
+        input("Press [Enter] to start.")
 
         # do rollout
         last_tstep = time.time()

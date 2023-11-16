@@ -5,7 +5,9 @@ import time
 import flax
 from flax.training import train_state
 import jax
+import jax.numpy as jnp
 import numpy as np
+import optax
 
 from orca.utils.jax_utils import shard_along_axis
 from orca.utils.typing import PRNGKey
@@ -171,3 +173,39 @@ def filter_eval_datasets(dataset_kwargs_list, sample_weights, eval_datasets=None
                 ),
             )
         )
+
+
+def create_optimizer(params_or_params_shape, optimizer_kwargs: dict):
+    """Creates optimizer for ORCA.
+
+    Optimizer_kwargs are the kwargs for optax.adamw; if the learning rate is a dict,
+    it is interpreted as the kwargs for optax.warmup_cosine_decay_schedule. If clip_gradient
+    is specified, then gradient clipping is applied.
+
+    Returns:
+        tx: an Optax optimizer
+        lr_callable: Function that takes the current step and returns the learning rate
+    """
+    if isinstance(optimizer_kwargs["learning_rate"], dict):
+        optimizer_kwargs["learning_rate"] = optax.warmup_cosine_decay_schedule(
+            **optimizer_kwargs["learning_rate"]
+        )
+        lr_callable = optimizer_kwargs["learning_rate"]
+    else:
+        lr_callable = lambda _: optimizer_kwargs["learning_rate"]
+
+    # Following ViT, timm, MAE: this mask skips weight decay on biases and LayerNorm parameters
+    wd_mask = jax.tree_util.tree_map_with_path(
+        lambda path, x: "kernel" in jax.tree_util.keystr(path), params_or_params_shape
+    )
+
+    clip_gradient = optimizer_kwargs.pop("clip_gradient", None)
+
+    tx = optax.adamw(mu_dtype=jnp.bfloat16, **optimizer_kwargs, mask=wd_mask)
+    if clip_gradient is not None:
+        tx = optax.chain(
+            optax.clip_by_global_norm(clip_gradient),
+            tx,
+        )
+
+    return tx, lr_callable
