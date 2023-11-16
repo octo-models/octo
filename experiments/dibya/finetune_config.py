@@ -49,7 +49,7 @@ def get_config(modality="image_conditioned"):
         pretrained_path=placeholder(str),
         pretrained_step=placeholder(int),
         batch_size=1024,
-        shuffle_buffer_size=10000,
+        shuffle_buffer_size=100000,
         num_val_batches=8,
         num_steps=max_steps,
         log_interval=100,
@@ -70,7 +70,7 @@ def get_config(modality="image_conditioned"):
                 decay_steps=max_steps,
                 end_value=0.0,
             ),
-            weight_decay=0.01,  # Zero WD for finetuning
+            weight_decay=0.01,
             clip_gradient=placeholder(float),
         ),
     )
