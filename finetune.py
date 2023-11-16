@@ -160,7 +160,8 @@ def main(_):
 
     def create_iterator(dataset):
         dataset = (
-            dataset.unbatch()
+            dataset.repeat()
+            .unbatch()
             .shuffle(FLAGS.config.shuffle_buffer_size)
             .batch(FLAGS.config.batch_size)
         )  # Trajs -> Transitions -> Shuffle -> Batches
