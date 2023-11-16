@@ -29,6 +29,7 @@ from orca.model.components.hf_weight_loaders import weights_loaders
 from orca.utils.jax_utils import initialize_compilation_cache
 from orca.utils.train_utils import (
     batched_apply,
+    create_optimizer,
     create_train_state,
     filter_eval_datasets,
     format_name_with_config,
@@ -278,27 +279,8 @@ def main(_):
         partial(model_def.init, train=False),
         construct_rng,
         *model_init_args,
-    )[
-        "params"
-    ]  # Needed to determine weight decay mask
-
-    optimizer_kwargs = FLAGS.config.optimizer.to_dict()
-    if isinstance(optimizer_kwargs["learning_rate"], dict):
-        optimizer_kwargs["learning_rate"] = optax.warmup_cosine_decay_schedule(
-            **optimizer_kwargs["learning_rate"]
-        )
-
-    # Following ViT, timm, MAE: this mask skips weight decay on biases and LayerNorm parameters
-    wd_mask = jax.tree_util.tree_map_with_path(
-        lambda path, x: "kernel" in jax.tree_util.keystr(path), params_shape
-    )
-    clip_gradient = optimizer_kwargs.pop("clip_gradient")
-    tx = optax.adamw(mu_dtype=jnp.bfloat16, **optimizer_kwargs, mask=wd_mask)
-    if clip_gradient is not None:
-        tx = optax.chain(
-            optax.clip_by_global_norm(clip_gradient),
-            tx,
-        )
+    )["params"]
+    tx, lr_callable = create_optimizer(params_shape, FLAGS.config.optimizer.to_dict())
     train_state = create_train_state(
         construct_rng,
         model_def,
@@ -392,7 +374,7 @@ def main(_):
                 "grad_norm": grad_norm,
                 "param_norm": param_norm,
                 "update_norm": update_norm,
-                "learning_rate": optimizer_kwargs["learning_rate"](state.step),
+                "learning_rate": lr_callable(state.step),
             }
         )
         new_state = state.apply_gradients(grads=grads, rng=rng)
