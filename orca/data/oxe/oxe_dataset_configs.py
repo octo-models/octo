@@ -35,7 +35,7 @@ OXE_DATASET_KWARGS = {
         "action_encoding": ActionEncoding.EEF_POS,
     },
     "bridge_dataset": {
-        "image_obs_keys": ["image_0", "image_1", "image_2"],
+        "image_obs_keys": ["image_0", "image_1", None],
         "depth_obs_keys": [None, None, None],
         "state_obs_keys": [
             "EEF_state",

@@ -18,7 +18,9 @@ def get_config(config_string):
 
     base_config = dict(
         batch_size=256,
+        eval_batch_size=128,
         shuffle_buffer_size=1000,
+        val_shuffle_buffer_size=1000,
         num_val_batches=8,
         num_steps=int(2e6),
         start_step=placeholder(int),
@@ -79,7 +81,7 @@ def get_config(config_string):
             end_value=0.0,
         ),
         weight_decay=0.01,
-        clip_gradient=1.0,
+        clip_gradient=placeholder(float),
     )
 
     base_model_config = dict(
@@ -102,7 +104,7 @@ def get_config(config_string):
                     normalization_type=normalization_type,
                     readout_key="action",
                 ),
-            )
+            ),
         ),
     )
 
@@ -363,10 +365,10 @@ def get_config(config_string):
                 dataset_kwargs=update_config(
                     base_bridge_data_config,
                     transform_kwargs=dict(
-                        task_augmentation_strategy="switch_keys",
+                        task_augmentation_strategy="delete_task_conditioning",
                         task_augmentation_kwargs=dict(
-                            switch_key_groups_probs=[
-                                (["image_0"], 0.5),
+                            delete_key_groups_probs=[
+                                (["image_*"], 0.5),
                                 (["language_instruction"], 0.5),
                             ],
                         ),

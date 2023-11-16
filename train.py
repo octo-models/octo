@@ -22,6 +22,7 @@ import wandb
 
 import orca
 from orca.data.dataset import make_interleaved_dataset, make_single_dataset
+from orca.data.oxe.oxe_dataset_mixes import make_oxe_dataset_kwargs_and_weights, mixes
 from orca.data.utils.text_processing import text_processors
 from orca.model import create_model_def, OrcaModel
 from orca.model.components.hf_weight_loaders import weights_loaders
@@ -74,7 +75,7 @@ def main(_):
     tf.config.set_visible_devices([], "GPU")
 
     # set up wandb and logging
-    if FLAGS.config.wandb_resume_id is None:
+    if FLAGS.config.get("wandb_resume_id", None) is None:
         name = format_name_with_config(
             FLAGS.name,
             FLAGS.config.to_dict(),
@@ -144,6 +145,7 @@ def main(_):
         text_processor = text_processors[FLAGS.config.text_processor](
             **FLAGS.config.text_processor_kwargs
         )
+        zero_text = text_processor.encode([""])[0]
 
     def process_text(batch):
         if text_processor is None:
@@ -152,9 +154,22 @@ def main(_):
             batch["tasks"]["language_instruction"] = text_processor.encode(
                 [s.decode("utf-8") for s in batch["tasks"]["language_instruction"]]
             )
+        del batch["dataset_name"]
         return batch
 
     # load datasets
+    if "oxe_kwargs" in FLAGS.config.dataset_kwargs:
+        #
+        oxe_kwargs = FLAGS.config.dataset_kwargs["oxe_kwargs"].to_dict()
+        del FLAGS.config.dataset_kwargs["oxe_kwargs"]
+        oxe_kwargs["data_mix"] = mixes.get(oxe_kwargs["data_mix"])
+        (
+            dataset_kwargs_list,
+            dataset_sampling_weights,
+        ) = make_oxe_dataset_kwargs_and_weights(**oxe_kwargs)
+        FLAGS.config.dataset_kwargs["data_kwargs_list"] = dataset_kwargs_list
+        FLAGS.config.dataset_kwargs["sample_weights"] = dataset_sampling_weights
+
     sample_weights = (
         FLAGS.config.dataset_kwargs["sample_weights"]
         if "sample_weights" in FLAGS.config.dataset_kwargs
@@ -176,19 +191,31 @@ def main(_):
         FLAGS.config.eval_datasets,
     )
     for dataset_kwargs in val_datasets_kwargs:
-        val_data_kwargs = copy.deepcopy(dataset_kwargs)
-        val_data_kwargs.update(**FLAGS.config.dataset_kwargs["common_kwargs"])
-        val_data_kwargs["shuffle"] = False
+        val_data_kwargs = {
+            **dataset_kwargs,
+            **FLAGS.config.dataset_kwargs["common_kwargs"],
+            **{
+                "num_parallel_reads": 1,
+                "num_parallel_calls": 1,
+                "shuffle": False,
+            },  # Make validation data loading less demanding
+        }
+        val_transform_kwargs = {
+            **FLAGS.config.dataset_kwargs["transform_kwargs"],
+            **{
+                "num_parallel_calls": 1,
+            },
+        }  # Make validation data loading less demanding
+
         val_dataset = make_single_dataset(
             val_data_kwargs,
-            FLAGS.config.dataset_kwargs["transform_kwargs"],
+            val_transform_kwargs,
             train=False,
         )
-        action_proprio_metadata = val_dataset.action_proprio_metadata
+        dataset_statistics = val_dataset.dataset_statistics
         val_datas.append(
             val_dataset.unbatch()
-            # TODO: doesn't this mean every single tiny dataset has a huge shuffle buffer?
-            .shuffle(FLAGS.config.shuffle_buffer_size)
+            .shuffle(FLAGS.config.val_shuffle_buffer_size)
             .repeat()
             .batch(FLAGS.config.batch_size)
         )
@@ -200,14 +227,12 @@ def main(_):
         if save_dir is not None:
             with tf.io.gfile.GFile(
                 os.path.join(
-                    save_dir, f"action_proprio_metadata_{val_data_kwargs['name']}.json"
+                    save_dir, f"dataset_statistics_{val_data_kwargs['name']}.json"
                 ),
                 "w",
             ) as f:
                 json.dump(
-                    jax.tree_map(
-                        lambda x: [float(e) for e in x.numpy()], action_proprio_metadata
-                    ),
+                    jax.tree_map(lambda x: x.tolist(), dataset_statistics),
                     f,
                 )
 
@@ -232,29 +257,54 @@ def main(_):
     # pretrained weights to load
     pretrained_loaders = [weights_loaders[w] for w in FLAGS.config.pretrained_weights]
 
+    rng = jax.random.PRNGKey(FLAGS.config.seed)
+    rng, construct_rng = jax.random.split(rng)
+    model_init_args = (
+        example_batch["observation"],
+        example_batch["tasks"],
+        example_batch["observation"]["pad_mask"],
+    )
+    print(
+        model_def.tabulate(
+            construct_rng,
+            *model_init_args,
+            train=False,
+            verbose=True,
+            depth=2,
+        )
+    )  # Prints out the parameter count of our model
+
+    params_shape = jax.eval_shape(
+        partial(model_def.init, train=False),
+        construct_rng,
+        *model_init_args,
+    )[
+        "params"
+    ]  # Needed to determine weight decay mask
+
     optimizer_kwargs = FLAGS.config.optimizer.to_dict()
     if isinstance(optimizer_kwargs["learning_rate"], dict):
         optimizer_kwargs["learning_rate"] = optax.warmup_cosine_decay_schedule(
             **optimizer_kwargs["learning_rate"]
         )
-    tx = optax.chain(
-        optax.clip_by_global_norm(optimizer_kwargs.pop("clip_gradient")),
-        optax.adamw(mu_dtype=jnp.bfloat16, **optimizer_kwargs),
+
+    # Following ViT, timm, MAE: this mask skips weight decay on biases and LayerNorm parameters
+    wd_mask = jax.tree_util.tree_map_with_path(
+        lambda path, x: "kernel" in jax.tree_util.keystr(path), params_shape
     )
-
-    rng = jax.random.PRNGKey(FLAGS.config.seed)
-    rng, construct_rng = jax.random.split(rng)
-
+    clip_gradient = optimizer_kwargs.pop("clip_gradient")
+    tx = optax.adamw(mu_dtype=jnp.bfloat16, **optimizer_kwargs, mask=wd_mask)
+    if clip_gradient is not None:
+        tx = optax.chain(
+            optax.clip_by_global_norm(clip_gradient),
+            tx,
+        )
     train_state = create_train_state(
         construct_rng,
         model_def,
         tx,
-        init_args=(
-            example_batch["observation"],
-            example_batch["tasks"],
-            example_batch["observation"]["pad_mask"],
-        ),
-        init_kwargs=dict(train=False, verbose=True),
+        init_args=model_init_args,
+        init_kwargs=dict(train=False),
         pretrained_loaders=pretrained_loaders,
     )
 
@@ -272,7 +322,7 @@ def main(_):
             dict(example_batch_spec=example_batch_spec), allow_val_change=True
         )
 
-    if FLAGS.config.wandb_resume_id is not None:
+    if FLAGS.config.get("wandb_resume_id", None) is not None:
         train_state = state_checkpointer.restore(
             state_checkpointer.latest_step(), items=train_state
         )
@@ -333,8 +383,34 @@ def main(_):
         (loss, info), grads = jax.value_and_grad(loss_fn, has_aux=True)(
             state.params, state, batch, dropout_rng, train=True
         )
+        grad_norm = optax.global_norm(grads)
+        param_norm = optax.global_norm(state.params)
+        updates, _ = state.tx.update(grads, state.opt_state, state.params)
+        update_norm = optax.global_norm(updates)
+        info.update(
+            {
+                "grad_norm": grad_norm,
+                "param_norm": param_norm,
+                "update_norm": update_norm,
+                "learning_rate": optimizer_kwargs["learning_rate"](state.step),
+            }
+        )
         new_state = state.apply_gradients(grads=grads, rng=rng)
         return new_state, info
+
+    def remove_text(tasks):
+        if text_processor is not None:
+            new_language = jax.tree_map(
+                lambda x, example: jnp.broadcast_to(example[None], x.shape),
+                tasks["language_instruction"],
+                zero_text,
+            )
+            tasks = flax.core.copy(tasks, {"language_instruction": new_language})
+        return tasks
+
+    def remove_images(tasks):
+        new_images = {k: jnp.zeros_like(v) for k, v in tasks.items() if "image" in k}
+        return flax.core.copy(tasks, new_images)
 
     @partial(
         jax.jit,
@@ -343,17 +419,35 @@ def main(_):
         out_shardings=replicated_sharding,
     )
     def eval_step(state, batch):
-        loss, info = loss_fn(state.params, state, batch, state.rng, train=False)
-        return info
+        loss_fn_partial = partial(
+            loss_fn, state.params, state, rng=state.rng, train=False
+        )
+        all_tasks = {"base": batch["tasks"]}
+        if text_processor is not None:
+            all_tasks["text_conditioned"] = remove_images(batch["tasks"])
+            all_tasks["image_conditioned"] = remove_text(batch["tasks"])
+            all_tasks["unconditioned"] = remove_text(remove_images(batch["tasks"]))
+        return {
+            k: loss_fn_partial(flax.core.copy(batch, {"tasks": tasks}))[1]
+            for k, tasks in all_tasks.items()
+        }
 
     @partial(
         jax.jit,
         in_shardings=(replicated_sharding, dp_sharding, dp_sharding),
         out_shardings=dp_sharding,
+        static_argnames=("policy_mode",),
     )
-    def get_policy_sampled_actions(state, observations, tasks):
+    def _get_policy_sampled_actions(state, observations, tasks, policy_mode=None):
         # only use first horizon timesteps as input to predict_action
         observations = jax.tree_map(lambda x: x[:, -horizon:], observations)
+
+        if policy_mode == "text_conditioned":
+            tasks = remove_images(tasks)
+        elif policy_mode == "image_conditioned":
+            tasks = remove_text(tasks)
+        elif policy_mode == "unconditioned":
+            tasks = remove_text(remove_images(tasks))
 
         def get_actions(model, observations, tasks, train):
             transformer_embeddings = model.orca_transformer(
@@ -364,7 +458,7 @@ def main(_):
             )
 
             actions = model.heads["action"].predict_action(
-                transformer_embeddings,  # Action head knows to pull out the action readout_key
+                transformer_embeddings,
                 train=train,
                 argmax=False,
                 sample_shape=(NUM_ACTIONS_FOR_VIS,),
@@ -388,6 +482,10 @@ def main(_):
         # viz expects (batch_size, n_samples, action_dim)
         actions = jnp.moveaxis(actions, 0, 1)
         return actions
+
+    def get_policy_sampled_actions(state, observations, tasks, policy_mode=None):
+        # jax.jit doesn't mesh well with batched_apply + sharding, so need a small wrapper
+        return _get_policy_sampled_actions(state, observations, tasks, policy_mode)
 
     def wandb_log(info, step):
         wandb.log(flatten_dict(info, sep="/"), step=step)
@@ -442,21 +540,36 @@ def main(_):
 
             logging.info("Visualizing...")
             timer.tick("visualize")
-            policy_fn = batched_apply(
-                partial(get_policy_sampled_actions, train_state),
-                FLAGS.config.batch_size,
-            )
-            for data_kwargs, visualizer in zip(val_datasets_kwargs, visualizers):
-                raw_infos = visualizer.raw_evaluations(policy_fn, max_trajs=100)
-                metrics = visualizer.metrics_for_wandb(raw_infos)
-                images = visualizer.visualize_for_wandb(policy_fn, max_trajs=8)
-                wandb_log(
-                    {
-                        f"offline_metrics_{data_kwargs['name']}": metrics,
-                        f"visualizations_{data_kwargs['name']}": images,
-                    },
-                    step=i,
+
+            if text_processor is not None:
+                modes_to_evaluate = [
+                    "text_conditioned",
+                    "image_conditioned",
+                    "unconditioned",
+                ]
+            else:
+                modes_to_evaluate = ["image_conditioned"]
+
+            modal_policy_fns = {
+                k: batched_apply(
+                    partial(get_policy_sampled_actions, train_state, policy_mode=k),
+                    FLAGS.config.eval_batch_size,
                 )
+                for k in modes_to_evaluate
+            }
+
+            for data_kwargs, visualizer in zip(val_datasets_kwargs, visualizers):
+                for mode, policy_fn in modal_policy_fns.items():
+                    raw_infos = visualizer.raw_evaluations(policy_fn, max_trajs=100)
+                    metrics = visualizer.metrics_for_wandb(raw_infos)
+                    images = visualizer.visualize_for_wandb(policy_fn, max_trajs=8)
+                    wandb_log(
+                        {
+                            f"offline_metrics_{data_kwargs['name']}/{mode}": metrics,
+                            f"visualizations_{data_kwargs['name']}/{mode}": images,
+                        },
+                        step=i,
+                    )
             timer.tock("visualize")
 
         if (i + 1) % FLAGS.config.save_interval == 0 and save_dir is not None:
