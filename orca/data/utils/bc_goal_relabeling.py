@@ -28,3 +28,18 @@ def uniform(traj):
     traj["tasks"]["end_timestep"] = tf.ones_like(goal_idxs) * traj_len
 
     return traj
+
+
+def no_image_conditioning(traj):
+    """
+    Relabels with empty goal images.
+    """
+    traj_len = tf.shape(tf.nest.flatten(traj["observation"])[0])[0]
+    traj["tasks"] = tf.nest.map_structure(
+        lambda x: tf.zeros_like(x[0]),
+        traj["observation"],
+    )
+    traj["tasks"]["goal_timestep"] = tf.fill([traj_len], traj_len)
+    traj["tasks"]["end_timestep"] = tf.fill([traj_len], traj_len)
+
+    return traj
