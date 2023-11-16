@@ -15,11 +15,20 @@ def update_config(config, **kwargs):
 
 def get_config(modality="image_conditioned"):
     assert modality in ["image_conditioned", "language_conditioned", "multimodal"]
+    # Fill this in for your own dataset!
+
+    # If starting with an ORCA-wrist model, there should be two image keys
+    # first image key should be the third-person view
+    # and second image key should be the wrist view
+
+    # If starting with an ORCA model, there should be one image key
+    # and it should be the third-person view
+
     FINETUNING_KWARGS = {
         "name": "bridge_dataset",
-        # On v4, this is "gs://rail-orca-central2/resize_256_256"
+        # On v4, this might be "gs://rail-orca-central2/resize_256_256"
         "data_dir": placeholder(str),
-        "image_obs_keys": ["image_0"],
+        "image_obs_keys": ["image_0", None],
         "state_obs_keys": [
             "EEF_state",
             None,
@@ -28,7 +37,11 @@ def get_config(modality="image_conditioned"):
         "state_encoding": StateEncoding.POS_EULER,
         "action_encoding": ActionEncoding.EEF_POS,
         "action_proprio_normalization_type": "normal",
-    }  # Fill this in for your own dataset!
+        # If the default data loading speed is too slow, try these:
+        # and "num_parallel_calls" in `transform_kwargs` below
+        # "num_parallel_reads": 8,  # for reading from disk / GCS
+        # "num_parallel_calls": 16,  # for initial dataset construction
+    }
 
     max_steps = FieldReference(200000)
 
@@ -57,7 +70,7 @@ def get_config(modality="image_conditioned"):
                 decay_steps=max_steps,
                 end_value=0.0,
             ),
-            weight_decay=0.01,
+            weight_decay=0.01,  # Zero WD for finetuning
             clip_gradient=placeholder(float),
         ),
     )
@@ -103,6 +116,8 @@ def get_config(modality="image_conditioned"):
         task_augmentation_kwargs=dict(
             delete_key_groups_probs=delete_key_groups_probs,
         ),
+        # If the default data loading speed is too slow, try these:
+        # num_parallel_calls=16,  # for the most CPU-intensive ops (decoding, resizing, augmenting)
     )
     config["data_transforms"] = transform_kwargs
     return ConfigDict(config)
