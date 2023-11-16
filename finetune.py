@@ -10,6 +10,7 @@ from flax.training import orbax_utils
 from flax.traverse_util import flatten_dict
 import jax
 import jax.numpy as jnp
+from jax.sharding import Mesh, NamedSharding, PartitionSpec
 from ml_collections import config_flags
 import numpy as np
 import orbax.checkpoint
@@ -24,7 +25,6 @@ from orca.utils.train_utils import (
     batched_apply,
     create_optimizer,
     format_name_with_config,
-    shard_along_axis,
     Timer,
     TrainState,
 )
@@ -70,6 +70,13 @@ def main(_):
         # Steps: {FLAGS.config.num_steps}
     """
     )
+    # create a 1D mesh with a single axis named "batch"
+    mesh = Mesh(jax.devices(), axis_names="batch")
+    # replicated sharding -- does not shard arrays
+    replicated_sharding = NamedSharding(mesh, PartitionSpec())
+    # data-parallel sharding -- shards arrays along the first axis
+    dp_sharding = NamedSharding(mesh, PartitionSpec("batch"))
+
     name = format_name_with_config(
         FLAGS.name,
         FLAGS.config.to_dict(),
@@ -166,8 +173,6 @@ def main(_):
             .batch(FLAGS.config.batch_size)
         )  # Trajs -> Transitions -> Shuffle -> Batches
         iterator = map(process_text, dataset.iterator())  # Process text
-        # Shard onto device
-        iterator = map(lambda batch: shard_along_axis(batch, devices), iterator)
         return iterator
 
     train_data_iter = create_iterator(dataset)
@@ -226,7 +231,11 @@ def main(_):
             method=get_loss,
         )
 
-    @jax.jit
+    # Data is split across devices, model is replicated across devices
+    @partial(
+        jax.jit,
+        in_shardings=[replicated_sharding, dp_sharding],
+    )
     def train_step(state, batch):
         rng, dropout_rng = jax.random.split(state.rng)
         (loss, info), grads = jax.value_and_grad(loss_fn, has_aux=True)(
@@ -236,7 +245,10 @@ def main(_):
         new_state = state.apply_gradients(grads=grads, rng=rng)
         return new_state, info
 
-    @jax.jit
+    @partial(
+        jax.jit,
+        in_shardings=[replicated_sharding, dp_sharding],
+    )
     def eval_step(state, batch):
         return loss_fn(state.params, state, batch, rng=state.rng, train=False)[1]
 
