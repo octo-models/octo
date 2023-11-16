@@ -137,10 +137,10 @@ def get_config(config_string):
                         base_data_config,
                         resize_size=(256, 256),
                         num_parallel_calls=16,  # for the most CPU-intensive ops (decoding, resizing, augmenting)
-                        task_augmentation_strategy="switch_keys",
+                        task_augmentation_strategy="delete_task_conditioning",
                         task_augmentation_kwargs=dict(
-                            switch_key_groups_probs=[
-                                (["image_0"], 0.5),
+                            delete_key_groups_probs=[
+                                (["image_*"], 0.5),
                                 (["language_instruction"], 0.5),
                             ],
                         ),

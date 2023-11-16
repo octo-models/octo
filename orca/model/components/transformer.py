@@ -71,6 +71,44 @@ class MlpBlock(nn.Module):
         return output
 
 
+class MAPHead(nn.Module):
+    """Multihead Attention Pooling.
+
+    From https://github.com/google-research/big_vision/blob/main/big_vision/models/vit.py
+    """
+
+    mlp_dim: Optional[int] = None  # Defaults to 4x input dim
+    num_heads: int = 8
+    num_readouts: int = 1
+
+    @nn.compact
+    def __call__(self, x, train=True):
+
+        *batch_dims, l, d = x.shape
+        x = x.reshape(-1, l, d)
+        batch_size = x.shape[0]
+
+        probe = self.param(
+            "probe",
+            nn.initializers.xavier_uniform(),
+            (1, self.num_readouts, d),
+            x.dtype,
+        )
+        probe = jnp.tile(probe, [batch_size, 1, 1])
+        out = nn.MultiHeadDotProductAttention(
+            num_heads=self.num_heads, kernel_init=nn.initializers.xavier_uniform()
+        )(probe, x)
+
+        # TODO: dropout on head?
+        y = nn.LayerNorm()(out)
+
+        out = out + MlpBlock(mlp_dim=nn.merge_param("mlp_dim", self.mlp_dim, 4 * d))(
+            y, deterministic=not train
+        )
+        out = out.reshape(*batch_dims, self.num_readouts, d)
+        return out
+
+
 class Encoder1DBlock(nn.Module):
     """Transformer encoder layer.
 
