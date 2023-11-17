@@ -18,6 +18,29 @@ from orca.model.components.transformer import Transformer
 T = TypeVar("T")
 
 
+def normalize_images(img, img_norm_type="default"):
+    if img_norm_type == "default":
+        # put pixels in [-1, 1]
+        return img.astype(jnp.float32) / 127.5 - 1.0
+    elif img_norm_type == "imagenet":
+        # put pixels in [0,1]
+        img = img.astype(jnp.float32) / 255
+        assert img.shape[-1] % 3 == 0, "images should have rgb channels!"
+
+        # define pixel-wise mean/std stats calculated from ImageNet
+        mean = jnp.array([0.485, 0.456, 0.406]).reshape((1, 1, 1, 3))
+        std = jnp.array([0.229, 0.224, 0.225]).reshape((1, 1, 1, 3))
+
+        # tile mean and std (to account for stacked early_fusion images)
+        num_tile = (1, 1, 1, int(img.shape[-1] / 3))
+        mean_tile = jnp.tile(mean, num_tile)
+        std_tile = jnp.tile(std, num_tile)
+
+        # tile the mean/std, normalize image, and return
+        return (img - mean_tile) / std_tile
+    raise ValueError()
+
+
 def weight_standardize(w, axis, eps):
     """Subtracts mean and divides by standard deviation."""
     w = w - jnp.mean(w, axis=axis)
@@ -45,6 +68,7 @@ class PatchEncoder(nn.Module):
     use_film: bool = False
     patch_size: int = 32
     num_features: int = 512
+    img_norm_type: str = "default"
 
     @nn.compact
     def __call__(self, observations: jnp.ndarray, train: bool = True, cond_var=None):
@@ -53,7 +77,7 @@ class PatchEncoder(nn.Module):
         assert (
             expecting_cond_var == received_cond_var
         ), "Only pass in cond var iff model expecting cond var"
-        x = observations.astype(jnp.float32) / 127.5 - 1.0
+        x = normalize_images(observations, self.img_norm_type)
         x = nn.Conv(
             features=self.num_features,
             kernel_size=(self.patch_size, self.patch_size),
@@ -81,6 +105,7 @@ class SmallStem(nn.Module):
     features: tuple = (32, 96, 192, 384)
     padding: tuple = (1, 1, 1, 1)
     num_features: int = 512
+    img_norm_type: str = "default"
 
     @nn.compact
     def __call__(self, observations: jnp.ndarray, train: bool = True, cond_var=None):
@@ -89,7 +114,8 @@ class SmallStem(nn.Module):
         assert (
             expecting_cond_var == received_cond_var
         ), "Only pass in cond var iff model expecting cond var"
-        x = observations.astype(jnp.float32) / 127.5 - 1.0
+
+        x = normalize_images(observations, self.img_norm_type)
         for n, (kernel_size, stride, features, padding) in enumerate(
             zip(
                 self.kernel_sizes,
@@ -190,6 +216,7 @@ class ViTResnet(nn.Module):
     use_film: bool = False
     width: int = 1
     num_layers: tuple = tuple()
+    img_norm_type: str = "default"
 
     @nn.compact
     def __call__(self, observations: jnp.ndarray, train: bool = True, cond_var=None):
@@ -199,8 +226,7 @@ class ViTResnet(nn.Module):
             expecting_cond_var == received_cond_var
         ), "Only pass in cond var iff model expecting cond var"
 
-        # put inputs in [-1, 1]
-        x = observations.astype(jnp.float32) / 127.5 - 1.0
+        x = normalize_images(observations, self.img_norm_type)
         width = int(64 * self.width)
         x = StdConv(
             features=width,
