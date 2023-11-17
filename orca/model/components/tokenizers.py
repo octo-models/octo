@@ -1,4 +1,5 @@
 import functools as ft
+import logging
 import re
 from typing import Sequence
 
@@ -57,7 +58,7 @@ class ImageTokenizer(nn.Module):
         encoder (str): Name of used encoder.
         encoder_kwargs (dict, optional): Overwrite dict for encoder hyperparameters.
         early_fusion (bool): If true multi-cam and goal images during first layer of encoder, else fuses after encoding using TokenLearner
-        num_tokens (int): Number of output tokens, only enforced when use_token_learner is True.
+        num_tokens (int): Number of output tokens, only enforced when early_fusion is False.
         obs_stack_keys (Sequence[str]): Which spatial observation inputs get stacked for encoder input. Supports regex.
         task_stack_keys (Sequence[str]): Which spatial task inputs get stacked for encoder input. Supports regex.
         task_film_keys (Sequence[str]): Which non-spatial task keys get passed into FiLM conditioning. Supports regex.
@@ -141,9 +142,10 @@ class ImageTokenizer(nn.Module):
         image_tokens = jnp.reshape(image_tokens, (b, t, -1, d))
         if self.early_fusion:
             n_tokens = image_tokens.shape[2]
-            assert (
-                n_tokens == self.num_tokens
-            ), f"encoder must produce {self.num_tokens} tokens not {n_tokens}!"
+            if n_tokens != self.num_tokens:
+                logging.warning(
+                    f"image encoder produces {n_tokens} tokens not {self.num_tokens}"
+                )
             return image_tokens
 
         if task_inputs is not None:
