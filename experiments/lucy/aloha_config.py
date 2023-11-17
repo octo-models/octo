@@ -18,7 +18,7 @@ def get_config(
         batch_size=256,
         eval_batch_size=128,
         shuffle_buffer_size=10000,
-        val_shuffle_buffer_size=1000,
+        val_shuffle_buffer_size=100,
         num_val_batches=16,
         num_steps=int(2e6),
         start_step=placeholder(int),
@@ -40,7 +40,7 @@ def get_config(
     normalization_type = "normal"
 
     base_data_config = dict(
-        window_size=51,
+        window_size=1,
         image_augment_kwargs=dict(
             random_resized_crop=dict(scale=[0.8, 1.0], ratio=[0.9, 1.1]),
             random_brightness=[0.2],
@@ -106,14 +106,14 @@ def get_config(
 
     base_model_config = dict(
         token_embedding_size=TOKEN_DIMS[transformer_size],
-        max_horizon=60,
+        max_horizon=10,
         readouts=dict(action=7),
         transformer_kwargs=TRANSFORMER_SIZES[transformer_size],
         heads=dict(
             action=dict(
                 cls_name="mse_action_head",
                 kwargs=dict(
-                    pred_horizon=50,
+                    pred_horizon=1,
                     action_dim=14,
                     vocab_size=256,
                     normalization_type=normalization_type,
