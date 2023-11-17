@@ -104,7 +104,7 @@ def get_config(config_string):
                     normalization_type=normalization_type,
                     readout_key="action",
                 ),
-            )
+            ),
         ),
     )
 
