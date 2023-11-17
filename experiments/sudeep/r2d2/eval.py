@@ -78,7 +78,9 @@ def supply_rng(f, rng=jax.random.PRNGKey(0)):
 
 
 _CAMERA_MAPPINGS = {
-    '16291792_left': 'image_0',
+    '16291792_left': 'image_2',
+    '22246076_left': 'image_0',
+    '26638268_left': 'image_1',
 }
 
 
@@ -149,7 +151,7 @@ def load_checkpoint(weights_path, config_path, metadata_path, example_batch_path
                 temperature=FLAGS.temperature,
             ),
         ),
-        horizon=model.config["dataset_kwargs"]["common_kwargs"]["window_size"],
+        horizon=model.config["dataset_kwargs"]["transform_kwargs"]["window_size"],
     )
     return (policy_fn, model)
 
@@ -189,10 +191,10 @@ class OrcaPolicy:
 
 
 def main(_):
-    checkpoint_weights_path  = '/home/sdasari/orca/reverify/orca/test_20231102_024636/checkpoint_40000/'
-    checkpoint_config_path   = '/home/sdasari/orca/reverify/orca/test_20231102_024636/config.json'
-    checkpoint_metadata_path = '/home/sdasari/orca/reverify/orca/test_20231102_024636/action_proprio_metadata_r2_d2_pen_ourlab.json'
-    checkpoint_example_batch = '/home/sdasari/orca/reverify/orca/test_20231102_024636/example_batch.msgpack'
+    checkpoint_weights_path  = '/home/sdasari/orca/orca_gc_res128/400000/'
+    checkpoint_config_path   = '/home/sdasari/orca/orca_gc_res128/config.json'
+    checkpoint_metadata_path = '/home/sdasari/orca/orca_gc_res128/action_proprio_metadata_r2_d2_play_cmu_rgb.json'
+    checkpoint_example_batch = '/home/sdasari/orca/orca_gc_res128/example_batch.msgpack'
 
     policy_fn, _ = load_checkpoint(
             checkpoint_weights_path, checkpoint_config_path, checkpoint_metadata_path, checkpoint_example_batch
