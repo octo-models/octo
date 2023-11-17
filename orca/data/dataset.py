@@ -41,7 +41,7 @@ def _chunk_act_obs(traj, window_size, additional_action_window_size=0):
 
     floored_chunk_indices = tf.maximum(chunk_indices, 0)
     floored_action_chunk_indices = tf.minimum(
-        tf.maximum(action_chunk_indices, 0), traj_len - 1
+        tf.maximum(action_chunk_indices, 0), traj["tasks"]["goal_timestep"][:, None] - 1
     )
 
     traj["observation"] = tf.nest.map_structure(
@@ -53,9 +53,14 @@ def _chunk_act_obs(traj, window_size, additional_action_window_size=0):
     traj["observation"]["pad_mask"] = chunk_indices >= 0
 
     # Actions past the goal timestep are zeroed out (TODO: should they be zeroed and trained on, or ignored by padding?)
-    action_past_goal = action_chunk_indices >= traj["tasks"]["goal_timestep"][:, None]
+    action_past_goal = action_chunk_indices > traj["tasks"]["goal_timestep"][:, None] - 1
+
+    zero_actions = tf.concat([
+        tf.zeros_like(traj["action"][:, :, :6]),
+        traj["action"][:, :, 6:]
+    ], axis=2)
     traj["action"] = tf.where(
-        action_past_goal[..., None], tf.zeros_like(traj["action"]), traj["action"]
+        action_past_goal[..., None], zero_actions, traj["action"]
     )
     return traj
 
