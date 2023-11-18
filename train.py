@@ -318,18 +318,10 @@ def main(_):
     else:
         start_step = FLAGS.config.start_step or 0
 
-    horizon = (
-        FLAGS.config.dataset_kwargs.transform_kwargs.window_size
-        - FLAGS.config.model.heads["action"]["kwargs"]["pred_horizon"]
-        + 1
-    )  # Ensures that there is a full horizon of actions to predict for each timestep
-
     def loss_fn(params, state, batch, rng, train=True):
         def get_loss(model: OrcaModel, observations, tasks, actions, train):
             # only use first horizon timesteps as input to transformer
             # to ensure that there is a full horizon of actions to predict for each timestep
-            observations = jax.tree_map(lambda x: x[:, :horizon], observations)
-
             transformer_embeddings = model.orca_transformer(
                 observations, tasks, observations["pad_mask"], train=train
             )
@@ -421,9 +413,6 @@ def main(_):
         static_argnames=("policy_mode",),
     )
     def _get_policy_sampled_actions(state, observations, tasks, policy_mode=None):
-        # only use first horizon timesteps as input to predict_action
-        observations = jax.tree_map(lambda x: x[:, -horizon:], observations)
-
         if policy_mode == "text_conditioned":
             tasks = remove_images(tasks)
         elif policy_mode == "image_conditioned":
