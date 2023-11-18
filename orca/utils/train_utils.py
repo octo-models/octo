@@ -5,6 +5,7 @@ import time
 import flax
 from flax.training import train_state
 import jax
+from jax.experimental import multihost_utils
 import jax.numpy as jnp
 import numpy as np
 import optax
@@ -131,6 +132,13 @@ def batched_apply(fn, batch_size):
 
     def wrapped_fn(*args, **kwargs):
         input_batch_size = get_batch_size((args, kwargs))
+        multihost_utils.assert_equal(
+            input_batch_size // batch_size,
+            "batched_apply has been called with arguments that would lead to"
+            " a different number of iterations on different hosts."
+            f" got batch_size={batch_size}, input_batch_size={input_batch_size}"
+            f" on host {jax.process_index()}.",
+        )
         outputs = []
         for i in range(0, input_batch_size, batch_size):
             step_batch_size = min(batch_size, input_batch_size - i)
