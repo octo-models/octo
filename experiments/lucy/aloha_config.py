@@ -41,6 +41,7 @@ def get_config(
 
     base_data_config = dict(
         window_size=1,
+        additional_action_window_size=49,
         image_augment_kwargs=dict(
             random_resized_crop=dict(scale=[0.8, 1.0], ratio=[0.9, 1.1]),
             random_brightness=[0.2],
@@ -106,14 +107,14 @@ def get_config(
 
     base_model_config = dict(
         token_embedding_size=TOKEN_DIMS[transformer_size],
-        max_horizon=10,
+        max_horizon=50,
         readouts=dict(action=7),
         transformer_kwargs=TRANSFORMER_SIZES[transformer_size],
         heads=dict(
             action=dict(
                 cls_name="mse_action_head",
                 kwargs=dict(
-                    pred_horizon=1,
+                    pred_horizon=50,
                     action_dim=14,
                     vocab_size=256,
                     normalization_type=normalization_type,
