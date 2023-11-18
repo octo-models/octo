@@ -147,13 +147,8 @@ class BlockTransformer(nn.Module):
             prefix_groups, timestep_groups, timestep_pad_mask
         )
 
-        # Storing attention mask in `intermediates` to make it accessible for debugging
-        # See https://flax.readthedocs.io/en/latest/guides/extracting_intermediates.html
-        self.sow("intermediates", "attention_mask", attention_mask)
-
         # Assemble input tokens (batch, total_tokens, token_embedding_size)
         input_tokens = self.assemble_input_tokens(prefix_groups, timestep_groups)
-        self.sow("intermediates", "input_tokens", input_tokens)
 
         # Run transformer
         transformer = Transformer(
