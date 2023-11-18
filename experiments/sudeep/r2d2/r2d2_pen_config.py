@@ -128,11 +128,11 @@ def get_config(
             pooling_method="none",
             add_spatial_coordinates=True,
             act="swish",
-            use_film=True,
+            use_film=False,
         )
     else:
         encoder = "small-stem-8-film"
-        encoder_kwargs = dict()
+        encoder_kwargs = dict(use_film=False)
 
     base_tokenizer_kwargs = dict(
         encoder=encoder,
@@ -151,7 +151,6 @@ def get_config(
                         "image_tokenizer",
                         {
                             "num_tokens": 256,
-                            "task_film_keys": ["language_instruction"],
                             **base_tokenizer_kwargs,
                         },
                     ),
@@ -166,37 +165,27 @@ def get_config(
                     num_parallel_reads=8,  # for reading from GCS
                     num_parallel_calls=16,  # for the less CPU-intensive ops in initial dataset construction
                     action_proprio_normalization_type=normalization_type,
-                    data_dir="gs://rail-orca-central1",
+                    data_dir="gs://rail-orca-central2",
                     image_obs_keys=[
-                        #"exterior_image_1_left",
-                        #"exterior_image_2_left",
+                        # "exterior_image_1_left",
+                        # "exterior_image_2_left",
                         "wrist_image_left",
                     ],
                     state_obs_keys=["joint_position"],
                 ),
                 "data_kwargs_list": [
-                    #{"name": "r2_d2"},
+                    {"name": "r2_d2"},
                     {"name": "r2_d2_pen_cmu_rgb"},
-                    #{"name": "r2_d2_play_cmu_rgb"},
+                    # {"name": "r2_d2_play_cmu_rgb"},
                 ],
-                #"sample_weights": [0.8, 0.1, 0.1],
+                "sample_weights": [0.5, 0.5],
                 "transform_kwargs": update_config(
                     base_data_config,
                     resize_size=(128, 128),
                     num_parallel_calls=16,  # for the most CPU-intensive ops (decoding, resizing, augmenting)
-                    task_augmentation_strategy="delete_task_conditioning",
-                    task_augmentation_kwargs=dict(
-                        delete_key_groups_probs=[
-                            (["image_*"], 0.5),
-                            (["language_instruction"], 0.5),
-                        ],
-                    ),
                 ),
             },
             balance_weights=False,
-            **update_config(
-                base_config,
-                text_processor="muse_embedding",
-            ),
+            **base_config,
         )
     )
