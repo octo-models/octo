@@ -12,7 +12,6 @@ import matplotlib.gridspec as gridspec
 import matplotlib.pyplot as plt
 import numpy as np
 import plotly.graph_objects as go
-import tensorflow_datasets as tfds
 import tqdm
 import wandb
 
@@ -386,7 +385,6 @@ class WandBFigure:
         self.canvas = FigureCanvas(self.fig)
 
     def __enter__(self):
-        print(self.fig)
         return plt.figure(self.fig.number)
 
     def __exit__(self, exc_type, exc_value, traceback):
