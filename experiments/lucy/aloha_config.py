@@ -8,17 +8,17 @@ from ml_collections.config_dict import placeholder
 def get_config(
     transformer_size,
 ):
-    assert transformer_size in ["vanilla", "vit_s", "vit_b", "vit_l"]
+    assert transformer_size in ["vanilla", "vit_ti", "vit_s", "vit_b", "vit_l"]
 
     base_wandb_config = dict(
         project="orca", group=placeholder(str), entity=placeholder(str)
     )
 
     base_config = dict(
-        batch_size=256,
+        batch_size=128,
         eval_batch_size=128,
         shuffle_buffer_size=10000,
-        val_shuffle_buffer_size=100,
+        val_shuffle_buffer_size=1000,
         num_val_batches=16,
         num_steps=int(2e6),
         start_step=placeholder(int),
@@ -78,6 +78,13 @@ def get_config(
             num_attention_heads=8,
             dropout_rate=0.1,
         ),
+        "vit_ti": dict(
+            num_layers=12,
+            mlp_dim=768,
+            num_attention_heads=3,
+            dropout_rate=0.0,
+            attention_dropout_rate=0.0,
+        ),
         "vit_s": dict(
             num_layers=12,
             mlp_dim=1536,
@@ -100,6 +107,7 @@ def get_config(
 
     TOKEN_DIMS = {
         "vanilla": 256,
+        "vit_ti": 192,
         "vit_s": 384,
         "vit_b": 768,
         "vit_l": 1024,
@@ -118,13 +126,13 @@ def get_config(
                     action_dim=14,
                     vocab_size=256,
                     normalization_type=normalization_type,
-                    readout_key="obs_0",
+                    readout_key="action",
                 ),
             )
         ),
     )
     if transformer_size == "vanilla":
-        encoder = "resnetv1-50-bridge-film"
+        encoder = "resnetv1-18-bridge-film"
         encoder_kwargs = dict(
             pooling_method="none",
             add_spatial_coordinates=True,
@@ -139,7 +147,7 @@ def get_config(
         encoder=encoder,
         encoder_kwargs=encoder_kwargs,
         task_stack_keys=[
-            "image_.*"
+            #"image_.*"
         ],  # by default, early fuse goal images into visual encoder
     )
 
@@ -152,7 +160,7 @@ def get_config(
                         "image_tokenizer",
                         {
                             "num_tokens": 64,
-                            "task_film_keys": ["language_instruction"],
+                            "task_film_keys": ["proprio"],
                             **base_tokenizer_kwargs,
                         },
                     ),
@@ -183,13 +191,13 @@ def get_config(
                     base_data_config,
                     resize_size=(256, 256),
                     num_parallel_calls=16,  # for the most CPU-intensive ops (decoding, resizing, augmenting)
-                    task_augmentation_strategy="delete_task_conditioning",
-                    task_augmentation_kwargs=dict(
-                        delete_key_groups_probs=[
-                            (["image_*"], 0.5),
-                            (["language_instruction"], 0.5),
-                        ],
-                    ),
+                    #task_augmentation_strategy="delete_task_conditioning",
+                    #task_augmentation_kwargs=dict(
+                    #    delete_key_groups_probs=[
+                    #        (["image_*"], 0.5),
+                    #        (["language_instruction"], 0.5),
+                    #    ],
+                    #),
                 ),
             },
             **update_config(
