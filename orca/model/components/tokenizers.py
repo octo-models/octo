@@ -98,8 +98,8 @@ class ImageTokenizer(nn.Module):
         # extract non-spatial FiLM inputs
         encoder_input_kwargs = {}
         if self.task_film_keys:
-            film_inputs = extract_inputs(self.task_film_keys, tasks)
-            film_inputs = film_inputs[:, None].repeat(t, axis=1)
+            film_inputs = extract_inputs(self.task_film_keys, observations) #tasks)
+            #film_inputs = film_inputs[:, None].repeat(t, axis=1)
             encoder_input_kwargs.update(
                 {"cond_var": jnp.reshape(film_inputs, (b * t, -1))}
             )
