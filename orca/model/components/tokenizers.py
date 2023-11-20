@@ -219,7 +219,7 @@ class LowdimObsTokenizer(BinTokenizer):
 
     obs_keys: Sequence[str] = tuple()
 
-    def __call__(self, observations, **unused_kwargs):
+    def __call__(self, observations, *unused_args, **unused_kwargs):
         assert self.obs_keys, "Need to specify observation keys to tokenize."
         tokenizer_inputs = []
         for o_key in self.obs_keys:
@@ -229,7 +229,8 @@ class LowdimObsTokenizer(BinTokenizer):
                 ), f"Only supports non-spatial inputs but {key} has shape {observations[key].shape}."
                 tokenizer_inputs.append(observations[key])
         tokenizer_inputs = jnp.concatenate(tokenizer_inputs, axis=-1)
-        return super().__call__(tokenizer_inputs)
+        tokenized_inputs = super().__call__(tokenizer_inputs)
+        return jax.nn.one_hot(tokenized_inputs, self.n_bins)
 
 
 TOKENIZERS = {

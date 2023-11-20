@@ -20,11 +20,11 @@ def get_config(
         shuffle_buffer_size=10000,
         val_shuffle_buffer_size=1000,
         num_val_batches=16,
-        num_steps=int(2e6),
+        num_steps=20000, #int(2e6),
         start_step=placeholder(int),
         log_interval=100,
-        eval_interval=5000,
-        save_interval=5000,
+        eval_interval=500, #5000,
+        save_interval=500, #5000,
         save_dir=placeholder(str),
         resume_path=placeholder(str),
         seed=42,
@@ -132,15 +132,14 @@ def get_config(
         ),
     )
     if transformer_size == "vanilla":
-        encoder = "resnetv1-18-bridge-film"
+        encoder = "resnetv1-18-bridge"
         encoder_kwargs = dict(
             pooling_method="none",
             add_spatial_coordinates=True,
             act="swish",
-            use_film=True,
         )
     else:
-        encoder = "small-stem-16-film"
+        encoder = "small-stem-16"
         encoder_kwargs = dict()
 
     base_tokenizer_kwargs = dict(
