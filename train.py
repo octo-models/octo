@@ -423,21 +423,10 @@ def main(_):
             for k, tasks in all_tasks.items()
         }
 
-<<<<<<< HEAD
     @partial(jax.jit, static_argnames="policy_mode")
     def get_policy_sampled_actions(state, observations, tasks, policy_mode=None):
         # only use first horizon timesteps as input to predict_action
-        observations = jax.tree_map(lambda x: x[:, -horizon:], observations)
 
-=======
-    @partial(
-        jax.jit,
-        in_shardings=(replicated_sharding, dp_sharding, dp_sharding),
-        out_shardings=dp_sharding,
-        static_argnames=("policy_mode",),
-    )
-    def _get_policy_sampled_actions(state, observations, tasks, policy_mode=None):
->>>>>>> Adding chuhnking
         if policy_mode == "text_conditioned":
             tasks = remove_images(tasks)
         elif policy_mode == "image_conditioned":
