@@ -3,7 +3,7 @@ import io
 import logging
 import os
 import pickle
-from typing import Any, Callable, Sequence, Union
+from typing import Any, Callable, Optional, Sequence, Union
 
 import jax
 from jax._src import xla_bridge as xb
@@ -43,9 +43,30 @@ def shard_along_axis(x: Any, devices: Sequence[jax.Device], axis: int = 0) -> ja
     )
 
 
-def replicate(x: Any, devices: Sequence[jax.Device]) -> jax.Array:
+def merge_along_axis(x: Any, axis: int = 0) -> jax.Array:
+    """Convert a PyTree of host-local arrays to a global array, concatenating and sharding along
+    `axis`."""
+    return multihost_utils.host_local_array_to_global_array(
+        x,
+        jax.sharding.Mesh(jax.devices(), "x"),
+        jax.sharding.PartitionSpec(*([None] * axis + ["x"])),
+    )
+
+
+def split_along_axis(x: Any, axis: int = 0) -> jax.Array:
+    """Convert a PyTree of global arrays to a host-local array, splitting along `axis`."""
+    return multihost_utils.global_array_to_host_local_array(
+        x,
+        jax.sharding.Mesh(jax.devices(), "x"),
+        jax.sharding.PartitionSpec(*([None] * axis + ["x"])),
+    )
+
+
+def replicate(x: Any, devices: Optional[Sequence[jax.Device]] = None) -> jax.Array:
     """Replicate a PyTree of arrays across devices. Works in multi-host setting
     as long as PyTrees are equal on all hosts."""
+    if devices is None:
+        devices = jax.devices()
     sharding = jax.sharding.PositionalSharding(devices).replicate()
     x = jax.tree_map(jnp.array, x)
     return jax.tree_map(

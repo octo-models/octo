@@ -117,7 +117,6 @@ class SmallStem(nn.Module):
         if self.use_film:
             assert cond_var is not None, "Cond var is None, nothing to condition on"
             x = FilmConditioning()(x, cond_var)
-        print(x.shape)
         return x
 
 
