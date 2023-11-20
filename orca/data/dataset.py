@@ -11,10 +11,13 @@ import tensorflow_datasets as tfds
 from orca.data.dataset_transforms import RLDS_TRAJECTORY_MAP_TRANSFORMS
 from orca.data.utils import bc_goal_relabeling, task_augmentation
 from orca.data.utils.data_utils import (
+    action_encoding_length,
     ActionEncoding,
     get_dataset_statistics,
+    make_zero_actions,
     normalize_action_and_proprio,
     pprint_data_mixture,
+    state_encoding_length,
     StateEncoding,
     tree_map,
 )
@@ -49,7 +52,7 @@ def _chunk_act_obs(traj, window_size, additional_action_window_size=0):
     )
     traj["action"] = tf.gather(traj["action"], floored_action_chunk_indices)
 
-    # indicates whether or not an entire observation is padding
+    # indicates whether an entire observation is padding
     traj["observation"]["pad_mask"] = chunk_indices >= 0
 
     # Actions past the goal timestep are zeroed out (TODO: should they be zeroed and trained on, or ignored by padding?)
@@ -57,8 +60,8 @@ def _chunk_act_obs(traj, window_size, additional_action_window_size=0):
         action_chunk_indices > traj["tasks"]["goal_timestep"][:, None] - 1
     )
 
-    zero_actions = tf.concat(
-        [tf.zeros_like(traj["action"][:, :, :6]), traj["action"][:, :, 6:]], axis=2
+    zero_actions = make_zero_actions(
+        traj["action"], traj["observation"]["action_encoding"][0]
     )
     traj["action"] = tf.where(action_past_goal[..., None], zero_actions, traj["action"])
     return traj
@@ -358,22 +361,30 @@ def make_dataset_from_rlds(
                     proprio.append(tf.zeros((traj_len, 1), dtype=tf.float32))
                 else:
                     proprio.append(tf.cast(orig_obs[key], tf.float32))
-            # pre-pend info which state encoding is used
-            proprio = [
-                tf.ones_like(proprio[0][:, :1]) * float(state_encoding)
-            ] + proprio
             traj["observation"]["proprio"] = tf.concat(proprio, axis=-1)
+            # make sure state encoding has correct length
+            assert traj["observation"]["proprio"].shape[-1] == state_encoding_length(
+                state_encoding
+            ), (
+                f"State encoding {state_encoding} expects {state_encoding_length(state_encoding)}-dim proprio"
+                f" but got {traj['observation']['proprio'].shape[-1]}."
+            )
 
-        # TODO: support other action encodings as well
-        assert (
-            action_encoding == ActionEncoding.EEF_POS
-        ), "Only support EEF pose delta actions for now."
+        # make sure action encoding has correct length
+        assert traj["action"].shape[-1] == action_encoding_length(action_encoding), (
+            f"Action encoding {action_encoding} expects {action_encoding_length(action_encoding)}-dim actions"
+            f" but got {traj['action'].shape[-1]}."
+        )
         traj["action"] = tf.cast(traj["action"], tf.float32)
 
         # check that all other keys are present
         for key in ["action", "language_instruction", "is_last", "is_terminal"]:
             if key not in traj:
                 raise ValueError(f"Key {key} is missing from trajectory: {traj}")
+
+        # add state and action encoding info
+        traj["observation"]["state_encoding"] = tf.repeat(state_encoding, traj_len)
+        traj["observation"]["action_encoding"] = tf.repeat(action_encoding, traj_len)
 
         # add timestep info
         traj["observation"]["timestep"] = tf.range(traj_len) + 1
@@ -469,6 +480,7 @@ def make_interleaved_dataset(
     assert len(sample_weights) == len(dataset_kwargs_list)
 
     datasets = []
+    action_encodings = []
     dataset_sizes = []
     avg_traj_lens = []
     for dataset_kwargs in dataset_kwargs_list:
@@ -476,12 +488,20 @@ def make_interleaved_dataset(
         dataset, dataset_statistics = make_dataset_from_rlds(
             **dataset_kwargs, train=train
         )
+        action_encodings.append(
+            dataset_kwargs.get("action_encoding", ActionEncoding.EEF_POS)
+        )
         dataset_sizes.append(dataset_statistics["num_transitions"])
         avg_traj_lens.append(
             dataset_statistics["num_transitions"]
             / dataset_statistics["num_trajectories"]
         )
         datasets.append(dataset.repeat())
+
+    # TODO: support interleaving datasets with different action encodings
+    assert (
+        len(set(action_encodings)) == 1
+    ), f"Need action encodings of all datasets to be identical, currently used encodings: {action_encodings}."
 
     if balance_weights:
         sample_weights = np.array(sample_weights) * np.array(dataset_sizes)

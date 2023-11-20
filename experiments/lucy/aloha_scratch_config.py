@@ -4,6 +4,8 @@ from config import update_config
 from ml_collections import ConfigDict
 from ml_collections.config_dict import placeholder
 
+from orca.data.utils.data_utils import StateEncoding, ActionEncoding
+
 
 def get_config(
     transformer_size,
@@ -190,6 +192,8 @@ def get_config(
                         "cam_right_wrist",
                     ],
                     state_obs_keys=["state"],
+                    state_encoding=StateEncoding.JOINT_BIMANUAL,
+                    action_encoding=ActionEncoding.JOINT_POS_BIMANUAL,
                 ),
                 "data_kwargs_list": [
                     {"name": "aloha_screwdriver_dataset"},
