@@ -65,8 +65,18 @@ def _chunk_act_obs(traj, window_size, additional_action_window_size=0):
     # (and so should be repeated)
     action_past_goal = action_chunk_indices > goal_timestep[:, None] - 1
 
-    zero_actions = tf.concat(
-        [tf.zeros_like(traj["action"][:, :, :6]), traj["action"][:, :, 6:]], axis=2
+    if additional_action_window_size > 0:
+        assert (
+            traj["action"].shape[-1] == 7
+        ), "Additional action window size is currently hardcoded for specific action dimension -- TODO: generalize this."
+
+    # Currently hardcoded to say that the first 6 dimensions are relative control
+    # and the last (gripper dimension) is absolute control
+    is_absolute_action = tf.range(traj["action"].shape[-1]) >= 6
+    zero_actions = tf.where(
+        is_absolute_action[None, None, :],
+        traj["action"],
+        tf.zeros_like(traj["action"]),
     )
     traj["action"] = tf.where(
         action_past_goal[:, :, None], zero_actions, traj["action"]
