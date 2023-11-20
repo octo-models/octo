@@ -58,7 +58,11 @@ def _chunk_act_obs(traj, window_size, additional_action_window_size=0):
     # indicates whether or not an entire observation is padding
     traj["observation"]["pad_mask"] = chunk_indices >= 0
 
-    # Actions past the goal timestep are zeroed out (TODO: should they be zeroed and trained on, or ignored by padding?)
+    # Actions past the goal timestep become no-ops
+    # This is hard-coded right now to only work for the 7dof arm, assuming that
+    # the first 6 dimensions are relative control (and so must be zeroed out)
+    # and that the remaining dimensions are absolute control like gripper position
+    # (and so should be repeated)
     action_past_goal = action_chunk_indices > goal_timestep[:, None] - 1
 
     zero_actions = tf.concat(

@@ -40,6 +40,7 @@ def drop_keys_independent(
         drop_group = tf.random.uniform([]) < prob
         dropped_all = dropped_all and drop_group
 
+        # When no goal images are present, the goal timestep becomes the final timestep
         if all([image_key in key_group for image_key in image_keys]):
             new_tasks["goal_timestep"] = tf.where(
                 drop_group,
@@ -92,6 +93,7 @@ def delete_task_conditioning(
             if any(fnmatch(key, pattern) for pattern in delete_key_patterns)
         ]
 
+        # When no goal images are present, the goal timestep becomes the final timestep
         if all([image_key in matching_keys for image_key in image_keys]):
             new_tasks["goal_timestep"] = tf.where(
                 i == delete_group_idx,
