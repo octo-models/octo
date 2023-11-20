@@ -184,7 +184,7 @@ class Visualizer:
             info = add_unnormalized_info(info, self.action_proprio_stats)
             info = add_manipulation_metrics(info)
 
-            if int(traj["observation"]["action_encoding"][0]) == ActionEncoding.EEF_POS:
+            if int(traj["observation"]["action_encoding"][0, 0, 0]) == ActionEncoding.EEF_POS:
                 plotly_fig = plot_trajectory_actions(**info)
                 visualizations[f"traj_{n}"] = plotly_fig
 
@@ -410,7 +410,7 @@ def plot_trajectory_overview_mpl(
 ):
     n_act_dims = traj["action"].shape[-1]
     grid_size = int(np.ceil(np.sqrt(n_act_dims + 1)))
-    wandb_figure = WandBFigure(figsize=(grid_size * 2, grid_size * 2))
+    wandb_figure = WandBFigure(figsize=(grid_size * 5, grid_size * 5))
     gs = gridspec.GridSpec(grid_size, grid_size)
     with wandb_figure as fig:
         ax = fig.add_subplot(gs[0, 0])
