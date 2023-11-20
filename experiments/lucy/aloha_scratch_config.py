@@ -163,12 +163,13 @@ def get_config(
                         },
                     ),
                     (
-                        "bin_tokenizer",
+                        "lowdim_obs_tokenizer",
                         {
                             "n_bins": 256,
                             "bin_type": normalization_type,
                             "low": -2.,
                             "high": 2.,
+                            "obs_keys": ["proprio"],
                         }
                     ),
                 ],
