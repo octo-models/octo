@@ -27,6 +27,7 @@ class StateEncoding(IntEnum):
     POS_EULER = 1  # EEF XYZ + roll-pitch-yaw + 1 x pad + gripper open/close
     POS_QUAT = 2  # EEF XYZ + quaternion + gripper open/close
     JOINT = 3  # 7 x joint angles (padding added if fewer) + gripper open/close
+    JOINT_BIMANUAL = 4  # 2 x [6 x joint angles + gripper open/close]
 
 
 class ActionEncoding(IntEnum):
@@ -34,6 +35,52 @@ class ActionEncoding(IntEnum):
 
     EEF_POS = 1  # EEF delta XYZ + roll-pitch-yaw + gripper open/close
     JOINT_POS = 2  # 7 x joint delta position + gripper open/close
+    JOINT_POS_BIMANUAL = 3  # 2 x [6 x joint pos + gripper]
+
+
+def state_encoding_length(state_encoding):
+    if state_encoding == StateEncoding.NONE:
+        return 0
+    # TODO: remove hack that POS_EULER pads 0 to match length
+    elif state_encoding in [
+        StateEncoding.POS_EULER,
+        StateEncoding.POS_QUAT,
+        StateEncoding.JOINT,
+    ]:
+        return 8
+    elif state_encoding in [StateEncoding.JOINT_BIMANUAL]:
+        return 14
+    else:
+        raise ValueError(f"State encoding {state_encoding} not supported.")
+
+
+def action_encoding_length(action_encoding):
+    if action_encoding in [ActionEncoding.EEF_POS, ActionEncoding.JOINT_POS]:
+        return 8
+    elif action_encoding in [ActionEncoding.JOINT_POS_BIMANUAL]:
+        return 14
+    else:
+        raise ValueError(f"Action encoding {action_encoding} not supported.")
+
+
+def make_zero_actions(action, action_encoding):
+    """Returns neutral action for action encoding, matches shape of input action."""
+    if action_encoding == ActionEncoding.EEF_POS:
+        return tf.concat([tf.zeros_like(action[:, :, :6]), action[:, :, 6:]], axis=2)
+    elif action_encoding == ActionEncoding.JOINT_POS:
+        return tf.concat([tf.zeros_like(action[:, :, :7]), action[:, :, 7:]], axis=2)
+    elif action_encoding == ActionEncoding.JOINT_POS_BIMANUAL:
+        return tf.concat(
+            [
+                tf.zeros_like(action[:, :, :6]),
+                action[:, :, 6:7],
+                tf.zeros_like(action[:, :, 7:13]),
+                action[:, :, 13:],
+            ],
+            axis=2,
+        )
+    else:
+        raise ValueError(f"Action encoding {action_encoding} not supported.")
 
 
 def pprint_data_mixture(
