@@ -146,9 +146,7 @@ def get_config(
     base_tokenizer_kwargs = dict(
         encoder=encoder,
         encoder_kwargs=encoder_kwargs,
-        task_stack_keys=[
-            #"image_.*"
-        ],  # by default, early fuse goal images into visual encoder
+        task_stack_keys=[],
     )
 
     return ConfigDict(
@@ -160,9 +158,18 @@ def get_config(
                         "image_tokenizer",
                         {
                             "num_tokens": 64,
-                            "task_film_keys": ["proprio"],
+                            "task_film_keys": [],
                             **base_tokenizer_kwargs,
                         },
+                    ),
+                    (
+                        "bin_tokenizer",
+                        {
+                            "n_bins": 256,
+                            "bin_type": normalization_type,
+                            "low": -2.,
+                            "high": 2.,
+                        }
                     ),
                 ],
                 task_tokenizers=[],
@@ -191,13 +198,6 @@ def get_config(
                     base_data_config,
                     resize_size=(256, 256),
                     num_parallel_calls=16,  # for the most CPU-intensive ops (decoding, resizing, augmenting)
-                    #task_augmentation_strategy="delete_task_conditioning",
-                    #task_augmentation_kwargs=dict(
-                    #    delete_key_groups_probs=[
-                    #        (["image_*"], 0.5),
-                    #        (["language_instruction"], 0.5),
-                    #    ],
-                    #),
                 ),
             },
             **update_config(
