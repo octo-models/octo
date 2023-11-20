@@ -209,10 +209,35 @@ class BinTokenizer(nn.Module):
         return outputs
 
 
+class LowdimObsTokenizer(BinTokenizer):
+    """
+    Tokenizer for non-spatial observations. Discretizes into bins. See BinTokenizer.
+
+    Args:
+        obs_keys (Sequence[str]): List of non-spatial keys to concatenate & tokenize. Supports regex.
+    """
+
+    obs_keys: Sequence[str] = tuple()
+
+    def __call__(self, observations, *unused_args, **unused_kwargs):
+        assert self.obs_keys, "Need to specify observation keys to tokenize."
+        tokenizer_inputs = []
+        for o_key in self.obs_keys:
+            for key in filter(re.compile(o_key).match, sorted(observations.keys())):
+                assert (
+                    len(observations[key].shape) == 3
+                ), f"Only supports non-spatial inputs but {key} has shape {observations[key].shape}."
+                tokenizer_inputs.append(observations[key])
+        tokenizer_inputs = jnp.concatenate(tokenizer_inputs, axis=-1)
+        tokenized_inputs = super().__call__(tokenizer_inputs)
+        return jax.nn.one_hot(tokenized_inputs, self.n_bins)
+
+
 TOKENIZERS = {
     "image_tokenizer": ImageTokenizer,
     "language_tokenizer": LanguageTokenizer,
     "bin_tokenizer": BinTokenizer,
+    "lowdim_obs_tokenizer": LowdimObsTokenizer,
 }
 
 
