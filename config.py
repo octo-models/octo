@@ -42,6 +42,7 @@ def get_config(config_string):
 
     base_data_config = dict(
         window_size=4,
+        additional_action_window_size=0,
         image_augment_kwargs=dict(
             random_resized_crop=dict(scale=[0.8, 1.0], ratio=[0.9, 1.1]),
             random_brightness=[0.2],

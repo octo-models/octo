@@ -83,11 +83,13 @@ def run_policy_on_trajectory(policy_fn, traj, *, text_processor=None):
         )
 
     actions = policy_fn(traj["observation"], tasks)
+
+    horizon = jax.tree_util.tree_leaves(traj["observation"])[0].shape[1]
     return {
         "n": np.array(len_traj),
         "pred_actions": actions,
-        "actions": traj["action"][:, -1, :],
-        "proprio": traj["observation"]["proprio"][:, -1],
+        "actions": traj["action"][:, horizon - 1, :],
+        "proprio": traj["observation"]["proprio"][:, horizon - 1],
     }
 
 
