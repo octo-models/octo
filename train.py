@@ -127,6 +127,7 @@ def main(_):
         wandb.init(
             project=wandb_run.project,
             id=wandb_run.id,
+            entity=wandb_run.entity,
             resume="must",
         )
         save_dir = wandb_run.config["save_dir"]
