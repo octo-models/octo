@@ -23,7 +23,12 @@ from orca.data.utils.data_utils import (
 )
 
 
-def _chunk_act_obs(traj, window_size, additional_action_window_size=0, action_encoding: ActionEncoding = ActionEncoding.EEF_POS):
+def _chunk_act_obs(
+    traj,
+    window_size,
+    additional_action_window_size=0,
+    action_encoding: ActionEncoding = ActionEncoding.EEF_POS,
+):
     """
     Chunks actions and observations into the given window_size.
 
@@ -43,8 +48,14 @@ def _chunk_act_obs(traj, window_size, additional_action_window_size=0, action_en
     )
 
     floored_chunk_indices = tf.maximum(chunk_indices, 0)
+
+    if "tasks" in traj:
+        goal_timestep = traj["tasks"]["goal_timestep"]
+    else:
+        goal_timestep = tf.fill([traj_len], traj_len, dtype=tf.int32)
+
     floored_action_chunk_indices = tf.minimum(
-        tf.maximum(action_chunk_indices, 0), traj["tasks"]["goal_timestep"][:, None] - 1
+        tf.maximum(action_chunk_indices, 0), goal_timestep[:, None] - 1
     )
 
     traj["observation"] = tf.nest.map_structure(
@@ -55,13 +66,12 @@ def _chunk_act_obs(traj, window_size, additional_action_window_size=0, action_en
     # indicates whether an entire observation is padding
     traj["observation"]["pad_mask"] = chunk_indices >= 0
 
-    # Actions past the goal timestep are zeroed out (TODO: should they be zeroed and trained on, or ignored by padding?)
-    action_past_goal = (
-        action_chunk_indices > traj["tasks"]["goal_timestep"][:, None] - 1
-    )
-
+    # Actions past the goal timestep become no-ops
+    action_past_goal = action_chunk_indices > goal_timestep[:, None] - 1
     zero_actions = make_zero_actions(traj["action"], action_encoding)
-    traj["action"] = tf.where(action_past_goal[..., None], zero_actions, traj["action"])
+    traj["action"] = tf.where(
+        action_past_goal[:, :, None], zero_actions, traj["action"]
+    )
     return traj
 
 
@@ -384,8 +394,12 @@ def make_dataset_from_rlds(
                 raise ValueError(f"Key {key} is missing from trajectory: {traj}")
 
         # add state and action encoding info
-        traj["observation"]["state_encoding"] = tf.repeat(state_encoding, traj_len)[..., None]
-        traj["observation"]["action_encoding"] = tf.repeat(action_encoding, traj_len)[..., None]
+        traj["observation"]["state_encoding"] = tf.repeat(state_encoding, traj_len)[
+            ..., None
+        ]
+        traj["observation"]["action_encoding"] = tf.repeat(action_encoding, traj_len)[
+            ..., None
+        ]
 
         # add timestep info
         traj["observation"]["timestep"] = tf.range(traj_len) + 1

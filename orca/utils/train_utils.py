@@ -5,11 +5,12 @@ import time
 import flax
 from flax.training import train_state
 import jax
+from jax.experimental import multihost_utils
 import jax.numpy as jnp
 import numpy as np
 import optax
 
-from orca.utils.jax_utils import shard_along_axis
+from orca.utils import jax_utils
 from orca.utils.typing import PRNGKey
 
 
@@ -118,12 +119,9 @@ class Timer:
         return ret
 
 
-def batched_apply(fn, batch_size, devices=None):
+def batched_apply(fn, batch_size):
     """Turns a function that applies to a fixed batch size into one that applies to a variable batch size.
     Useful for passing variable batch sizes to jit-compiled functions.
-
-    Currently assumes that the first axis is the batch axis **for both inputs and outputs**.
-    Pass `devices` to optionally shard the batch across devices.
     """
 
     def pad_to_size(arr, size):
@@ -134,6 +132,13 @@ def batched_apply(fn, batch_size, devices=None):
 
     def wrapped_fn(*args, **kwargs):
         input_batch_size = get_batch_size((args, kwargs))
+        multihost_utils.assert_equal(
+            input_batch_size // batch_size,
+            "batched_apply has been called with arguments that would lead to"
+            " a different number of iterations on different hosts."
+            f" got batch_size={batch_size}, input_batch_size={input_batch_size}"
+            f" on host {jax.process_index()}.",
+        )
         outputs = []
         for i in range(0, input_batch_size, batch_size):
             step_batch_size = min(batch_size, input_batch_size - i)
@@ -141,11 +146,11 @@ def batched_apply(fn, batch_size, devices=None):
                 lambda arr: pad_to_size(arr[i : i + batch_size], batch_size),
                 (args, kwargs),
             )
-            if devices is not None:
-                step_args, step_kwargs = shard_along_axis(
-                    (step_args, step_kwargs), devices
-                )
+            step_args, step_kwargs = jax_utils.merge_along_axis(
+                (step_args, step_kwargs)
+            )
             step_output = fn(*step_args, **step_kwargs)
+            step_output = jax.device_get(jax_utils.split_along_axis(step_output))
             outputs.append(
                 jax.tree_map(
                     lambda arr: arr[:step_batch_size],
