@@ -66,20 +66,37 @@ def action_encoding_length(action_encoding):
 
 
 def make_zero_actions(action, action_encoding):
-    """Returns neutral action for action encoding, matches shape of input action."""
+    """
+    Returns neutral action for action encoding, matches shape of input action.
+    Zero-action 0s out all relative actions and retains value of absolute actions like gripper open/close.
+    """
+    assert action.shape[-1] == action_encoding_length(action_encoding), (
+        f"For action encoding {action_encoding} expected {action_encoding_length(action_encoding)}-dim action,"
+        f" but got {action.shape[-1]}-dim action."
+    )
     if action_encoding == ActionEncoding.EEF_POS:
-        return tf.concat([tf.zeros_like(action[:, :, :6]), action[:, :, 6:]], axis=2)
+        is_absolute_action = tf.range(action.shape[-1]) >= 6
+        return tf.where(
+            is_absolute_action[None, None, :],
+            action,
+            tf.zeros_like(action),
+        )
     elif action_encoding == ActionEncoding.JOINT_POS:
-        return tf.concat([tf.zeros_like(action[:, :, :7]), action[:, :, 7:]], axis=2)
+        is_absolute_action = tf.range(action.shape[-1]) >= 7
+        return tf.where(
+            is_absolute_action[None, None, :],
+            action,
+            tf.zeros_like(action),
+        )
     elif action_encoding == ActionEncoding.JOINT_POS_BIMANUAL:
-        return tf.concat(
-            [
-                tf.zeros_like(action[:, :, :6]),
-                action[:, :, 6:7],
-                tf.zeros_like(action[:, :, 7:13]),
-                action[:, :, 13:],
-            ],
-            axis=2,
+        is_absolute_action = tf.math.logical_or(
+            tf.range(action.shape[-1]) == 6,
+            tf.range(action.shape[-1]) == 13,
+        )
+        return tf.where(
+            is_absolute_action[None, None, :],
+            action,
+            tf.zeros_like(action),
         )
     else:
         raise ValueError(f"Action encoding {action_encoding} not supported.")
