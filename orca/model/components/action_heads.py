@@ -103,6 +103,17 @@ class BasicActionHead(nn.Module):
 
         # (batch, horizon, pred_horizon, action_dim, token_embedding_size)
         action_logits = self.__call__(embeddings, train=train)
+
+        horizon = action_logits.shape[1]
+        assert (
+            actions.shape[1] >= horizon + self.pred_horizon - 1
+        ), f"""
+            To predict actions for horizon {horizon} and future prediction horizon {self.pred_horizon},
+            the ground-truth actions must have at least {horizon + self.pred_horizon - 1} timesteps, but got shape {actions.shape}.
+
+            Did you make sure to set "additional_action_window_size" correctly in the data config?
+        """
+
         # compute log probabilities for predicted actions
         action_logprob = jax.nn.log_softmax(action_logits, axis=-1)
 
@@ -291,6 +302,15 @@ class MSEActionHead(BasicActionHead):
         # (batch, horizon, pred_horizon, action_dim)
         mean = self.__call__(embeddings, train=train)
 
+        horizon = mean.shape[1]
+        assert (
+            actions.shape[1] >= horizon + self.pred_horizon - 1
+        ), f"""
+            To predict actions for horizon {horizon} and future prediction horizon {self.pred_horizon},
+            the ground-truth actions must have at least {horizon + self.pred_horizon - 1} timesteps, but got shape {actions.shape}.
+
+            Did you make sure to set "additional_action_window_size" correctly in the data config?
+        """
         # chunk the target actions to match the predicted actions
         # only use first horizon timesteps from the window
         actions = jnp.clip(actions, -self.max_action, self.max_action)

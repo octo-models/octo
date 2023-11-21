@@ -20,7 +20,7 @@ from orca.data.utils.data_utils import (
 )
 
 
-def _chunk_act_obs(traj, window_size):
+def _chunk_act_obs(traj, window_size, additional_action_window_size=0):
     """
     Chunks actions and observations into the given window_size.
 
@@ -30,14 +30,57 @@ def _chunk_act_obs(traj, window_size):
     chunk_indices = tf.broadcast_to(
         tf.range(-window_size + 1, 1), [traj_len, window_size]
     ) + tf.broadcast_to(tf.range(traj_len)[:, None], [traj_len, window_size])
+
+    action_chunk_indices = tf.broadcast_to(
+        tf.range(-window_size + 1, 1 + additional_action_window_size),
+        [traj_len, window_size + additional_action_window_size],
+    ) + tf.broadcast_to(
+        tf.range(traj_len)[:, None],
+        [traj_len, window_size + additional_action_window_size],
+    )
+
     floored_chunk_indices = tf.maximum(chunk_indices, 0)
-    for key in ["observation", "action"]:
-        traj[key] = tf.nest.map_structure(
-            lambda x: tf.gather(x, floored_chunk_indices), traj[key]
-        )
+
+    if "tasks" in traj:
+        goal_timestep = traj["tasks"]["goal_timestep"]
+    else:
+        goal_timestep = tf.fill([traj_len], traj_len, dtype=tf.int32)
+
+    floored_action_chunk_indices = tf.minimum(
+        tf.maximum(action_chunk_indices, 0), goal_timestep[:, None] - 1
+    )
+
+    traj["observation"] = tf.nest.map_structure(
+        lambda x: tf.gather(x, floored_chunk_indices), traj["observation"]
+    )
+    traj["action"] = tf.gather(traj["action"], floored_action_chunk_indices)
+
     # indicates whether or not an entire observation is padding
     traj["observation"]["pad_mask"] = chunk_indices >= 0
 
+    # Actions past the goal timestep become no-ops
+    # This is hard-coded right now to only work for the 7dof arm, assuming that
+    # the first 6 dimensions are relative control (and so must be zeroed out)
+    # and that the remaining dimensions are absolute control like gripper position
+    # (and so should be repeated)
+    action_past_goal = action_chunk_indices > goal_timestep[:, None] - 1
+
+    if additional_action_window_size > 0:
+        assert (
+            traj["action"].shape[-1] == 7
+        ), "Additional action window size is currently hardcoded for specific action dimension -- TODO: generalize this."
+
+    # Currently hardcoded to say that the first 6 dimensions are relative control
+    # and the last (gripper dimension) is absolute control
+    is_absolute_action = tf.range(traj["action"].shape[-1]) >= 6
+    zero_actions = tf.where(
+        is_absolute_action[None, None, :],
+        traj["action"],
+        tf.zeros_like(traj["action"]),
+    )
+    traj["action"] = tf.where(
+        action_past_goal[:, :, None], zero_actions, traj["action"]
+    )
     return traj
 
 
@@ -111,6 +154,7 @@ def apply_common_transforms(
     task_augmentation_strategy: Optional[str] = None,
     task_augmentation_kwargs: dict = {},
     window_size: int = 1,
+    additional_action_window_size: int = 0,
     resize_size: Optional[Tuple[int, int]] = None,
     skip_unlabeled: bool = False,
     max_action: Optional[float] = None,
@@ -133,6 +177,7 @@ def apply_common_transforms(
         task_augmentation_kwargs (dict, optional): Additional keyword arguments to pass to the task augmentation
         resize_size (tuple, optional): target (height, width) for all RGB and depth images, default to no resize.
         window_size (int, optional): The length of the snippets that trajectories are chunked into.
+        additional_action_window_size (int, optional): The number of additional actions to include in the chunked actions.
         skip_unlabeled (bool, optional): Whether to skip trajectories with no language labels.
         max_action: (float, optional): If provided, trajectories in which *any* action dimension
             of *any* transition has an absolute value larger than this will be skipped.
@@ -202,7 +247,12 @@ def apply_common_transforms(
 
     # chunks actions and observations
     dataset = dataset.map(
-        partial(_chunk_act_obs, window_size=window_size), num_parallel_calls
+        partial(
+            _chunk_act_obs,
+            window_size=window_size,
+            additional_action_window_size=additional_action_window_size,
+        ),
+        num_parallel_calls,
     )
 
     return dataset

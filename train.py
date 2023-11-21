@@ -127,6 +127,7 @@ def main(_):
         wandb.init(
             project=wandb_run.project,
             id=wandb_run.id,
+            entity=wandb_run.entity,
             resume="must",
         )
         save_dir = wandb_run.config["save_dir"]
@@ -337,18 +338,8 @@ def main(_):
     # replicate train state across devices
     train_state = jax_utils.replicate(train_state)
 
-    horizon = (
-        FLAGS.config.dataset_kwargs.transform_kwargs.window_size
-        - FLAGS.config.model.heads["action"]["kwargs"]["pred_horizon"]
-        + 1
-    )  # Ensures that there is a full horizon of actions to predict for each timestep
-
     def loss_fn(params, state, batch, rng, train=True):
         def get_loss(model: OrcaModel, observations, tasks, actions, train):
-            # only use first horizon timesteps as input to transformer
-            # to ensure that there is a full horizon of actions to predict for each timestep
-            observations = jax.tree_map(lambda x: x[:, :horizon], observations)
-
             transformer_embeddings = model.orca_transformer(
                 observations, tasks, observations["pad_mask"], train=train
             )
@@ -436,7 +427,6 @@ def main(_):
     @partial(jax.jit, static_argnames="policy_mode")
     def get_policy_sampled_actions(state, observations, tasks, policy_mode=None):
         # only use first horizon timesteps as input to predict_action
-        observations = jax.tree_map(lambda x: x[:, -horizon:], observations)
 
         if policy_mode == "text_conditioned":
             tasks = remove_images(tasks)
