@@ -55,7 +55,9 @@ def state_encoding_length(state_encoding):
 
 
 def action_encoding_length(action_encoding):
-    if action_encoding in [ActionEncoding.EEF_POS, ActionEncoding.JOINT_POS]:
+    if action_encoding in [ActionEncoding.EEF_POS]:
+        return 7
+    elif action_encoding in [ActionEncoding.JOINT_POS]:
         return 8
     elif action_encoding in [ActionEncoding.JOINT_POS_BIMANUAL]:
         return 14
@@ -225,7 +227,7 @@ def normalize_action_and_proprio(traj, metadata, normalization_type):
         for key, traj_key in keys_to_normalize.items():
             traj = dl.transforms.selective_tree_map(
                 traj,
-                match=traj_key,
+                match=lambda k, _: k == traj_key,
                 map_fn=lambda x: (x - metadata[key]["mean"])
                 / (metadata[key]["std"] + 1e-8),
             )
@@ -236,7 +238,7 @@ def normalize_action_and_proprio(traj, metadata, normalization_type):
         for key, traj_key in keys_to_normalize.items():
             traj = dl.transforms.selective_tree_map(
                 traj,
-                match=traj_key,
+                match=lambda k, _: k == traj_key,
                 map_fn=lambda x: tf.clip_by_value(
                     2
                     * (x - metadata[key]["min"])
