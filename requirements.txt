@@ -21,6 +21,6 @@ tensorflow_text >= 2.13.0
 tensorflow_probability == 0.21.0
 tensorflow_datasets >= 4.9.2
 tensorflow_graphics == 2021.12.3
-dlimp @ git+https://github.com/kvablack/dlimp@db40c4195ef149cde52e9a33c366c5827f1ae405
+dlimp @ git+https://github.com/kvablack/dlimp@6e1eab9f74ec1498e50a3a5571ae011f472a6feb
 plotly >= 5.16.1
 matplotlib
