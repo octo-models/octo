@@ -374,16 +374,17 @@ def make_dataset_from_rlds(
                     proprio.append(tf.cast(orig_obs[key], tf.float32))
             traj["observation"]["proprio"] = tf.concat(proprio, axis=-1)
             # make sure state encoding has correct length
-            assert traj["observation"]["proprio"].shape[-1] == state_encoding_length(
-                state_encoding
-            ), (
-                f"State encoding {state_encoding} expects {state_encoding_length(state_encoding)}-dim proprio"
-                f" but got {traj['observation']['proprio'].shape[-1]}."
-            )
+            if state_encoding != StateEncoding.NONE:
+                assert traj["observation"]["proprio"].shape[-1] == state_encoding_length(
+                    state_encoding
+                ), (
+                    f"State encoding {state_encoding} for dataset {name} expects {state_encoding_length(state_encoding)}-dim proprio"
+                    f" but got {traj['observation']['proprio'].shape[-1]}."
+                )
 
         # make sure action encoding has correct length
         assert traj["action"].shape[-1] == action_encoding_length(action_encoding), (
-            f"Action encoding {action_encoding} expects {action_encoding_length(action_encoding)}-dim actions"
+            f"Action encoding {action_encoding} for dataset {name} expects {action_encoding_length(action_encoding)}-dim actions"
             f" but got {traj['action'].shape[-1]}."
         )
         traj["action"] = tf.cast(traj["action"], tf.float32)
