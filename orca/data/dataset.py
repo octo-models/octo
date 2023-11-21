@@ -375,9 +375,9 @@ def make_dataset_from_rlds(
             traj["observation"]["proprio"] = tf.concat(proprio, axis=-1)
             # make sure state encoding has correct length
             if state_encoding != StateEncoding.NONE:
-                assert traj["observation"]["proprio"].shape[-1] == state_encoding_length(
-                    state_encoding
-                ), (
+                assert traj["observation"]["proprio"].shape[
+                    -1
+                ] == state_encoding_length(state_encoding), (
                     f"State encoding {state_encoding} for dataset {name} expects {state_encoding_length(state_encoding)}-dim proprio"
                     f" but got {traj['observation']['proprio'].shape[-1]}."
                 )
