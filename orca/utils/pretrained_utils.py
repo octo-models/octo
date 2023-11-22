@@ -141,6 +141,8 @@ class PretrainedModel:
         checkpoint_path: str,
         config_path: Optional[str] = None,
         example_batch_path: Optional[str] = None,
+        overwrite_model_config: Optional[Dict[str, Any]] = None,
+        overwrite_example_batch: Optional[Dict[str, Any]] = None,
         step: Optional[int] = None,
     ):
         """Loads a pretrained model from a checkpoint. Important: this method expects the
@@ -174,9 +176,10 @@ class PretrainedModel:
             )
 
         # compute params shape without using any FLOPs
+        rng = jax.random.PRNGKey(0)
         params_shape = jax.eval_shape(
             partial(model_def.init, train=False),
-            jax.random.PRNGKey(0),
+            rng,
             example_batch["observation"],
             example_batch["tasks"],
             example_batch["observation"]["pad_mask"],
@@ -198,6 +201,28 @@ class PretrainedModel:
             tf.io.gfile.join(checkpoint_path, "default"), params_shape
         )
 
+        if overwrite_model_config:
+            # initialize new model, copy over all pre-trained params with fitting shape
+            config["model"].update(overwrite_model_config)
+            model_def = create_model_def(
+                **config["model"].to_dict(),
+            )
+            if overwrite_example_batch:
+                example_batch = overwrite_example_batch
+
+            # Initializing the model in a jit avoids running the model on CPU
+            @jax.jit
+            def _init():
+                return model_def.init(
+                    rng,
+                    example_batch["observation"],
+                    example_batch["tasks"],
+                    example_batch["observation"]["pad_mask"],
+                    train=False,
+                )
+
+            params = cls._merge_pretrained_params(_init()["params"], params)
+
         if config["text_processor"] is None:
             text_processor = None
         else:
@@ -212,6 +237,35 @@ class PretrainedModel:
             example_batch=example_batch,
             config=flax.core.freeze(config.to_dict()),
         )
+
+    @staticmethod
+    def _merge_pretrained_params(target_params, pretrained_params):
+        """Copies pre-trained params for every param that has corresponding key + shape."""
+
+        def merge_params(target, pretrained, path=""):
+            for key in target:
+                key_path = path + "." + key
+                if key in pretrained:
+                    if isinstance(target[key], flax.core.FrozenDict):
+                        merge_params(target[key], pretrained[key], key_path)
+                    else:
+                        if target[key].shape == pretrained[key].shape:
+                            print(f"Initializing {key_path} with pre-trained weights.")
+                            target[key] = pretrained[key]
+                        else:
+                            logging.warning(
+                                f"Shapes for {key_path} changed -- skipping. "
+                                f"Pre-trained: {pretrained[key].shape}, target: {target[key].shape}"
+                            )
+                else:
+                    logging.warning(
+                        f"Can't find {key_path} in pre-trained model -- skipping."
+                    )
+
+        target_params = target_params.unfreeze()
+        merge_params(target_params, pretrained_params)
+        target_params = target_params.freeze()
+        return target_params
 
 
 class HeadWrapper:
