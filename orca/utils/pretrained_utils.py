@@ -142,7 +142,7 @@ class PretrainedModel:
         config_path: Optional[str] = None,
         example_batch_path: Optional[str] = None,
         overwrite_model_config: Optional[Dict[str, Any]] = None,
-        overwrite_example_batch: Optional[Dict[str, Any]] = None,
+        overwrite_example_batch_path: Optional[str] = None,
         step: Optional[int] = None,
     ):
         """Loads a pretrained model from a checkpoint. Important: this method expects the
@@ -207,8 +207,13 @@ class PretrainedModel:
             model_def = create_model_def(
                 **config["model"].to_dict(),
             )
-            if overwrite_example_batch:
-                example_batch = overwrite_example_batch
+            if overwrite_example_batch_path:
+                with tf.io.gfile.GFile(overwrite_example_batch_path, "rb") as f:
+                    example_batch = flax.serialization.msgpack_restore(f.read())
+                    logging.info(
+                        "Loaded overwrite example batch with structure: %s",
+                        flax.core.pretty_repr(jax.tree_map(jnp.shape, example_batch)),
+                    )
 
             # Initializing the model in a jit avoids running the model on CPU
             @jax.jit
