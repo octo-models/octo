@@ -329,6 +329,13 @@ resnetv1_configs = {
         block_cls=ResNetBlock,
         num_spatial_blocks=8,
     ),
+    "resnetv1-18-bridge-film": ft.partial(
+        ResNetEncoder,
+        stage_sizes=(2, 2, 2, 2),
+        block_cls=ResNetBlock,
+        num_spatial_blocks=8,
+        use_film=True,
+    ),
     "resnetv1-34-bridge": ft.partial(
         ResNetEncoder,
         stage_sizes=(3, 4, 6, 3),
