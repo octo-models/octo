@@ -301,6 +301,7 @@ def main(_):
         init_args=model_init_args,
         init_kwargs=dict(train=False),
         pretrained_loaders=pretrained_loaders,
+        pretrained_loader_kwargs=FLAGS.config.pretrained_loader_kwargs,
     )
 
     example_batch = multihost_utils.process_allgather(example_batch)
