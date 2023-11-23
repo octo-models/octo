@@ -76,30 +76,21 @@ def make_zero_actions(action, action_encoding):
     )
     if action_encoding == ActionEncoding.EEF_POS:
         is_absolute_action = tf.range(action.shape[-1]) >= 6
-        return tf.where(
-            is_absolute_action[None, None, :],
-            action,
-            tf.zeros_like(action),
-        )
     elif action_encoding == ActionEncoding.JOINT_POS:
         is_absolute_action = tf.range(action.shape[-1]) >= 7
-        return tf.where(
-            is_absolute_action[None, None, :],
-            action,
-            tf.zeros_like(action),
-        )
     elif action_encoding == ActionEncoding.JOINT_POS_BIMANUAL:
         is_absolute_action = tf.math.logical_or(
             tf.range(action.shape[-1]) == 6,
             tf.range(action.shape[-1]) == 13,
         )
-        return tf.where(
-            is_absolute_action[None, None, :],
-            action,
-            tf.zeros_like(action),
-        )
     else:
         raise ValueError(f"Action encoding {action_encoding} not supported.")
+
+    return tf.where(
+        is_absolute_action[None, None, :],
+        action,
+        tf.zeros_like(action),
+    )
 
 
 def pprint_data_mixture(
