@@ -286,6 +286,10 @@ vit_encoder_configs = {
         features=(32, 96, 192),
         padding=(1, 1, 1),
     ),
+    "small-stem-16": ft.partial(
+        SmallStem,
+        patch_size=16,
+    ),
     "small-stem-16-film": ft.partial(
         SmallStem,
         use_film=True,

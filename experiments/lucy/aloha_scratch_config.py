@@ -4,27 +4,29 @@ from config import update_config
 from ml_collections import ConfigDict
 from ml_collections.config_dict import placeholder
 
+from orca.data.utils.data_utils import StateEncoding, ActionEncoding
+
 
 def get_config(
     transformer_size,
 ):
-    assert transformer_size in ["vanilla", "vit_s", "vit_b", "vit_l"]
+    assert transformer_size in ["vanilla", "vit_ti", "vit_s", "vit_b", "vit_l"]
 
     base_wandb_config = dict(
         project="orca", group=placeholder(str), entity=placeholder(str)
     )
 
     base_config = dict(
-        batch_size=1024,
+        batch_size=128,
         eval_batch_size=128,
-        shuffle_buffer_size=100000,
+        shuffle_buffer_size=10000,
         val_shuffle_buffer_size=1000,
         num_val_batches=16,
-        num_steps=int(2e6),
+        num_steps=20000, #int(2e6),
         start_step=placeholder(int),
         log_interval=100,
-        eval_interval=5000,
-        save_interval=5000,
+        eval_interval=500, #5000,
+        save_interval=500, #5000,
         save_dir=placeholder(str),
         resume_path=placeholder(str),
         seed=42,
@@ -33,10 +35,7 @@ def get_config(
         pretrained_weights=[],
         wandb=base_wandb_config,
         wandb_resume_id=placeholder(str),
-        eval_datasets=[
-            "bridge_dataset",
-            "fractal20220817_data",
-        ],
+        eval_datasets=None,
     )
 
     # params that need to be specified multiple places
@@ -44,7 +43,8 @@ def get_config(
 
     base_data_config = dict(
         window_size=1,
-        additional_action_window_size=0,
+        additional_action_window_size=49,
+        action_encoding=ActionEncoding.JOINT_POS_BIMANUAL,
         image_augment_kwargs=dict(
             random_resized_crop=dict(scale=[0.8, 1.0], ratio=[0.9, 1.1]),
             random_brightness=[0.2],
@@ -81,6 +81,13 @@ def get_config(
             num_attention_heads=8,
             dropout_rate=0.1,
         ),
+        "vit_ti": dict(
+            num_layers=12,
+            mlp_dim=768,
+            num_attention_heads=3,
+            dropout_rate=0.0,
+            attention_dropout_rate=0.0,
+        ),
         "vit_s": dict(
             num_layers=12,
             mlp_dim=1536,
@@ -103,6 +110,7 @@ def get_config(
 
     TOKEN_DIMS = {
         "vanilla": 256,
+        "vit_ti": 192,
         "vit_s": 384,
         "vit_b": 768,
         "vit_l": 1024,
@@ -110,51 +118,37 @@ def get_config(
 
     base_model_config = dict(
         token_embedding_size=TOKEN_DIMS[transformer_size],
-        max_horizon=10,
+        max_horizon=50,
         readouts=dict(action=7),
         transformer_kwargs=TRANSFORMER_SIZES[transformer_size],
         heads=dict(
             action=dict(
                 cls_name="mse_action_head",
                 kwargs=dict(
-                    pred_horizon=1,
-                    action_dim=7,
+                    pred_horizon=50,
+                    action_dim=14,
                     vocab_size=256,
                     normalization_type=normalization_type,
-                    readout_key="obs_0",
+                    readout_key="action",
                 ),
             )
         ),
     )
     if transformer_size == "vanilla":
-        encoder = "resnetv1-50-bridge-film"
+        encoder = "resnetv1-18-bridge"
         encoder_kwargs = dict(
             pooling_method="none",
             add_spatial_coordinates=True,
             act="swish",
-            use_film=True,
         )
     else:
-        encoder = "small-stem-16-film"
+        encoder = "small-stem-16"
         encoder_kwargs = dict()
 
     base_tokenizer_kwargs = dict(
         encoder=encoder,
         encoder_kwargs=encoder_kwargs,
-        task_stack_keys=[
-            "image_.*"
-        ],  # by default, early fuse goal images into visual encoder
-    )
-
-    oxe_kwargs = ConfigDict(
-        dict(
-            data_mix=placeholder(str),
-            # for v4 TPUs: "gs://rail-orca-central2/resize_336_336"
-            data_dir=placeholder(str),
-            n_third_person_cameras=1,
-            n_wrist_cameras=0,
-            load_depth=False,
-        )
+        task_stack_keys=[],
     )
 
     return ConfigDict(
@@ -166,34 +160,49 @@ def get_config(
                         "image_tokenizer",
                         {
                             "num_tokens": 64,
-                            "task_film_keys": ["language_instruction"],
+                            "task_film_keys": [],
                             **base_tokenizer_kwargs,
                         },
+                    ),
+                    (
+                        "lowdim_obs_tokenizer",
+                        {
+                            "n_bins": 256,
+                            "bin_type": normalization_type,
+                            "low": -2.,
+                            "high": 2.,
+                            "obs_keys": ["proprio"],
+                        }
                     ),
                 ],
                 task_tokenizers=[],
             ),
             optimizer=base_optimizer_config,
             dataset_kwargs={
-                "oxe_kwargs": oxe_kwargs,  # this will generate data_kwargs_list and sampling weights
                 # common_kwargs override specific kwargs from data_kwargs_list
                 "common_kwargs": dict(
                     ram_budget=1,  # limit RAM per dataset
                     num_parallel_reads=8,  # for reading from GCS
                     num_parallel_calls=16,  # for the less CPU-intensive ops in initial dataset construction
                     action_proprio_normalization_type=normalization_type,
+                    data_dir="gs://rail-orca-central2",
+                    image_obs_keys=[
+                        "cam_high",
+                        "cam_low",
+                        "cam_left_wrist",
+                        "cam_right_wrist",
+                    ],
+                    state_obs_keys=["state"],
+                    state_encoding=StateEncoding.JOINT_BIMANUAL,
+                    action_encoding=ActionEncoding.JOINT_POS_BIMANUAL,
                 ),
+                "data_kwargs_list": [
+                    {"name": "aloha_screwdriver_dataset"},
+                ],
                 "transform_kwargs": update_config(
                     base_data_config,
                     resize_size=(256, 256),
                     num_parallel_calls=16,  # for the most CPU-intensive ops (decoding, resizing, augmenting)
-                    task_augmentation_strategy="delete_task_conditioning",
-                    task_augmentation_kwargs=dict(
-                        delete_key_groups_probs=[
-                            (["image_*"], 0.5),
-                            (["language_instruction"], 0.5),
-                        ],
-                    ),
                 ),
             },
             **update_config(

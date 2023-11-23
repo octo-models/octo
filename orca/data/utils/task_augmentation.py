@@ -29,6 +29,7 @@ def drop_keys_independent(
     tasks = traj["tasks"]
     new_tasks = tasks.copy()
     dropped_all = True
+    image_keys = [key for key in tasks.keys() if "image" in key]
 
     for key_group, prob in drop_key_groups_probs:
         if not all(key in tasks for key in key_group):
@@ -38,6 +39,15 @@ def drop_keys_independent(
 
         drop_group = tf.random.uniform([]) < prob
         dropped_all = dropped_all and drop_group
+
+        # When no goal images are present, the goal timestep becomes the final timestep
+        if all([image_key in key_group for image_key in image_keys]):
+            new_tasks["goal_timestep"] = tf.where(
+                drop_group,
+                tasks["end_timestep"],
+                tasks["goal_timestep"],
+            )
+
         for key in key_group:
             new_tasks[key] = tf.where(
                 drop_group,
@@ -74,12 +84,23 @@ def delete_task_conditioning(
     delete_probs = [prob for _, prob in delete_key_groups_probs]
     delete_group_idx = tf.random.categorical(tf.math.log([delete_probs]), 1)[0, 0]
 
+    image_keys = [key for key in tasks.keys() if "image" in key]
+
     for i, (delete_key_patterns, _) in enumerate(delete_key_groups_probs):
         matching_keys = [
             key
             for key in tasks.keys()
             if any(fnmatch(key, pattern) for pattern in delete_key_patterns)
         ]
+
+        # When no goal images are present, the goal timestep becomes the final timestep
+        if all([image_key in matching_keys for image_key in image_keys]):
+            new_tasks["goal_timestep"] = tf.where(
+                i == delete_group_idx,
+                tasks["end_timestep"],
+                tasks["goal_timestep"],
+            )
+
         for key in matching_keys:
             new_tasks[key] = tf.where(
                 i == delete_group_idx,

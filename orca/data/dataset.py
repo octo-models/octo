@@ -11,16 +11,24 @@ import tensorflow_datasets as tfds
 from orca.data.dataset_transforms import RLDS_TRAJECTORY_MAP_TRANSFORMS
 from orca.data.utils import bc_goal_relabeling, task_augmentation
 from orca.data.utils.data_utils import (
+    action_encoding_length,
     ActionEncoding,
     get_dataset_statistics,
+    make_zero_actions,
     normalize_action_and_proprio,
     pprint_data_mixture,
+    state_encoding_length,
     StateEncoding,
     tree_map,
 )
 
 
-def _chunk_act_obs(traj, window_size):
+def _chunk_act_obs(
+    traj,
+    window_size,
+    additional_action_window_size=0,
+    action_encoding: ActionEncoding = ActionEncoding.EEF_POS,
+):
     """
     Chunks actions and observations into the given window_size.
 
@@ -30,14 +38,40 @@ def _chunk_act_obs(traj, window_size):
     chunk_indices = tf.broadcast_to(
         tf.range(-window_size + 1, 1), [traj_len, window_size]
     ) + tf.broadcast_to(tf.range(traj_len)[:, None], [traj_len, window_size])
+
+    action_chunk_indices = tf.broadcast_to(
+        tf.range(-window_size + 1, 1 + additional_action_window_size),
+        [traj_len, window_size + additional_action_window_size],
+    ) + tf.broadcast_to(
+        tf.range(traj_len)[:, None],
+        [traj_len, window_size + additional_action_window_size],
+    )
+
     floored_chunk_indices = tf.maximum(chunk_indices, 0)
-    for key in ["observation", "action"]:
-        traj[key] = tf.nest.map_structure(
-            lambda x: tf.gather(x, floored_chunk_indices), traj[key]
-        )
-    # indicates whether or not an entire observation is padding
+
+    if "tasks" in traj:
+        goal_timestep = traj["tasks"]["goal_timestep"]
+    else:
+        goal_timestep = tf.fill([traj_len], traj_len, dtype=tf.int32)
+
+    floored_action_chunk_indices = tf.minimum(
+        tf.maximum(action_chunk_indices, 0), goal_timestep[:, None] - 1
+    )
+
+    traj["observation"] = tf.nest.map_structure(
+        lambda x: tf.gather(x, floored_chunk_indices), traj["observation"]
+    )
+    traj["action"] = tf.gather(traj["action"], floored_action_chunk_indices)
+
+    # indicates whether an entire observation is padding
     traj["observation"]["pad_mask"] = chunk_indices >= 0
 
+    # Actions past the goal timestep become no-ops
+    action_past_goal = action_chunk_indices > goal_timestep[:, None] - 1
+    zero_actions = make_zero_actions(traj["action"], action_encoding)
+    traj["action"] = tf.where(
+        action_past_goal[:, :, None], zero_actions, traj["action"]
+    )
     return traj
 
 
@@ -111,6 +145,8 @@ def apply_common_transforms(
     task_augmentation_strategy: Optional[str] = None,
     task_augmentation_kwargs: dict = {},
     window_size: int = 1,
+    additional_action_window_size: int = 0,
+    action_encoding: ActionEncoding = ActionEncoding.EEF_POS,
     resize_size: Optional[Tuple[int, int]] = None,
     skip_unlabeled: bool = False,
     max_action: Optional[float] = None,
@@ -133,6 +169,8 @@ def apply_common_transforms(
         task_augmentation_kwargs (dict, optional): Additional keyword arguments to pass to the task augmentation
         resize_size (tuple, optional): target (height, width) for all RGB and depth images, default to no resize.
         window_size (int, optional): The length of the snippets that trajectories are chunked into.
+        additional_action_window_size (int, optional): The number of additional actions to include in the chunked actions.
+        action_encoding (ActionEncoding): type of action encoding used, e.g. joint delta vs EEF delta.
         skip_unlabeled (bool, optional): Whether to skip trajectories with no language labels.
         max_action: (float, optional): If provided, trajectories in which *any* action dimension
             of *any* transition has an absolute value larger than this will be skipped.
@@ -202,7 +240,13 @@ def apply_common_transforms(
 
     # chunks actions and observations
     dataset = dataset.map(
-        partial(_chunk_act_obs, window_size=window_size), num_parallel_calls
+        partial(
+            _chunk_act_obs,
+            window_size=window_size,
+            additional_action_window_size=additional_action_window_size,
+            action_encoding=action_encoding,
+        ),
+        num_parallel_calls,
     )
 
     return dataset
@@ -328,22 +372,35 @@ def make_dataset_from_rlds(
                     proprio.append(tf.zeros((traj_len, 1), dtype=tf.float32))
                 else:
                     proprio.append(tf.cast(orig_obs[key], tf.float32))
-            # pre-pend info which state encoding is used
-            proprio = [
-                tf.ones_like(proprio[0][:, :1]) * float(state_encoding)
-            ] + proprio
             traj["observation"]["proprio"] = tf.concat(proprio, axis=-1)
+            # make sure state encoding has correct length
+            if state_encoding != StateEncoding.NONE:
+                assert traj["observation"]["proprio"].shape[
+                    -1
+                ] == state_encoding_length(state_encoding), (
+                    f"State encoding {state_encoding} for dataset {name} expects {state_encoding_length(state_encoding)}-dim proprio"
+                    f" but got {traj['observation']['proprio'].shape[-1]}."
+                )
 
-        # TODO: support other action encodings as well
-        assert (
-            action_encoding == ActionEncoding.EEF_POS
-        ), "Only support EEF pose delta actions for now."
+        # make sure action encoding has correct length
+        assert traj["action"].shape[-1] == action_encoding_length(action_encoding), (
+            f"Action encoding {action_encoding} for dataset {name} expects {action_encoding_length(action_encoding)}-dim actions"
+            f" but got {traj['action'].shape[-1]}."
+        )
         traj["action"] = tf.cast(traj["action"], tf.float32)
 
         # check that all other keys are present
         for key in ["action", "language_instruction", "is_last", "is_terminal"]:
             if key not in traj:
                 raise ValueError(f"Key {key} is missing from trajectory: {traj}")
+
+        # add state and action encoding info
+        traj["observation"]["state_encoding"] = tf.repeat(state_encoding, traj_len)[
+            ..., None
+        ]
+        traj["observation"]["action_encoding"] = tf.repeat(action_encoding, traj_len)[
+            ..., None
+        ]
 
         # add timestep info
         traj["observation"]["timestep"] = tf.range(traj_len) + 1
@@ -439,6 +496,7 @@ def make_interleaved_dataset(
     assert len(sample_weights) == len(dataset_kwargs_list)
 
     datasets = []
+    action_encodings = []
     dataset_sizes = []
     avg_traj_lens = []
     for dataset_kwargs in dataset_kwargs_list:
@@ -446,12 +504,20 @@ def make_interleaved_dataset(
         dataset, dataset_statistics = make_dataset_from_rlds(
             **dataset_kwargs, train=train
         )
+        action_encodings.append(
+            dataset_kwargs.get("action_encoding", ActionEncoding.EEF_POS)
+        )
         dataset_sizes.append(dataset_statistics["num_transitions"])
         avg_traj_lens.append(
             dataset_statistics["num_transitions"]
             / dataset_statistics["num_trajectories"]
         )
         datasets.append(dataset.repeat())
+
+    # TODO: support interleaving datasets with different action encodings
+    assert (
+        len(set(action_encodings)) == 1
+    ), f"Need action encodings of all datasets to be identical, currently used encodings: {action_encodings}."
 
     if balance_weights:
         sample_weights = np.array(sample_weights) * np.array(dataset_sizes)
