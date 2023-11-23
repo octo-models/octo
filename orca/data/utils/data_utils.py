@@ -27,6 +27,7 @@ class StateEncoding(IntEnum):
     POS_EULER = 1  # EEF XYZ + roll-pitch-yaw + 1 x pad + gripper open/close
     POS_QUAT = 2  # EEF XYZ + quaternion + gripper open/close
     JOINT = 3  # 7 x joint angles (padding added if fewer) + gripper open/close
+    JOINT_BIMANUAL = 4  # 2 x [6 x joint angles + gripper open/close]
 
 
 class ActionEncoding(IntEnum):
@@ -34,6 +35,62 @@ class ActionEncoding(IntEnum):
 
     EEF_POS = 1  # EEF delta XYZ + roll-pitch-yaw + gripper open/close
     JOINT_POS = 2  # 7 x joint delta position + gripper open/close
+    JOINT_POS_BIMANUAL = 3  # 2 x [6 x joint pos + gripper]
+
+
+def state_encoding_length(state_encoding):
+    if state_encoding == StateEncoding.NONE:
+        return 0
+    # TODO: remove hack that POS_EULER pads 0 to match length
+    elif state_encoding in [
+        StateEncoding.POS_EULER,
+        StateEncoding.POS_QUAT,
+        StateEncoding.JOINT,
+    ]:
+        return 8
+    elif state_encoding in [StateEncoding.JOINT_BIMANUAL]:
+        return 14
+    else:
+        raise ValueError(f"State encoding {state_encoding} not supported.")
+
+
+def action_encoding_length(action_encoding):
+    if action_encoding in [ActionEncoding.EEF_POS]:
+        return 7
+    elif action_encoding in [ActionEncoding.JOINT_POS]:
+        return 8
+    elif action_encoding in [ActionEncoding.JOINT_POS_BIMANUAL]:
+        return 14
+    else:
+        raise ValueError(f"Action encoding {action_encoding} not supported.")
+
+
+def make_zero_actions(action, action_encoding):
+    """
+    Returns neutral action for action encoding, matches shape of input action.
+    Zero-action 0s out all relative actions and retains value of absolute actions like gripper open/close.
+    """
+    assert action.shape[-1] == action_encoding_length(action_encoding), (
+        f"For action encoding {action_encoding} expected {action_encoding_length(action_encoding)}-dim action,"
+        f" but got {action.shape[-1]}-dim action."
+    )
+    if action_encoding == ActionEncoding.EEF_POS:
+        is_absolute_action = tf.range(action.shape[-1]) >= 6
+    elif action_encoding == ActionEncoding.JOINT_POS:
+        is_absolute_action = tf.range(action.shape[-1]) >= 7
+    elif action_encoding == ActionEncoding.JOINT_POS_BIMANUAL:
+        is_absolute_action = tf.math.logical_or(
+            tf.range(action.shape[-1]) == 6,
+            tf.range(action.shape[-1]) == 13,
+        )
+    else:
+        raise ValueError(f"Action encoding {action_encoding} not supported.")
+
+    return tf.where(
+        is_absolute_action[None, None, :],
+        action,
+        tf.zeros_like(action),
+    )
 
 
 def pprint_data_mixture(
@@ -103,8 +160,10 @@ def get_dataset_statistics(
 
     if "val" not in builder.info.splits:
         split = "train[:95%]"
+        expected_trajs = int(builder.info.splits["train"].num_examples * 0.95)
     else:
         split = "train"
+        expected_trajs = builder.info.splits["train"].num_examples
     dataset = (
         dl.DLataset.from_rlds(builder, split=split, shuffle=False)
         .map(restructure_fn)
@@ -124,7 +183,8 @@ def get_dataset_statistics(
     num_transitions = 0
     num_trajectories = 0
     for traj in tqdm.tqdm(
-        dataset.iterator(), total=builder.info.splits["train"].num_examples
+        dataset.iterator(),
+        total=expected_trajs,
     ):
         actions.append(traj["action"])
         proprios.append(traj["proprio"])
@@ -175,7 +235,7 @@ def normalize_action_and_proprio(traj, metadata, normalization_type):
         for key, traj_key in keys_to_normalize.items():
             traj = dl.transforms.selective_tree_map(
                 traj,
-                match=traj_key,
+                match=lambda k, _: k == traj_key,
                 map_fn=lambda x: (x - metadata[key]["mean"])
                 / (metadata[key]["std"] + 1e-8),
             )
@@ -186,7 +246,7 @@ def normalize_action_and_proprio(traj, metadata, normalization_type):
         for key, traj_key in keys_to_normalize.items():
             traj = dl.transforms.selective_tree_map(
                 traj,
-                match=traj_key,
+                match=lambda k, _: k == traj_key,
                 map_fn=lambda x: tf.clip_by_value(
                     2
                     * (x - metadata[key]["min"])

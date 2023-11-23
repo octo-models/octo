@@ -10,6 +10,7 @@ import flax
 from flax.training import orbax_utils
 from flax.traverse_util import flatten_dict
 import jax
+from jax.experimental import multihost_utils
 import jax.numpy as jnp
 from jax.sharding import Mesh, NamedSharding, PartitionSpec
 from ml_collections import config_flags
@@ -26,7 +27,7 @@ from orca.data.oxe.oxe_dataset_mixes import make_oxe_dataset_kwargs_and_weights,
 from orca.data.utils.text_processing import text_processors
 from orca.model import create_model_def, OrcaModel
 from orca.model.components.hf_weight_loaders import weights_loaders
-from orca.utils.jax_utils import initialize_compilation_cache
+from orca.utils import jax_utils
 from orca.utils.train_utils import (
     batched_apply,
     create_optimizer,
@@ -61,7 +62,7 @@ NUM_ACTIONS_FOR_VIS = 8
 
 
 def main(_):
-    initialize_compilation_cache()
+    jax_utils.initialize_compilation_cache()
 
     assert FLAGS.config.batch_size % jax.device_count() == 0
 
@@ -72,8 +73,15 @@ def main(_):
     # data-parallel sharding -- shards arrays along the first axis
     dp_sharding = NamedSharding(mesh, PartitionSpec("batch"))
 
+    def shard(batch):
+        return multihost_utils.host_local_array_to_global_array(
+            batch, mesh, PartitionSpec("batch")
+        )
+
     # prevent tensorflow from using GPUs
     tf.config.set_visible_devices([], "GPU")
+
+    tf.random.set_seed(FLAGS.config.seed + jax.process_index())
 
     # set up wandb and logging
     if FLAGS.config.get("wandb_resume_id", None) is None:
@@ -85,13 +93,15 @@ def main(_):
             name=name,
             time=datetime.datetime.now().strftime("%Y%m%d_%H%M%S"),
         )
-        wandb.init(
-            config=FLAGS.config.to_dict(),
-            id=wandb_id,
-            name=name,
-            mode="disabled" if FLAGS.debug else None,
-            **FLAGS.config.wandb,
-        )
+        wandb_id = jax_utils.host_broadcast_str(wandb_id)
+        if jax.process_index() == 0:
+            wandb.init(
+                config=FLAGS.config.to_dict(),
+                id=wandb_id,
+                name=name,
+                mode="disabled" if FLAGS.debug else None,
+                **FLAGS.config.wandb,
+            )
 
         if FLAGS.config.save_dir is not None:
             save_dir = tf.io.gfile.join(
@@ -100,13 +110,14 @@ def main(_):
                 FLAGS.config.wandb.group or "",
                 wandb_id,
             )
-            wandb.config.update(dict(save_dir=save_dir), allow_val_change=True)
             logging.info("Saving to %s", save_dir)
-            tf.io.gfile.makedirs(save_dir)
-            with tf.io.gfile.GFile(
-                os.path.join(save_dir, "config.json"), "w"
-            ) as config_file:
-                config_file.write(FLAGS.config.to_json_best_effort())
+            if jax.process_index() == 0:
+                tf.io.gfile.makedirs(save_dir)
+                wandb.config.update(dict(save_dir=save_dir), allow_val_change=True)
+                with tf.io.gfile.GFile(
+                    os.path.join(save_dir, "config.json"), "w"
+                ) as config_file:
+                    config_file.write(FLAGS.config.to_json_best_effort())
         else:
             save_dir = None
             logging.info("save_dir not passed in, not saving checkpoints")
@@ -116,6 +127,7 @@ def main(_):
         wandb.init(
             project=wandb_run.project,
             id=wandb_run.id,
+            entity=wandb_run.entity,
             resume="must",
         )
         save_dir = wandb_run.config["save_dir"]
@@ -136,8 +148,9 @@ def main(_):
             orbax.checkpoint.PyTreeCheckpointer(),
         )
 
-    codebase_directory = osp.abspath(osp.join(osp.dirname(orca.__file__), ".."))
-    wandb.run.log_code(codebase_directory)  # TODO: replace w/ codesave_library?
+    if jax.process_index() == 0:
+        codebase_directory = osp.abspath(osp.join(osp.dirname(orca.__file__), ".."))
+        wandb.run.log_code(codebase_directory)  # TODO: replace w/ codesave_library?
 
     # set up text tokenization (this needs to happen after batching but before sharding)
     if FLAGS.config.text_processor is None:
@@ -226,7 +239,7 @@ def main(_):
         )
 
         # save normalization constants for evaluation
-        if save_dir is not None:
+        if save_dir is not None and jax.process_index() == 0:
             with tf.io.gfile.GFile(
                 os.path.join(
                     save_dir, f"dataset_statistics_{val_data_kwargs['name']}.json"
@@ -238,8 +251,10 @@ def main(_):
                     f,
                 )
 
-    train_data_iter = map(process_text, train_data.iterator())
-    val_data_iters = [map(process_text, val_data.iterator()) for val_data in val_datas]
+    train_data_iter = map(shard, map(process_text, train_data.iterator()))
+    val_data_iters = [
+        map(shard, map(process_text, val_data.iterator())) for val_data in val_datas
+    ]
 
     example_batch = next(train_data_iter)
     logging.info(f"Batch size: {example_batch['action'].shape[0]}")
@@ -247,9 +262,6 @@ def main(_):
     logging.info(
         f"Batch size per device: {example_batch['action'].shape[0] // jax.device_count()}"
     )
-
-    # truncate batch size for faster init
-    example_batch = jax.tree_map(lambda x: x[:1], example_batch)
 
     # set up model, optimizer, loss
     model_def = create_model_def(
@@ -259,8 +271,8 @@ def main(_):
     # pretrained weights to load
     pretrained_loaders = [weights_loaders[w] for w in FLAGS.config.pretrained_weights]
 
-    rng = jax.random.PRNGKey(FLAGS.config.seed)
-    rng, construct_rng = jax.random.split(rng)
+    # ensure construct rng is same on every host
+    construct_rng = jax.random.PRNGKey(FLAGS.config.seed)
     model_init_args = (
         example_batch["observation"],
         example_batch["tasks"],
@@ -291,12 +303,17 @@ def main(_):
         pretrained_loaders=pretrained_loaders,
     )
 
-    if save_dir is not None:
+    example_batch = multihost_utils.process_allgather(example_batch)
+    if save_dir is not None and jax.process_index() == 0:
         # Saving example batch for future checkpoint loading
         with tf.io.gfile.GFile(
             os.path.join(save_dir, "example_batch.msgpack"), "wb"
         ) as f:
-            f.write(flax.serialization.msgpack_serialize(example_batch))
+            f.write(
+                flax.serialization.msgpack_serialize(
+                    jax.tree_map(lambda x: x[:1], example_batch)
+                )
+            )
 
         example_batch_spec = jax.tree_map(
             lambda arr: (arr.shape, str(arr.dtype)), example_batch
@@ -319,18 +336,11 @@ def main(_):
     else:
         start_step = FLAGS.config.start_step or 0
 
-    horizon = (
-        FLAGS.config.dataset_kwargs.transform_kwargs.window_size
-        - FLAGS.config.model.heads["action"]["kwargs"]["pred_horizon"]
-        + 1
-    )  # Ensures that there is a full horizon of actions to predict for each timestep
+    # replicate train state across devices
+    train_state = jax_utils.replicate(train_state)
 
     def loss_fn(params, state, batch, rng, train=True):
         def get_loss(model: OrcaModel, observations, tasks, actions, train):
-            # only use first horizon timesteps as input to transformer
-            # to ensure that there is a full horizon of actions to predict for each timestep
-            observations = jax.tree_map(lambda x: x[:, :horizon], observations)
-
             transformer_embeddings = model.orca_transformer(
                 observations, tasks, observations["pad_mask"], train=train
             )
@@ -415,15 +425,9 @@ def main(_):
             for k, tasks in all_tasks.items()
         }
 
-    @partial(
-        jax.jit,
-        in_shardings=(replicated_sharding, dp_sharding, dp_sharding),
-        out_shardings=dp_sharding,
-        static_argnames=("policy_mode",),
-    )
-    def _get_policy_sampled_actions(state, observations, tasks, policy_mode=None):
+    @partial(jax.jit, static_argnames="policy_mode")
+    def get_policy_sampled_actions(state, observations, tasks, policy_mode=None):
         # only use first horizon timesteps as input to predict_action
-        observations = jax.tree_map(lambda x: x[:, -horizon:], observations)
 
         if policy_mode == "text_conditioned":
             tasks = remove_images(tasks)
@@ -466,12 +470,9 @@ def main(_):
         actions = jnp.moveaxis(actions, 0, 1)
         return actions
 
-    def get_policy_sampled_actions(state, observations, tasks, policy_mode=None):
-        # jax.jit doesn't mesh well with batched_apply + sharding, so need a small wrapper
-        return _get_policy_sampled_actions(state, observations, tasks, policy_mode)
-
     def wandb_log(info, step):
-        wandb.log(flatten_dict(info, sep="/"), step=step)
+        if jax.process_index() == 0:
+            wandb.log(flatten_dict(info, sep="/"), step=step)
 
     timer = Timer()
     for i in tqdm.tqdm(

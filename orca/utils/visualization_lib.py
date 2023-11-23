@@ -12,9 +12,10 @@ import matplotlib.gridspec as gridspec
 import matplotlib.pyplot as plt
 import numpy as np
 import plotly.graph_objects as go
-import tensorflow_datasets as tfds
 import tqdm
 import wandb
+
+from orca.data.utils.data_utils import ActionEncoding
 
 BASE_METRIC_KEYS = {
     "mse": ("mse", tuple()),  # What is the MSE
@@ -84,11 +85,13 @@ def run_policy_on_trajectory(policy_fn, traj, *, text_processor=None):
         )
 
     actions = policy_fn(traj["observation"], tasks)
+
+    horizon = jax.tree_util.tree_leaves(traj["observation"])[0].shape[1]
     return {
         "n": np.array(len_traj),
         "pred_actions": actions,
-        "actions": traj["action"][:, -1, :],
-        "proprio": traj["observation"]["proprio"][:, -1],
+        "actions": traj["action"][:, horizon - 1, :],
+        "proprio": traj["observation"]["proprio"][:, horizon - 1],
     }
 
 
@@ -180,8 +183,12 @@ class Visualizer:
             info = add_unnormalized_info(info, self.action_proprio_stats)
             info = add_manipulation_metrics(info)
 
-            plotly_fig = plot_trajectory_actions(**info)
-            visualizations[f"traj_{n}"] = plotly_fig
+            if (
+                int(traj["observation"]["action_encoding"][0, 0, 0])
+                == ActionEncoding.EEF_POS
+            ):
+                plotly_fig = plot_trajectory_actions(**info)
+                visualizations[f"traj_{n}"] = plotly_fig
 
             mpl_fig = plot_trajectory_overview_mpl(traj, **info)
             visualizations[f"traj_{n}_mpl"] = mpl_fig
@@ -386,7 +393,6 @@ class WandBFigure:
         self.canvas = FigureCanvas(self.fig)
 
     def __enter__(self):
-        print(self.fig)
         return plt.figure(self.fig.number)
 
     def __exit__(self, exc_type, exc_value, traceback):
@@ -403,14 +409,16 @@ def plot_trajectory_overview_mpl(
     unnorm_proprio,
     **info,
 ):
-    wandb_figure = WandBFigure(figsize=(6, 8))
-    gs = gridspec.GridSpec(4, 2)
+    n_act_dims = traj["action"].shape[-1]
+    grid_size = int(np.ceil(np.sqrt(n_act_dims + 1)))
+    wandb_figure = WandBFigure(figsize=(grid_size * 5, grid_size * 5))
+    gs = gridspec.GridSpec(grid_size, grid_size)
     with wandb_figure as fig:
         ax = fig.add_subplot(gs[0, 0])
         ax.plot(info["mse"].mean(axis=1))
         ax.set_ylabel("MSE")
-        for i in range(7):
-            ax = fig.add_subplot(gs[(i + 1) // 2, (i + 1) % 2])
+        for i in range(n_act_dims):
+            ax = fig.add_subplot(gs[(i + 1) // grid_size, (i + 1) % grid_size])
             ax.plot(unnorm_actions[:, i], label="action")
             unnorm_pred_actions_i = unnorm_pred_actions[:, :, i]
             x = np.tile(

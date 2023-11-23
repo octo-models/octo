@@ -47,6 +47,10 @@ def bridge_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
     return trajectory
 
 
+def aloha_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
+    return trajectory
+
+
 RLDS_TRAJECTORY_MAP_TRANSFORMS = {
     "r2_d2": r2_d2_dataset_transform,
     "r2_d2_pen_cmu_rgb": r2_d2_dataset_transform,
@@ -54,6 +58,7 @@ RLDS_TRAJECTORY_MAP_TRANSFORMS = {
     "r2_d2_pen": r2_d2_dataset_transform,
     "fmb_dataset": fmb_dataset_transform,
     "bridge_dataset": bridge_dataset_transform,
+    "aloha_screwdriver_dataset": aloha_dataset_transform,
     # Open X-Embodiment Datasets
     "fractal20220817_data": rt1_dataset_transform,
     "kuka": kuka_dataset_transform,
