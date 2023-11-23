@@ -26,6 +26,7 @@ def get_config(config_string):
         text_processor=None,
         text_processor_kwargs=dict(),
         pretrained_weights=[],
+        pretrained_loader_kwargs=[],
         wandb=base_wandb_config,
         eval_datasets=["bridge_dataset"],
     )

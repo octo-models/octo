@@ -32,9 +32,10 @@ def hf_weights_loader(hf_model, params):
     return freeze(params)
 
 
-def resnet18_IN_SimCLR_loader(params):
-    base_folder = osp.dirname(orca.__file__)
-    checkpoint = osp.join(base_folder, "../pretrained_weights/IN_1M_resnet18.pkl")
+def resnet18_IN_SimCLR_loader(params, checkpoint=None):
+    if checkpoint is None:
+        base_folder = osp.dirname(orca.__file__)
+        checkpoint = osp.join(base_folder, "../pretrained_weights/IN_1M_resnet18.pkl")
     with open(checkpoint, "rb") as f:
         checkpoint = pkl.load(f)
 
