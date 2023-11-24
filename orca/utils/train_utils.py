@@ -25,7 +25,6 @@ def create_train_state(
     init_args=(),
     init_kwargs=dict(),
     pretrained_loaders=tuple(),
-    pretrained_loader_kwargs=tuple(),
     init_method=None,
 ):
     """Utility to create a TrainState."""
@@ -43,15 +42,8 @@ def create_train_state(
         len(ev) == 0
     ), "Are you forgetting to store some variables in the state? {}".format(ev.keys())
 
-    if pretrained_loader_kwargs:
-        assert len(pretrained_loader_kwargs) == len(
-            pretrained_loaders
-        ), "one kwarg dict for each loader!"
-    else:
-        pretrained_loader_kwargs = [dict() for _ in pretrained_loaders]
-
-    for loader, kwargs in zip(pretrained_loaders, pretrained_loader_kwargs):
-        params = loader(params, **kwargs)
+    for loader in pretrained_loaders:
+        params = loader(params)
 
     return TrainState.create(
         apply_fn=model_def.apply,
