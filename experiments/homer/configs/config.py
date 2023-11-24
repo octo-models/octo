@@ -39,7 +39,7 @@ def get_config(config_string):
         num_episodes_per_row=4,
         eval_episodes=20,
         num_val_batches=8,
-        pretrained_weights=[],
+        pretrained_loaders=[],
         pretrained_loader_kwargs=[],
         wandb=base_wandb_config,
         shuffle_buffer_size=25000,

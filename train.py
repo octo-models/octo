@@ -269,7 +269,16 @@ def main(_):
     )
 
     # pretrained weights to load
-    pretrained_loaders = [weights_loaders[w] for w in FLAGS.config.pretrained_weights]
+    pretrained_loader_kwargs = FLAGS.config.pretrained_loader_kwargs or [
+        dict() for _ in FLAGS.config.pretrained_loaders
+    ]
+    assert len(pretrained_loader_kwargs) == len(
+        FLAGS.config.pretrained_loaders
+    ), "supply one kwarg dict for each loader!"
+    pretrained_loaders = [
+        partial(weights_loaders[w], **kwargs)
+        for w, kwargs in zip(FLAGS.config.pretrained_loaders, pretrained_loader_kwargs)
+    ]
 
     # ensure construct rng is same on every host
     construct_rng = jax.random.PRNGKey(FLAGS.config.seed)
@@ -301,7 +310,6 @@ def main(_):
         init_args=model_init_args,
         init_kwargs=dict(train=False),
         pretrained_loaders=pretrained_loaders,
-        pretrained_loader_kwargs=FLAGS.config.pretrained_loader_kwargs,
     )
 
     example_batch = multihost_utils.process_allgather(example_batch)
