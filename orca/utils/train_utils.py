@@ -180,12 +180,13 @@ def filter_eval_datasets(dataset_kwargs_list, sample_weights, eval_datasets=None
         )
 
 
-def create_optimizer(params_or_params_shape, optimizer_kwargs: dict):
+def create_optimizer(params_or_params_shape, optimizer_kwargs: dict, frozen_keys=None):
     """Creates optimizer for ORCA.
 
     Optimizer_kwargs are the kwargs for optax.adamw; if the learning rate is a dict,
     it is interpreted as the kwargs for optax.warmup_cosine_decay_schedule. If clip_gradient
     is specified, then gradient clipping is applied.
+    Frozen_keys removes gradients on all params whose name contains key.
 
     Returns:
         tx: an Optax optimizer
@@ -212,5 +213,19 @@ def create_optimizer(params_or_params_shape, optimizer_kwargs: dict):
             optax.clip_by_global_norm(clip_gradient),
             tx,
         )
+
+    if frozen_keys is not None:
+        # define trainable and frozen parameter sets
+        partition_optimizers = {
+            "trainable": tx,
+            "frozen": optax.set_to_zero(),
+        }
+        param_partitions = flax.traverse_util.path_aware_map(
+            lambda path, v: "frozen"
+            if any([key in path for key in frozen_keys])
+            else "trainable",
+            params_or_params_shape,
+        )
+        tx = optax.multi_transform(partition_optimizers, param_partitions)
 
     return tx, lr_callable
