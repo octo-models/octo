@@ -196,6 +196,7 @@ def main(_):
         train=True,
         sample_weights=sample_weights,
         shuffle_buffer_size=FLAGS.config.shuffle_buffer_size,
+        balance_weights=FLAGS.config.get("balance_weights", True),
     ).batch(FLAGS.config.batch_size)
     val_datas = []
     visualizers = []
@@ -268,7 +269,16 @@ def main(_):
     )
 
     # pretrained weights to load
-    pretrained_loaders = [weights_loaders[w] for w in FLAGS.config.pretrained_weights]
+    pretrained_loader_kwargs = FLAGS.config.pretrained_loader_kwargs or [
+        dict() for _ in FLAGS.config.pretrained_loaders
+    ]
+    assert len(pretrained_loader_kwargs) == len(
+        FLAGS.config.pretrained_loaders
+    ), "supply one kwarg dict for each loader!"
+    pretrained_loaders = [
+        partial(weights_loaders[w], **kwargs)
+        for w, kwargs in zip(FLAGS.config.pretrained_loaders, pretrained_loader_kwargs)
+    ]
 
     # ensure construct rng is same on every host
     construct_rng = jax.random.PRNGKey(FLAGS.config.seed)
