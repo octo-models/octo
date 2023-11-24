@@ -4,12 +4,10 @@ from typing import Any, Callable, Sequence, Tuple
 
 import flax.linen as nn
 import jax.numpy as jnp
-
-# import flax.linen as nn
-# import jax.numpy as jnp
 import numpy as np
 
 from orca.model.components.film_conditioning_layer import FilmConditioning
+from orca.model.components.vit_encoders import normalize_images
 
 ModuleDef = Any
 
@@ -205,6 +203,7 @@ class ResNetEncoder(nn.Module):
     use_multiplicative_cond: bool = False
     num_spatial_blocks: int = 8
     use_film: bool = False
+    img_norm_type: str = "default"
 
     @nn.compact
     def __call__(self, observations: jnp.ndarray, train: bool = True, cond_var=None):
@@ -214,9 +213,7 @@ class ResNetEncoder(nn.Module):
             expecting_cond_var == received_cond_var
         ), "Only pass in cond var iff model expecting cond var"
 
-        # put inputs in [-1, 1]
-        x = observations.astype(jnp.float32) / 127.5 - 1.0
-
+        x = normalize_images(observations, self.img_norm_type)
         if self.add_spatial_coordinates:
             x = AddSpatialCoordinates(dtype=self.dtype)(x)
 

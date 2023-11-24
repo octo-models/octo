@@ -1,4 +1,5 @@
 import functools as ft
+import logging
 import re
 from typing import Sequence
 
@@ -26,22 +27,28 @@ class TokenLearner(nn.Module):
     """
 
     num_tokens: int
-    bottleneck_dim: int = 64
-    dropout_rate: float = 0.0
+    bottleneck_dim: int = 128
+    dropout_rate: float = 0.1
 
     @nn.compact
     def __call__(self, inputs, train: bool = True):
-        if len(inputs.shape) == 4:
-            inputs = inputs.reshape(inputs.shape[0], -1, inputs.shape[-1])
+        input_4_dims = len(inputs.shape) == 4
+        if input_4_dims:
+            b, t, _, d = inputs.shape
+            inputs = inputs.reshape(b * t, -1, d)
         x = nn.LayerNorm()(inputs)
         x = MlpBlock(
             mlp_dim=self.bottleneck_dim,
             out_dim=self.num_tokens,
             dropout_rate=self.dropout_rate,
-        )(x, train=train)
+        )(x, deterministic=not train)
         x = jnp.transpose(x, (0, 2, 1))  # (batch, num_tokens, h*w)
         x = nn.softmax(x, axis=-1)
-        return jnp.einsum("bna,baf->bnf", x, inputs)
+        x = jnp.einsum("bna,baf->bnf", x, inputs)
+
+        if input_4_dims:
+            x = x.reshape((b, t, self.num_tokens, d))
+        return x
 
 
 class ImageTokenizer(nn.Module):

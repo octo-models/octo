@@ -31,7 +31,8 @@ def get_config(config_string):
         seed=42,
         text_processor=None,
         text_processor_kwargs=dict(),
-        pretrained_weights=[],
+        pretrained_loaders=[],
+        pretrained_loader_kwargs=[],
         wandb=base_wandb_config,
         wandb_resume_id=placeholder(str),
         eval_datasets=None,
@@ -308,7 +309,7 @@ def get_config(config_string):
                         tokenizer_name="distilbert-base-uncased",
                         encode_with_model=False,
                     ),
-                    pretrained_weights=["distilbert"],
+                    pretrained_loaders=["distilbert"],
                 ),
             )
         ),
