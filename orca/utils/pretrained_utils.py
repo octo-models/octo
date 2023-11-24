@@ -251,11 +251,13 @@ class PretrainedModel:
             for key in target:
                 key_path = path + "." + key
                 if key in pretrained:
-                    if isinstance(target[key], flax.core.FrozenDict):
+                    if isinstance(target[key], dict):
                         merge_params(target[key], pretrained[key], key_path)
                     else:
                         if target[key].shape == pretrained[key].shape:
-                            print(f"Initializing {key_path} with pre-trained weights.")
+                            print(
+                                f"Initializing {key_path} with pre-trained weights. Shape: {target[key].shape}"
+                            )
                             target[key] = pretrained[key]
                         else:
                             logging.warning(
@@ -269,7 +271,7 @@ class PretrainedModel:
 
         target_params = target_params.unfreeze()
         merge_params(target_params, pretrained_params)
-        target_params = target_params.freeze()
+        target_params = flax.core.FrozenDict(target_params)
         return target_params
 
 
