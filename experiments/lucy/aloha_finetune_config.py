@@ -36,8 +36,8 @@ def get_config():
         action_proprio_normalization_type="normal",
         # If the default data loading speed is too slow, try these:
         # and "num_parallel_calls" in `transform_kwargs` below
-        # "num_parallel_reads": 8,  # for reading from disk / GCS
-        # "num_parallel_calls": 16,  # for initial dataset construction
+        num_parallel_reads=8,  # for reading from disk / GCS
+        num_parallel_calls=16,  # for initial dataset construction
     )
 
     max_steps = FieldReference(20000)
@@ -46,7 +46,7 @@ def get_config():
         pretrained_path=placeholder(str),
         pretrained_step=placeholder(int),
         batch_size=1024,
-        shuffle_buffer_size=100000,
+        shuffle_buffer_size=20000,
         num_val_batches=8,
         num_steps=max_steps,
         log_interval=100,
@@ -58,12 +58,12 @@ def get_config():
             project="orca_finetune", group=placeholder(str), entity=placeholder(str)
         ),
         finetuning_dataset=FINETUNING_KWARGS,
-        modality=modality,
+        modality=None, #modality,
         optimizer=dict(
             learning_rate=dict(
                 init_value=0.0,
                 peak_value=3e-4,
-                warmup_steps=2000,
+                warmup_steps=1000,
                 decay_steps=max_steps,
                 end_value=0.0,
             ),
@@ -90,22 +90,22 @@ def get_config():
                 "random_hue",
             ],
         ),
-        goal_relabeling_strategy=goal_relabeling_strategy,
+        goal_relabeling_strategy="uniform", #goal_relabeling_strategy,
+        action_encoding=ActionEncoding.JOINT_POS_BIMANUAL,
         # If the default data loading speed is too slow, try these:
-        # num_parallel_calls=16,  # for the most CPU-intensive ops (decoding, resizing, augmenting)
+        num_parallel_calls=16,  # for the most CPU-intensive ops (decoding, resizing, augmenting)
     )
     config["data_transforms"] = transform_kwargs
 
     config["overwrite_model_config"] = dict(
-        token_embedding_size=192,
-        max_horizon=50,
+        token_embedding_size=384,
+        max_horizon=10,
         readouts=dict(action=7),
         transformer_kwargs=dict(
             num_layers=12,
-            mlp_dim=768,
-            num_attention_heads=3,
+            mlp_dim=1536,
+            num_attention_heads=6,
             dropout_rate=0.0,
-            attention_dropout_rate=0.0,
         ),
         heads=dict(
             action=dict(
@@ -114,7 +114,7 @@ def get_config():
                     pred_horizon=50,
                     action_dim=14,
                     vocab_size=256,
-                    normalization_type=normalization_type,
+                    normalization_type="normal", #normalization_type,
                     readout_key="action",
                 ),
             )
@@ -134,7 +134,7 @@ def get_config():
                 "lowdim_obs_tokenizer",
                 {
                     "n_bins": 256,
-                    "bin_type": normalization_type,
+                    "bin_type": "normal", #normalization_type,
                     "low": -2.,
                     "high": 2.,
                     "obs_keys": ["proprio"],

@@ -116,6 +116,10 @@ def main(_):
     model = PretrainedModel.load_pretrained(
         FLAGS.config.pretrained_path,
         step=FLAGS.config.pretrained_step,
+        overwrite_model_config=FLAGS.config.get("overwrite_model_config", None),
+        overwrite_example_batch_path=FLAGS.config.get(
+            "overwrite_example_batch_path", None
+        ),
     )
 
     #########
