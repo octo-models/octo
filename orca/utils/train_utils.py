@@ -1,5 +1,6 @@
 from collections import defaultdict
 from contextlib import contextmanager
+import logging
 import time
 
 import flax
@@ -216,6 +217,7 @@ def create_optimizer(params_or_params_shape, optimizer_kwargs: dict, frozen_keys
 
     if frozen_keys is not None:
         # define trainable and frozen parameter sets
+        logging.info(f"Freezing parameters with the following keys: {frozen_keys}.")
         partition_optimizers = {
             "trainable": tx,
             "frozen": optax.set_to_zero(),
