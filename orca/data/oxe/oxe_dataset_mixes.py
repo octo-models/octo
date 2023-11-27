@@ -70,10 +70,10 @@ OXE_MAGIC_SOUP = [
     ("ucsd_kitchen_dataset_converted_externally_to_rlds", 2.0),
     ("austin_sailor_dataset_converted_externally_to_rlds", 1.0),
     ("austin_sirius_dataset_converted_externally_to_rlds", 1.0),
-    ("bc_z", 1.0),
+    ("bc_z", 0.2),
     ("dlr_edan_shared_control_converted_externally_to_rlds", 1.0),
     ("iamlab_cmu_pickup_insert_converted_externally_to_rlds", 1.0),
-    ("uiuc_d3field", 1.0),
+    # ("uiuc_d3field", 1.0),  --> somehow raw data is broken
     ("utaustin_mutex", 1.0),
     ("berkeley_fanuc_manipulation", 2.0),
     ("cmu_stretch", 1.0),
