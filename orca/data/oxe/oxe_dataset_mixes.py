@@ -135,7 +135,12 @@ OXE_FULL_MIX = [
     ("berkeley_gnm_sac_son", 1.0),
 ]
 
-mixes = {"bridge": BRIDGE_MIX, "rtx": RT_X_MIX, "oxe": RT_X_MIX + OXE_FRANKA_MIX}
+mixes = {
+    "bridge": BRIDGE_MIX,
+    "rtx": RT_X_MIX,
+    "rtx_franka": RT_X_MIX + OXE_FRANKA_MIX,
+    "oxe_magic_soup": OXE_MAGIC_SOUP,
+}
 
 
 def make_oxe_dataset_kwargs_and_weights(
