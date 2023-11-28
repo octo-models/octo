@@ -316,3 +316,89 @@ def rel2abs_gripper_actions(actions: tf.Tensor):
 
 def invert_gripper_actions(actions: tf.Tensor):
     return 1 - actions
+
+
+@tf.function(jit_compile=True)
+def binarize_gripper_actions(actions: tf.Tensor) -> tf.Tensor:
+    """Converts gripper actions from continous to binary values (0 and 1).
+
+    We exploit that fact that most of the time, the gripper is fully open (near
+    1.0) or fully closed (near 0.0). As it transitions between the two, it
+    sometimes passes through a few intermediate values. We relabel those
+    intermediate values based on the state that is reached _after_ those
+    intermediate values.
+
+    In the edge case that the trajectory ends with an intermediate value, we
+    give up on binarizing and relabel that chunk of intermediate values as
+    the last action in the trajectory.
+
+    The scan implements the following code:
+
+    new_actions = np.empty_like(actions)
+    carry = actions[-1]
+    for i in reversed(range(actions.shape[0])):
+        if in_between_mask[i]:
+            carry = carry
+        else:
+            carry = float(open_mask[i])
+        new_actions[i] = carry
+    """
+    open_mask = actions > 0.95
+    closed_mask = actions < 0.05
+    in_between_mask = tf.logical_not(tf.logical_or(open_mask, closed_mask))
+
+    is_open_float = tf.cast(open_mask, tf.float32)
+
+    def scan_fn(carry, i):
+        return tf.cond(
+            in_between_mask[i],
+            lambda: tf.cast(carry, tf.float32),
+            lambda: is_open_float[i],
+        )
+
+    new_actions = tf.scan(
+        scan_fn, tf.range(tf.shape(actions)[0]), actions[-1], reverse=True
+    )
+    return new_actions
+
+
+def rel2abs_gripper_actions(actions: tf.Tensor):
+    """
+    Converts relative actions (-1 for closing, +1 for opening) to absolute gripper actions in range [0...1].
+    """
+    abs_actions = tf.math.cumsum(actions, axis=0)
+    abs_actions = tf.clip_by_value(abs_actions, 0, 1)
+    return abs_actions
+
+
+def invert_gripper_actions(actions: tf.Tensor):
+    return 1 - actions
+
+
+def allocate_threads(n: int, weights: np.ndarray):
+    """
+    Allocates an integer n across an array based on weights. The final array sums to n, but each
+    element is no less than 1.
+    """
+    assert np.all(weights >= 0), "Weights must be non-negative"
+    assert len(weights) <= n, "Weights must be no longer than n"
+    weights = np.array(weights) / np.sum(weights)
+
+    allocation = np.zeros_like(weights, dtype=int)
+    while True:
+        # give the remaining elements that would get less than 1 a 1
+        mask = (weights * n < 1) & (weights > 0)
+        if not mask.any():
+            break
+        n -= mask.sum()
+        allocation += mask.astype(int)
+        # recompute the distribution over the remaining elements
+        weights[mask] = 0
+        weights = weights / weights.sum()
+    # allocate the remaining elements
+    fractional, integral = np.modf(weights * n)
+    allocation += integral.astype(int)
+    n -= integral.sum()
+    for i in np.argsort(fractional)[::-1][: int(n)]:
+        allocation[i] += 1
+    return allocation

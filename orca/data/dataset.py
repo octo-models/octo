@@ -13,6 +13,7 @@ from orca.data.utils import bc_goal_relabeling, task_augmentation
 from orca.data.utils.data_utils import (
     action_encoding_length,
     ActionEncoding,
+    allocate_threads,
     get_dataset_statistics,
     make_zero_actions,
     normalize_action_and_proprio,
@@ -75,10 +76,9 @@ def _chunk_act_obs(
     return traj
 
 
-def _decode_images(frame):
+def _decode_images(obs: dict) -> dict:
     """Decodes images and depth images, marking empty strings as padding."""
-    obs = frame["observation"]
-    # indicates which keys in the observation dict are padding
+    # indicates which keys in the dict are padding
     pad_mask_dict = {}
     for key in obs:
         if "image" in key:
@@ -116,23 +116,19 @@ def _decode_images(frame):
                     f"Unsupported depth dtype: found {key} with dtype {obs[key].dtype}"
                 )
 
-    frame["observation"] = obs
-    frame["observation"]["pad_mask_dict"] = pad_mask_dict
-    return frame
+    obs["pad_mask_dict"] = pad_mask_dict
+    return obs
 
 
-def _augment(frame, augment_kwargs):
-    """Augments images, skipping padding images. Augments all images in a trajectory identically."""
-    obs = frame["observation"]
-    seed = [frame["_traj_index"], frame["_traj_index"]]
+def _augment(obs: dict, seed, augment_kwargs) -> dict:
+    """Augments images, skipping padding images."""
     for key in obs:
         if "image" in key:
             if obs["pad_mask_dict"][key]:
                 obs[key] = dl.transforms.augment_image(
                     obs[key], **augment_kwargs, seed=seed
                 )
-    frame["observation"] = obs
-    return frame
+    return obs
 
 
 def apply_common_transforms(
@@ -195,24 +191,6 @@ def apply_common_transforms(
             )
         )
 
-    dataset = dataset.frame_map(_decode_images, num_parallel_calls)
-
-    if resize_size:
-        dataset = dataset.frame_map(
-            partial(dl.transforms.resize_images, size=resize_size),
-            num_parallel_calls,
-        )
-        dataset = dataset.frame_map(
-            partial(dl.transforms.resize_depth_images, size=resize_size),
-            num_parallel_calls,
-        )
-
-    if train:
-        # augments the entire trajectory with the same seed
-        dataset = dataset.frame_map(
-            partial(_augment, augment_kwargs=image_augment_kwargs), num_parallel_calls
-        )
-
     # adds the "tasks" key
     if goal_relabeling_strategy is not None:
         dataset = dataset.map(
@@ -228,6 +206,17 @@ def apply_common_transforms(
             return traj
 
         dataset = dataset.map(move_language_instruction_to_tasks, num_parallel_calls)
+
+    def truncate(traj):
+        traj_len = tf.shape(traj["action"])[0]
+        if traj_len > 100:
+            start_idx = tf.random.uniform(
+                [], minval=0, maxval=traj_len - 100, dtype=tf.int32
+            )
+            traj = tf.nest.map_structure(lambda x: x[start_idx : start_idx + 100], traj)
+        return traj
+
+    dataset = dataset.map(truncate, num_parallel_calls)
 
     if train and task_augmentation_strategy is not None:
         dataset = dataset.map(
@@ -459,6 +448,27 @@ def make_single_dataset(
     dataset, dataset_statistics = make_dataset_from_rlds(**dataset_kwargs, train=train)
     dataset = apply_common_transforms(dataset, **transform_kwargs, train=train)
 
+    def apply_image_transform(frame, fn):
+        # tasks is not chunked -- apply fn directly
+        frame["tasks"] = fn(frame["tasks"])
+        # observation is chunked -- apply fn vmapped
+        frame["observation"] = dl.vmap(fn)(frame["observation"])
+        return frame
+
+    # decode images (and depth images), marking empty strings as padding
+    dataset = dataset.frame_map(
+        partial(apply_image_transform, fn=_decode_images),
+    )
+
+    # resize images, if requested
+    if resize_size := transform_kwargs.get("resize_size", None):
+        dataset = dataset.frame_map(
+            partial(
+                apply_image_transform,
+                fn=partial(dl.transforms.resize_images, size=resize_size),
+            ),
+        )
+
     # save for later
     dataset.dataset_statistics = dataset_statistics
     return dataset
@@ -470,8 +480,12 @@ def make_interleaved_dataset(
     transform_kwargs: dict,
     train: bool,
     sample_weights: Optional[List[float]] = None,
+    shared_threads: Optional[int] = None,
+    shared_read_threads: Optional[int] = None,
+    global_threads: Optional[int] = None,
     balance_weights: bool = True,
     shuffle_buffer_size: int = 10000,
+    batch_size: int = 64,
 ) -> dl.DLataset:
     """Creates an interleaved dataset from list of dataset kwargs.
 
@@ -495,22 +509,52 @@ def make_interleaved_dataset(
         sample_weights = [1.0] * len(dataset_kwargs_list)
     assert len(sample_weights) == len(dataset_kwargs_list)
 
+    # go through datasets once to get sizes
+    dataset_sizes = []
+    all_dataset_statistics = []
+    for dataset_kwargs in dataset_kwargs_list:
+        kwargs = copy.deepcopy(dataset_kwargs)
+        kwargs.update(**common_dataset_kwargs)
+        _, dataset_statistics = make_dataset_from_rlds(**kwargs, train=train)
+        dataset_sizes.append(dataset_statistics["num_transitions"])
+        all_dataset_statistics.append(dataset_statistics)
+
+    # balance and normalize weights
+    if balance_weights:
+        sample_weights = np.array(sample_weights) * np.array(dataset_sizes)
+    sample_weights = np.array(sample_weights) / np.sum(sample_weights)
+    pprint_data_mixture(dataset_kwargs_list, sample_weights)
+
+    # allocate threads based on weights
+    if shared_threads is None:
+        threads_per_dataset = [tf.data.AUTOTUNE] * len(dataset_kwargs_list)
+    else:
+        threads_per_dataset = allocate_threads(shared_threads, sample_weights)
+    if shared_read_threads is None:
+        reads_per_dataset = [tf.data.AUTOTUNE] * len(dataset_kwargs_list)
+    else:
+        reads_per_dataset = allocate_threads(shared_read_threads, sample_weights)
+
+    # construct datasets
     datasets = []
     action_encodings = []
-    dataset_sizes = []
-    avg_traj_lens = []
-    for dataset_kwargs in dataset_kwargs_list:
-        dataset_kwargs.update(**common_dataset_kwargs)
-        dataset, dataset_statistics = make_dataset_from_rlds(
-            **dataset_kwargs, train=train
+    for dataset_kwargs, dataset_statistics, threads, reads in zip(
+        dataset_kwargs_list,
+        all_dataset_statistics,
+        threads_per_dataset,
+        reads_per_dataset,
+    ):
+        kwargs = copy.deepcopy(dataset_kwargs)
+        kwargs.update(**common_dataset_kwargs)
+        dataset, _ = make_dataset_from_rlds(
+            **kwargs,
+            train=train,
+            num_parallel_calls=threads,
+            num_parallel_reads=reads,
+            dataset_statistics=dataset_statistics,
         )
         action_encodings.append(
             dataset_kwargs.get("action_encoding", ActionEncoding.EEF_POS)
-        )
-        dataset_sizes.append(dataset_statistics["num_transitions"])
-        avg_traj_lens.append(
-            dataset_statistics["num_transitions"]
-            / dataset_statistics["num_trajectories"]
         )
         datasets.append(dataset.repeat())
 
@@ -519,34 +563,57 @@ def make_interleaved_dataset(
         len(set(action_encodings)) == 1
     ), f"Need action encodings of all datasets to be identical, currently used encodings: {action_encodings}."
 
-    if balance_weights:
-        sample_weights = np.array(sample_weights) * np.array(dataset_sizes)
-    # normalize to sum to one
-    sample_weights = np.array(sample_weights) / np.sum(sample_weights)
-    pprint_data_mixture(dataset_kwargs_list, sample_weights)
-
-    # interleave datasets at the trajectory level with sampling weights
-    # (doing it this way saves memory compared to interleaving at the step level)
-    # must compensate for different trajectory lengths
-    dataset = dl.DLataset.sample_from_datasets(
-        datasets, sample_weights / np.array(avg_traj_lens)
-    )
-
-    # SPECIAL CASE: if `num_parallel_calls` is not in `transform_kwargs`, use
-    # same value as in `dataset_kwargs`
-    if "num_parallel_calls" not in transform_kwargs:
-        transform_kwargs["num_parallel_calls"] = dataset_kwargs.get(
-            "num_parallel_calls", tf.data.AUTOTUNE
+    transformed_datasets = []
+    for dataset, threads in zip(datasets, threads_per_dataset):
+        # only does relabeling and chunking
+        transformed_datasets.append(
+            apply_common_transforms(
+                dataset,
+                **transform_kwargs,
+                num_parallel_calls=threads,
+                train=train,
+            ).flatten(num_parallel_calls=threads)
         )
 
-    # apply common transforms like augmentation, chunking etc on interleaved episode dataset
-    dataset = apply_common_transforms(
-        dataset,
-        **transform_kwargs,
-        train=train,
+    # interleave at the transition level
+    dataset: dl.DLataset = dl.DLataset.sample_from_datasets(
+        transformed_datasets, sample_weights
+    ).shuffle(shuffle_buffer_size)
+
+    def apply_image_transform(frame, fn):
+        # tasks is not chunked -- apply fn directly
+        frame["tasks"] = fn(frame["tasks"])
+        # observation is chunked -- apply fn vmapped
+        frame["observation"] = dl.vmap(fn)(frame["observation"])
+        return frame
+
+    # decode images (and depth images), marking empty strings as padding
+    dataset = dataset.map(
+        partial(apply_image_transform, fn=_decode_images), global_threads
     )
 
-    dataset = dataset.flatten(
-        num_parallel_calls=transform_kwargs["num_parallel_calls"]
-    ).shuffle(shuffle_buffer_size)
+    # resize images, if requested
+    if resize_size := transform_kwargs.get("resize_size", None):
+        dataset = dataset.map(
+            partial(
+                apply_image_transform,
+                fn=partial(dl.transforms.resize_images, size=resize_size),
+            ),
+            global_threads,
+        )
+
+    if train:
+        # augment each frame with the same seed
+        def aug(frame):
+            seed = tf.random.uniform([2], maxval=tf.dtypes.int32.max, dtype=tf.int32)
+            return apply_image_transform(
+                frame,
+                lambda x: _augment(
+                    x, seed, augment_kwargs=transform_kwargs["image_augment_kwargs"]
+                ),
+            )
+
+        dataset = dataset.map(aug, global_threads)
+
+    dataset = dataset.batch(batch_size, num_parallel_calls=global_threads)
     return dataset
