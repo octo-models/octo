@@ -196,9 +196,13 @@ def main(_):
         FLAGS.config.dataset_kwargs["transform_kwargs"],
         train=True,
         sample_weights=sample_weights,
+        shared_threads=48,
+        shared_read_threads=48,
+        global_threads=200,
         shuffle_buffer_size=FLAGS.config.shuffle_buffer_size,
+        batch_size=FLAGS.config.batch_size,
         balance_weights=FLAGS.config.get("balance_weights", True),
-    ).batch(FLAGS.config.batch_size)
+    )
     val_datas = []
     visualizers = []
     val_datasets_kwargs, val_datasets_sample_weights = filter_eval_datasets(
