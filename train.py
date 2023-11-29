@@ -188,7 +188,7 @@ def main(_):
     sample_weights = (
         FLAGS.config.dataset_kwargs["sample_weights"]
         if "sample_weights" in FLAGS.config.dataset_kwargs
-        else None
+        else [1.0] * len(FLAGS.config.dataset_kwargs["data_kwargs_list"])
     )
     train_data = make_interleaved_dataset(
         FLAGS.config.dataset_kwargs["common_kwargs"],
@@ -562,9 +562,13 @@ def main(_):
 
             for data_kwargs, visualizer in zip(val_datasets_kwargs, visualizers):
                 for mode, policy_fn in modal_policy_fns.items():
-                    raw_infos = visualizer.raw_evaluations(policy_fn, max_trajs=100)
+                    raw_infos = visualizer.raw_evaluations(
+                        policy_fn, max_trajs=FLAGS.config.trajs_for_metrics
+                    )
                     metrics = visualizer.metrics_for_wandb(raw_infos)
-                    images = visualizer.visualize_for_wandb(policy_fn, max_trajs=8)
+                    images = visualizer.visualize_for_wandb(
+                        policy_fn, max_trajs=FLAGS.config.trajs_for_viz
+                    )
                     wandb_log(
                         {
                             f"offline_metrics_{data_kwargs['name']}/{mode}": metrics,
