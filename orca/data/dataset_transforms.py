@@ -5,6 +5,7 @@ import tensorflow as tf
 
 import orca.data.bridge.bridge_utils as bridge
 from orca.data.oxe.oxe_dataset_transforms import *  # noqa: F403
+from orca.data.utils.data_utils import binarize_gripper_actions
 
 
 def r2_d2_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
@@ -35,7 +36,7 @@ def bridge_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
     trajectory["action"] = tf.concat(
         [
             trajectory["action"][:, :6],
-            bridge.binarize_gripper_actions(trajectory["action"][:, -1])[:, None],
+            binarize_gripper_actions(trajectory["action"][:, -1])[:, None],
         ],
         axis=1,
     )
