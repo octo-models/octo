@@ -303,7 +303,7 @@ def main(_):
         *model_init_args,
     )["params"]
     tx, lr_callable = create_optimizer(
-        params_shape,
+        params_shape.unfreeze(),
         FLAGS.config.optimizer.to_dict(),
     )
     train_state = create_train_state(
