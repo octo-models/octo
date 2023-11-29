@@ -28,4 +28,4 @@ jobs:
         pip install --upgrade "jax[cpu]==0.4.13"
 
     - name: Train on debug dataset
-      run: WANDB_MODE=disabled python train.py --config config.py:ci_debug_dataset --name debug
+      run: WANDB_MODE=disabled python train.py --config experiments/dibya/debug_config.py --name debug
