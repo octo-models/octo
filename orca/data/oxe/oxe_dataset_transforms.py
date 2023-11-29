@@ -154,9 +154,9 @@ def viola_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
         ),
         axis=-1,
     )
-    trajectory["language_instruction"] = trajectory["observation"][
-        "natural_language_instruction"
-    ]
+    trajectory["language_instruction"] = tf.fill(
+        tf.shape(trajectory["observation"]["natural_language_instruction"]), ""
+    )  # delete uninformative language instruction
     return trajectory
 
 
@@ -169,9 +169,6 @@ def berkeley_autolab_ur5_dataset_transform(
     trajectory["observation"]["depth"] = trajectory["observation"].pop(
         "image_with_depth"
     )
-    trajectory["observation"]["hand_image"] = trajectory["observation"]["hand_image"][
-        ..., ::-1
-    ]  # RGB is flipped for wrist image
     trajectory["action"] = tf.concat(
         (
             trajectory["action"]["world_vector"],
@@ -277,7 +274,7 @@ def stanford_hydra_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, An
         :, -3:-2
     ]
     trajectory["language_instruction"] = tf.fill(
-        tf.shape(trajectory["natural_language_instruction"]), ""
+        tf.shape(trajectory["language_instruction"]), ""
     )  # delete uninformative language instruction
     return trajectory
 
@@ -285,7 +282,7 @@ def stanford_hydra_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, An
 def austin_buds_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
     trajectory["observation"]["state"] = trajectory["observation"]["state"][:, :8]
     trajectory["language_instruction"] = tf.fill(
-        tf.shape(trajectory["natural_language_instruction"]), ""
+        tf.shape(trajectory["language_instruction"]), ""
     )  # delete uninformative language instruction
     return trajectory
 
@@ -300,7 +297,7 @@ def nyu_franka_play_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, A
     trajectory["observation"]["eef_state"] = trajectory["observation"]["state"][:, -6:]
     trajectory["action"] = trajectory["action"][:, -8:-1]
     trajectory["language_instruction"] = tf.fill(
-        tf.shape(trajectory["natural_language_instruction"]), ""
+        tf.shape(trajectory["language_instruction"]), ""
     )  # delete uninformative language instruction
     return trajectory
 
@@ -364,14 +361,14 @@ def ucsd_pick_place_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, A
 
 def austin_sailor_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
     trajectory["language_instruction"] = tf.fill(
-        tf.shape(trajectory["natural_language_instruction"]), ""
+        tf.shape(trajectory["language_instruction"]), ""
     )  # delete uninformative language instruction
     return trajectory
 
 
 def austin_sirius_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
     trajectory["language_instruction"] = tf.fill(
-        tf.shape(trajectory["natural_language_instruction"]), ""
+        tf.shape(trajectory["language_instruction"]), ""
     )  # delete uninformative language instruction
     return trajectory
 
