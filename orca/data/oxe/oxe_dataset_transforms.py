@@ -583,11 +583,6 @@ def berkeley_fanuc_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, An
         ),
         axis=-1,
     )
-    # flip BGR channels back to RGB
-    trajectory["observation"]["image"] = trajectory["observation"]["image"][..., ::-1]
-    trajectory["observation"]["wrist_image"] = trajectory["observation"]["wrist_image"][
-        ..., ::-1
-    ]
     return trajectory
 
 
