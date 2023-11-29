@@ -18,13 +18,25 @@ from typing import Any, Dict
 import tensorflow as tf
 import tensorflow_datasets as tfds
 
+from orca.data.utils.data_utils import (
+    binarize_gripper_actions,
+    invert_gripper_actions,
+    rel2abs_gripper_actions,
+)
+
 
 def rt1_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
+    # make gripper action absolute action, +1 = open, 0 = close
+    gripper_action = trajectory["action"]["gripper_closedness_action"]
+    gripper_action = rel2abs_gripper_actions(gripper_action)
+    gripper_action = binarize_gripper_actions(gripper_action)
+    gripper_action = invert_gripper_actions(gripper_action)
+
     trajectory["action"] = tf.concat(
         (
             trajectory["action"]["world_vector"],
             trajectory["action"]["rotation_delta"],
-            trajectory["action"]["gripper_closedness_action"],
+            gripper_action,
         ),
         axis=-1,
     )
@@ -35,11 +47,17 @@ def rt1_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def kuka_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
+    # make gripper action absolute action, +1 = open, 0 = close
+    gripper_action = trajectory["action"]["gripper_closedness_action"]
+    gripper_action = rel2abs_gripper_actions(gripper_action)
+    gripper_action = binarize_gripper_actions(gripper_action)
+    gripper_action = invert_gripper_actions(gripper_action)
+
     trajectory["action"] = tf.concat(
         (
             trajectory["action"]["world_vector"],
             trajectory["action"]["rotation_delta"],
-            trajectory["action"]["gripper_closedness_action"],
+            gripper_action,
         ),
         axis=-1,
     )
@@ -57,9 +75,9 @@ def kuka_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
     )
     gripper_value = tf.io.decode_raw(gripper_value, tf.float32)
     trajectory["observation"]["gripper_closed"] = tf.reshape(gripper_value, (-1, 1))
-    trajectory["language_instruction"] = trajectory["observation"][
-        "natural_language_instruction"
-    ]
+    trajectory["language_instruction"] = tf.fill(
+        tf.shape(trajectory["observation"]["natural_language_instruction"]), ""
+    )  # delete uninformative language instruction
     return trajectory
 
 
@@ -71,6 +89,16 @@ def taco_play_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
         :, 7:8
     ]
     trajectory["action"] = trajectory["action"]["rel_actions_world"]
+
+    # invert gripper action + clip, +1 = open, 0 = close
+    trajectory["action"] = tf.concat(
+        (
+            trajectory["action"][:, :6],
+            tf.clip_by_value(trajectory["action"][:, -1:], 0, 1),
+        ),
+        axis=-1,
+    )
+
     trajectory["language_instruction"] = trajectory["observation"][
         "natural_language_instruction"
     ]
@@ -84,11 +112,18 @@ def jaco_play_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
     trajectory["observation"]["state_gripper"] = trajectory["observation"][
         "end_effector_cartesian_pos"
     ][:, -1:]
+
+    # make gripper action absolute action, +1 = open, 0 = close
+    gripper_action = trajectory["action"]["gripper_closedness_action"]
+    gripper_action = rel2abs_gripper_actions(gripper_action)
+    gripper_action = binarize_gripper_actions(gripper_action)
+    gripper_action = invert_gripper_actions(gripper_action)
+
     trajectory["action"] = tf.concat(
         (
             trajectory["action"]["world_vector"],
             tf.zeros_like(trajectory["action"]["world_vector"]),
-            trajectory["action"]["gripper_closedness_action"],
+            gripper_action,
         ),
         axis=-1,
     )
@@ -109,54 +144,70 @@ def berkeley_cable_routing_dataset_transform(
         ),
         axis=-1,
     )
-    trajectory["language_instruction"] = trajectory["observation"][
-        "natural_language_instruction"
-    ]
+    trajectory["language_instruction"] = tf.fill(
+        tf.shape(trajectory["observation"]["natural_language_instruction"]), ""
+    )  # delete uninformative language instruction
     return trajectory
 
 
 def roboturk_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
+    # invert absolute gripper action, +1 = open, 0 = close
+    gripper_action = invert_gripper_actions(
+        tf.clip_by_value(trajectory["action"]["gripper_closedness_action"], 0, 1)
+    )
+
     trajectory["action"] = tf.concat(
         (
             trajectory["action"]["world_vector"],
             trajectory["action"]["rotation_delta"],
-            trajectory["action"]["gripper_closedness_action"],
+            gripper_action,
         ),
         axis=-1,
     )
-    trajectory["language_instruction"] = trajectory["observation"][
-        "natural_language_instruction"
-    ]
+    trajectory["language_instruction"] = tf.fill(
+        tf.shape(trajectory["observation"]["natural_language_instruction"]), ""
+    )  # delete uninformative language instruction
     return trajectory
 
 
 def nyu_door_opening_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
+    # make gripper action absolute action, +1 = open, 0 = close
+    gripper_action = trajectory["action"]["gripper_closedness_action"]
+    gripper_action = rel2abs_gripper_actions(gripper_action)
+    gripper_action = binarize_gripper_actions(gripper_action)
+    gripper_action = invert_gripper_actions(gripper_action)
+
     trajectory["action"] = tf.concat(
         (
             trajectory["action"]["world_vector"],
             trajectory["action"]["rotation_delta"],
-            trajectory["action"]["gripper_closedness_action"],
+            gripper_action,
         ),
         axis=-1,
     )
-    trajectory["language_instruction"] = trajectory["observation"][
-        "natural_language_instruction"
-    ]
+    trajectory["language_instruction"] = tf.fill(
+        tf.shape(trajectory["observation"]["natural_language_instruction"]), ""
+    )  # delete uninformative language instruction
     return trajectory
 
 
 def viola_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
+    # make gripper action, +1 = open, 0 = close
+    gripper_action = trajectory["action"]["gripper_closedness_action"][:, None]
+    gripper_action = tf.clip_by_value(gripper_action, 0, 1)
+    gripper_action = invert_gripper_actions(gripper_action)
+
     trajectory["action"] = tf.concat(
         (
             trajectory["action"]["world_vector"],
             trajectory["action"]["rotation_delta"],
-            trajectory["action"]["gripper_closedness_action"][:, None],
+            gripper_action,
         ),
         axis=-1,
     )
-    trajectory["language_instruction"] = trajectory["observation"][
-        "natural_language_instruction"
-    ]
+    trajectory["language_instruction"] = tf.fill(
+        tf.shape(trajectory["observation"]["natural_language_instruction"]), ""
+    )  # delete uninformative language instruction
     return trajectory
 
 
@@ -169,11 +220,18 @@ def berkeley_autolab_ur5_dataset_transform(
     trajectory["observation"]["depth"] = trajectory["observation"].pop(
         "image_with_depth"
     )
+
+    # make gripper action absolute action, +1 = open, 0 = close
+    gripper_action = trajectory["action"]["gripper_closedness_action"][:, None]
+    gripper_action = rel2abs_gripper_actions(gripper_action)
+    gripper_action = binarize_gripper_actions(gripper_action)
+    gripper_action = invert_gripper_actions(gripper_action)
+
     trajectory["action"] = tf.concat(
         (
             trajectory["action"]["world_vector"],
             trajectory["action"]["rotation_delta"],
-            trajectory["action"]["gripper_closedness_action"][:, None],
+            gripper_action,
         ),
         axis=-1,
     )
@@ -192,19 +250,20 @@ def toto_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
         ),
         axis=-1,
     )
-    trajectory["language_instruction"] = trajectory["observation"][
-        "natural_language_instruction"
-    ]
+    trajectory["language_instruction"] = tf.fill(
+        tf.shape(trajectory["observation"]["natural_language_instruction"]), ""
+    )  # delete uninformative language instruction
     return trajectory
 
 
 def language_table_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
+    # default to "open" gripper
     trajectory["action"] = tf.concat(
         (
             trajectory["action"],
             tf.zeros_like(trajectory["action"]),
             tf.zeros_like(trajectory["action"]),
-            tf.zeros_like(trajectory["action"][:, :1]),
+            tf.ones_like(trajectory["action"][:, :1]),
         ),
         axis=-1,
     )
@@ -214,10 +273,10 @@ def language_table_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, An
     instruction_encoded = tf.strings.unicode_encode(
         instruction_bytes, output_encoding="UTF-8"
     )
-    # Remove trailing padding.
+    # Remove trailing padding --> convert RaggedTensor to regular Tensor.
     trajectory["language_instruction"] = tf.strings.split(instruction_encoded, "\x00")[
-        0
-    ]
+        :, :1
+    ].to_tensor()[:, 0]
     return trajectory
 
 
@@ -263,6 +322,15 @@ def nyu_rot_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def stanford_hydra_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
+    # invert gripper action, +1 = open, 0 = close
+    trajectory["action"] = tf.concat(
+        (
+            trajectory["action"][:, :6],
+            invert_gripper_actions(trajectory["action"][:, -1:]),
+        ),
+        axis=-1,
+    )
+
     trajectory["observation"]["eef_state"] = tf.concat(
         (
             trajectory["observation"]["state"][:, :3],
@@ -273,16 +341,28 @@ def stanford_hydra_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, An
     trajectory["observation"]["gripper_state"] = trajectory["observation"]["state"][
         :, -3:-2
     ]
-    # flip BGR channels to RGB
-    trajectory["observation"]["image"] = trajectory["observation"]["image"][..., ::-1]
-    trajectory["observation"]["wrist_image"] = trajectory["observation"]["wrist_image"][
-        ..., ::-1
-    ]
+    trajectory["language_instruction"] = tf.fill(
+        tf.shape(trajectory["language_instruction"]), ""
+    )  # delete uninformative language instruction
     return trajectory
 
 
 def austin_buds_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
+    # invert gripper action + clip, +1 = open, 0 = close
+    trajectory["action"] = tf.concat(
+        (
+            trajectory["action"][:, :6],
+            invert_gripper_actions(
+                tf.clip_by_value(trajectory["action"][:, -1:], 0, 1)
+            ),
+        ),
+        axis=-1,
+    )
+
     trajectory["observation"]["state"] = trajectory["observation"]["state"][:, :8]
+    trajectory["language_instruction"] = tf.fill(
+        tf.shape(trajectory["language_instruction"]), ""
+    )  # delete uninformative language instruction
     return trajectory
 
 
@@ -294,7 +374,19 @@ def nyu_franka_play_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, A
         trajectory["observation"]["depth_additional_view"][..., 0], tf.float32
     )
     trajectory["observation"]["eef_state"] = trajectory["observation"]["state"][:, -6:]
-    trajectory["action"] = trajectory["action"][:, -8:-1]
+
+    # clip gripper action, +1 = open, 0 = close
+    trajectory["action"] = tf.concat(
+        (
+            trajectory["action"][:, -8:-2],
+            tf.clip_by_value(trajectory["action"][:, -2:-1], 0, 1),
+        ),
+        axis=-1,
+    )
+
+    trajectory["language_instruction"] = tf.fill(
+        tf.shape(trajectory["language_instruction"]), ""
+    )  # delete uninformative language instruction
     return trajectory
 
 
@@ -315,11 +407,15 @@ def furniture_bench_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, A
         ),
         axis=-1,
     )
+
+    # invert gripper action + clip, +1 = open, 0 = close
     trajectory["action"] = tf.concat(
         (
             trajectory["action"][:, :3],
             tft.euler.from_quaternion(trajectory["action"][:, 3:7]),
-            trajectory["action"][:, -1:],
+            invert_gripper_actions(
+                tf.clip_by_value(trajectory["action"][:, -1:], 0, 1)
+            ),
         ),
         axis=-1,
     )
@@ -356,10 +452,38 @@ def ucsd_pick_place_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, A
 
 
 def austin_sailor_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
+    # invert gripper action + clip, +1 = open, 0 = close
+    trajectory["action"] = tf.concat(
+        (
+            trajectory["action"][:, :6],
+            invert_gripper_actions(
+                tf.clip_by_value(trajectory["action"][:, -1:], 0, 1)
+            ),
+        ),
+        axis=-1,
+    )
+
+    trajectory["language_instruction"] = tf.fill(
+        tf.shape(trajectory["language_instruction"]), ""
+    )  # delete uninformative language instruction
     return trajectory
 
 
 def austin_sirius_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
+    # invert gripper action + clip, +1 = open, 0 = close
+    trajectory["action"] = tf.concat(
+        (
+            trajectory["action"][:, :6],
+            invert_gripper_actions(
+                tf.clip_by_value(trajectory["action"][:, -1:], 0, 1)
+            ),
+        ),
+        axis=-1,
+    )
+
+    trajectory["language_instruction"] = tf.fill(
+        tf.shape(trajectory["language_instruction"]), ""
+    )  # delete uninformative language instruction
     return trajectory
 
 
@@ -368,7 +492,9 @@ def bc_z_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
         (
             trajectory["action"]["future/xyz_residual"][:, :3],
             trajectory["action"]["future/axis_angle_residual"][:, :3],
-            tf.cast(trajectory["action"]["future/target_close"][:, :1], tf.float32),
+            invert_gripper_actions(
+                tf.cast(trajectory["action"]["future/target_close"][:, :1], tf.float32)
+            ),
         ),
         axis=-1,
     )
@@ -499,6 +625,14 @@ def dlr_sara_grid_clamp_dataset_transform(trajectory: Dict[str, Any]) -> Dict[st
 def dlr_edan_shared_control_dataset_transform(
     trajectory: Dict[str, Any]
 ) -> Dict[str, Any]:
+    # invert gripper action, +1 = open, 0 = close
+    trajectory["action"] = tf.concat(
+        (
+            trajectory["action"][:, :6],
+            invert_gripper_actions(trajectory["action"][:, -1:]),
+        ),
+        axis=-1,
+    )
     return trajectory
 
 
@@ -555,11 +689,21 @@ def uiuc_d3field_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]
 
 def utaustin_mutex_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
     trajectory["observation"]["state"] = trajectory["observation"]["state"][:, :8]
-    # flip BGR channels back to RGB
-    trajectory["observation"]["image"] = trajectory["observation"]["image"][..., ::-1]
-    trajectory["observation"]["wrist_image"] = trajectory["observation"]["wrist_image"][
-        ..., ::-1
-    ]
+
+    # invert gripper action + clip, +1 = open, 0 = close
+    trajectory["action"] = tf.concat(
+        (
+            trajectory["action"][:, :6],
+            invert_gripper_actions(
+                tf.clip_by_value(trajectory["action"][:, -1:], 0, 1)
+            ),
+        ),
+        axis=-1,
+    )
+
+    trajectory["language_instruction"] = tf.fill(
+        tf.shape(trajectory["language_instruction"]), ""
+    )  # delete uninformative language instruction
     return trajectory
 
 
@@ -568,10 +712,12 @@ def berkeley_fanuc_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, An
     trajectory["observation"]["gripper_state"] = trajectory["observation"]["state"][
         :, 6:7
     ]
+
+    # dataset does not store gripper actions, so use gripper state info, invert so +1 = open, 0 = close
     trajectory["action"] = tf.concat(
         (
             trajectory["action"],
-            tf.zeros_like(trajectory["action"][:, :1]),
+            invert_gripper_actions(trajectory["observation"]["gripper_state"]),
         ),
         axis=-1,
     )
