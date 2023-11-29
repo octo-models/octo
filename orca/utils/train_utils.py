@@ -181,13 +181,12 @@ def filter_eval_datasets(dataset_kwargs_list, sample_weights, eval_datasets=None
         )
 
 
-def create_optimizer(params_or_params_shape, optimizer_kwargs: dict, frozen_keys=None):
+def create_optimizer(params_or_params_shape, optimizer_kwargs: dict):
     """Creates optimizer for ORCA.
 
     Optimizer_kwargs are the kwargs for optax.adamw; if the learning rate is a dict,
     it is interpreted as the kwargs for optax.warmup_cosine_decay_schedule. If clip_gradient
     is specified, then gradient clipping is applied.
-    Frozen_keys removes gradients on all params whose name contains key.
 
     Returns:
         tx: an Optax optimizer
@@ -215,13 +214,17 @@ def create_optimizer(params_or_params_shape, optimizer_kwargs: dict, frozen_keys
             tx,
         )
 
-    if frozen_keys is not None:
+    if "frozen_keys" in optimizer_kwargs and optimizer_kwargs["frozen_keys"]:
         # define trainable and frozen parameter sets
-        logging.info(f"Freezing parameters with the following keys: {frozen_keys}.")
+        frozen_keys = optimizer_kwargs["frozen_keys"]
+        logging.info(
+            f"Freezing parameters that include the following keys: {frozen_keys}."
+        )
         partition_optimizers = {
             "trainable": tx,
             "frozen": optax.set_to_zero(),
         }
+        # freeze anything that contains the keys as part of the path
         param_partitions = flax.traverse_util.path_aware_map(
             lambda path, v: "frozen"
             if any([key in path for key in frozen_keys])
@@ -229,5 +232,29 @@ def create_optimizer(params_or_params_shape, optimizer_kwargs: dict, frozen_keys
             params_or_params_shape,
         )
         tx = optax.multi_transform(partition_optimizers, param_partitions)
+
+        logging.info("Frozen params:")
+        flax.traverse_util.path_aware_map(
+            lambda path, opt_status: logging.info(path)
+            if opt_status == "frozen"
+            else None,
+            param_partitions,
+        )
+        total_params = sum(
+            jax.tree_util.tree_leaves(
+                jax.tree_map(lambda x: x.size, params_or_params_shape)
+            )
+        )
+        trainable_params = sum(
+            jax.tree_util.tree_leaves(
+                jax.tree_map(
+                    lambda x, y: x.size if y == "trainable" else 0,
+                    params_or_params_shape,
+                    param_partitions,
+                )
+            )
+        )
+        logging.info(f"Num trainable params: {trainable_params}.")
+        logging.info(f"Num frozen params: {total_params - trainable_params}.")
 
     return tx, lr_callable

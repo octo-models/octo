@@ -305,7 +305,6 @@ def main(_):
     tx, lr_callable = create_optimizer(
         params_shape,
         FLAGS.config.optimizer.to_dict(),
-        FLAGS.config.get("frozen_keys", None),
     )
     train_state = create_train_state(
         construct_rng,
