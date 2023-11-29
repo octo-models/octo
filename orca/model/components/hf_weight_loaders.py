@@ -4,14 +4,19 @@ import pickle as pkl
 
 from flax.core import freeze, unfreeze
 import jax.numpy as jnp
-from transformers import FlaxAutoModel
+from transformers import AutoConfig, FlaxAutoModel, FlaxT5EncoderModel
 
 import orca
 from orca.model.components.clip import clip_weights_loader
 
 
-def hf_weights_loader(hf_model, params):
-    model = FlaxAutoModel.from_pretrained(hf_model)
+def hf_weights_loader(params, hf_model):
+    if "t5" in hf_model:
+        config = AutoConfig.from_pretrained(hf_model)
+        model = FlaxT5EncoderModel.from_pretrained(hf_model, config=config)
+    else:
+        model = FlaxAutoModel.from_pretrained(hf_model)
+
     model_def, model_variables = model.module, model.params
     replaced = False
 
@@ -81,6 +86,7 @@ def resnet18_IN_SimCLR_loader(params, checkpoint=None):
 # these are called to replace parameters after they are initialized from scratch
 weights_loaders = {
     "clip": clip_weights_loader,
-    "distilbert": ft.partial(hf_weights_loader, "distilbert-base-uncased"),
+    "distilbert": ft.partial(hf_weights_loader, hf_model="distilbert-base-uncased"),
     "resnet18-IN-SimCLR": resnet18_IN_SimCLR_loader,
+    "from_huggingface": hf_weights_loader,
 }
