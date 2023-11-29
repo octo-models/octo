@@ -565,7 +565,9 @@ def uiuc_d3field_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]
 
 def utaustin_mutex_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
     trajectory["observation"]["state"] = trajectory["observation"]["state"][:, :8]
-    trajectory["language_instruction"] = ""  # delete too long language instruction
+    trajectory["language_instruction"] = tf.fill(
+        tf.shape(trajectory["language_instruction"]), ""
+    )  # delete uninformative language instruction
     return trajectory
 
 
