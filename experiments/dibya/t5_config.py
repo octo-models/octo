@@ -10,7 +10,7 @@ def get_config(
 ):
     base_config = get_base_config(transformer_size)
 
-    config = update_config(base_config, dict(
+    config = update_config(base_config,
         model={
             "observation_tokenizers": [
                     (
@@ -40,8 +40,8 @@ def get_config(
                 "return_tensors": "np",
             },
         ),
-        pretrained_weights=["from_huggingface"],
+        pretrained_loaders=["from_huggingface"],
         pretrained_loader_kwargs=[dict(hf_model="t5-base")],
-    ))
+    )
 
     return config
