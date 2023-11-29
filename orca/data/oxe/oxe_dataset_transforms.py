@@ -89,6 +89,16 @@ def taco_play_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
         :, 7:8
     ]
     trajectory["action"] = trajectory["action"]["rel_actions_world"]
+
+    # invert gripper action + clip, +1 = open, 0 = close
+    trajectory["action"] = tf.concat(
+        (
+            trajectory["action"][:, :6],
+            tf.clip_by_value(trajectory["action"][:, -1:], 0, 1),
+        ),
+        axis=-1,
+    )
+
     trajectory["language_instruction"] = trajectory["observation"][
         "natural_language_instruction"
     ]
@@ -103,10 +113,11 @@ def jaco_play_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
         "end_effector_cartesian_pos"
     ][:, -1:]
 
-    # invert absolute gripper action, +1 = open, 0 = close
-    gripper_action = invert_gripper_actions(
-        trajectory["action"]["gripper_closedness_action"]
-    )
+    # make gripper action absolute action, +1 = open, 0 = close
+    gripper_action = trajectory["action"]["gripper_closedness_action"]
+    gripper_action = rel2abs_gripper_actions(gripper_action)
+    gripper_action = binarize_gripper_actions(gripper_action)
+    gripper_action = invert_gripper_actions(gripper_action)
 
     trajectory["action"] = tf.concat(
         (
@@ -142,7 +153,7 @@ def berkeley_cable_routing_dataset_transform(
 def roboturk_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
     # invert absolute gripper action, +1 = open, 0 = close
     gripper_action = invert_gripper_actions(
-        trajectory["action"]["gripper_closedness_action"]
+        tf.clip_by_value(trajectory["action"]["gripper_closedness_action"], 0, 1)
     )
 
     trajectory["action"] = tf.concat(
