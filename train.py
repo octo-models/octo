@@ -4,6 +4,7 @@ from functools import partial
 import json
 import os
 import os.path as osp
+import subprocess
 
 from absl import app, flags, logging
 import flax
@@ -330,6 +331,14 @@ def main(_):
         wandb.config.update(
             dict(example_batch_spec=example_batch_spec), allow_val_change=True
         )
+
+        # Save the git hash
+        process = subprocess.Popen(
+            ["git", "rev-parse", "HEAD"], shell=False, stdout=subprocess.PIPE
+        )
+        git_head_hash = process.communicate()[0].strip()
+        with open(os.path.join(save_dir, "git_hash.txt"), "wb") as f:
+            f.write(git_head_hash)
 
     if FLAGS.config.get("wandb_resume_id", None) is not None:
         train_state = state_checkpointer.restore(
