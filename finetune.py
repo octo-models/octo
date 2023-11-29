@@ -180,7 +180,6 @@ def main(_):
     tx, lr_callable = create_optimizer(
         model.params,
         FLAGS.config.optimizer.to_dict(),
-        FLAGS.config.get("frozen_keys", None),
     )
     train_state = TrainState.create(
         apply_fn=model.model_def.apply,
