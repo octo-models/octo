@@ -195,6 +195,11 @@ def make_oxe_dataset_kwargs_and_weights(
             if n_wrist_cameras
             else []
         )
+
+        if not any([e is not None for e in dataset_kwargs["image_obs_keys"]]):
+            print(f"Skipping {dataset} since no image input was loaded from it.")
+            continue
+
         dataset_kwargs["depth_obs_keys"] = dataset_kwargs["depth_obs_keys"][
             :n_third_person_cameras
         ] + (
