@@ -182,6 +182,21 @@ def main(_):
     rng = jax.random.PRNGKey(FLAGS.config.seed)
 
     tx, lr_callable = create_optimizer(model.params, FLAGS.config.optimizer.to_dict())
+
+    if FLAGS.config.get("frozen_keys", None):
+        # define trainable and frozen parameter sets
+        partition_optimizers = {
+            "trainable": tx,
+            "frozen": optax.set_to_zero(),
+        }
+        param_partitions = flax.traverse_util.path_aware_map(
+            lambda path, v: "frozen"
+            if any([key in path for key in FLAGS.config.get("frozen_keys")])
+            else "trainable",
+            model.params,
+        )
+        tx = optax.multi_transform(partition_optimizers, param_partitions)
+
     train_state = TrainState.create(
         apply_fn=model.model_def.apply,
         params=model.params,

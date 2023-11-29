@@ -271,7 +271,6 @@ class PretrainedModel:
 
         target_params = target_params.unfreeze()
         merge_params(target_params, pretrained_params)
-        target_params = flax.core.FrozenDict(target_params)
         return target_params
 
 

@@ -45,6 +45,7 @@ def get_config():
     config = dict(
         pretrained_path=placeholder(str),
         pretrained_step=placeholder(int),
+        frozen_keys=['BlockTransformer_0'],
         batch_size=1024,
         shuffle_buffer_size=20000,
         num_val_batches=8,
@@ -52,7 +53,7 @@ def get_config():
         log_interval=100,
         eval_interval=500,
         save_interval=500,
-        save_dir=placeholder(str),
+        save_dir="gs://karl-central-2", #placeholder(str),
         seed=42,
         wandb=dict(
             project="orca_finetune", group=placeholder(str), entity=placeholder(str)
