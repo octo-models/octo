@@ -46,7 +46,7 @@ class HFTokenizer(TextProcessor):
         if self.encode_with_model:
             return np.array(self.model(**inputs).last_hidden_state)
         else:
-            return FrozenDict(inputs)
+            return dict(inputs)
 
 
 class MuseEmbedding(TextProcessor):
