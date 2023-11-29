@@ -177,13 +177,14 @@ def main(_):
 
     rng = jax.random.PRNGKey(FLAGS.config.seed)
 
+    params = model.params.unfreeze()
     tx, lr_callable = create_optimizer(
-        model.params,
+        params,
         FLAGS.config.optimizer.to_dict(),
     )
     train_state = TrainState.create(
         apply_fn=model.model_def.apply,
-        params=model.params,
+        params=params,
         tx=tx,
         rng=rng,
     )

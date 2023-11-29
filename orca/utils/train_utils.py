@@ -48,7 +48,7 @@ def create_train_state(
 
     return TrainState.create(
         apply_fn=model_def.apply,
-        params=params,
+        params=params.unfreeze(),
         tx=tx,
         rng=state_rng,
     )
@@ -206,6 +206,7 @@ def create_optimizer(params_or_params_shape, optimizer_kwargs: dict):
     )
 
     clip_gradient = optimizer_kwargs.pop("clip_gradient", None)
+    frozen_keys = optimizer_kwargs.pop("frozen_keys", None)
 
     tx = optax.adamw(mu_dtype=jnp.bfloat16, **optimizer_kwargs, mask=wd_mask)
     if clip_gradient is not None:
@@ -214,9 +215,8 @@ def create_optimizer(params_or_params_shape, optimizer_kwargs: dict):
             tx,
         )
 
-    if "frozen_keys" in optimizer_kwargs and optimizer_kwargs["frozen_keys"]:
+    if frozen_keys:
         # define trainable and frozen parameter sets
-        frozen_keys = optimizer_kwargs["frozen_keys"]
         logging.info(
             f"Freezing parameters that include the following keys: {frozen_keys}."
         )
@@ -233,9 +233,9 @@ def create_optimizer(params_or_params_shape, optimizer_kwargs: dict):
         )
         tx = optax.multi_transform(partition_optimizers, param_partitions)
 
-        logging.info("Frozen params:")
+        logging.debug("Frozen params:")
         flax.traverse_util.path_aware_map(
-            lambda path, opt_status: logging.info(path)
+            lambda path, opt_status: logging.debug(path)
             if opt_status == "frozen"
             else None,
             param_partitions,
@@ -254,7 +254,7 @@ def create_optimizer(params_or_params_shape, optimizer_kwargs: dict):
                 )
             )
         )
-        logging.info(f"Num trainable params: {trainable_params}.")
-        logging.info(f"Num frozen params: {total_params - trainable_params}.")
+        logging.info(f"Num trainable params: {trainable_params:,}.")
+        logging.info(f"Num frozen params: {total_params - trainable_params:,}.")
 
     return tx, lr_callable
