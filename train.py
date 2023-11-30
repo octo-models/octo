@@ -174,63 +174,70 @@ def main(_):
 
     # load datasets
     if "oxe_kwargs" in FLAGS.config.dataset_kwargs:
-        #
+        # create dataset_kwargs_list from oxe_kwargs
         oxe_kwargs = FLAGS.config.dataset_kwargs["oxe_kwargs"].to_dict()
         del FLAGS.config.dataset_kwargs["oxe_kwargs"]
-        oxe_kwargs["data_mix"] = mixes.get(oxe_kwargs["data_mix"])
+        oxe_kwargs["data_mix"] = mixes[oxe_kwargs["data_mix"]]
         (
             dataset_kwargs_list,
             dataset_sampling_weights,
         ) = make_oxe_dataset_kwargs_and_weights(**oxe_kwargs)
-        FLAGS.config.dataset_kwargs["data_kwargs_list"] = dataset_kwargs_list
+        FLAGS.config.dataset_kwargs["dataset_kwargs_list"] = dataset_kwargs_list
         FLAGS.config.dataset_kwargs["sample_weights"] = dataset_sampling_weights
 
-    sample_weights = (
-        FLAGS.config.dataset_kwargs["sample_weights"]
-        if "sample_weights" in FLAGS.config.dataset_kwargs
-        else [1.0] * len(FLAGS.config.dataset_kwargs["data_kwargs_list"])
+    # override each element of dataset_kwargs_list with common_dataset_kwargs
+    if "common_dataset_kwargs" in FLAGS.config.dataset_kwargs:
+        FLAGS.config.dataset_kwargs["dataset_kwargs_list"] = [
+            {**kwargs, **FLAGS.config.dataset_kwargs["common_dataset_kwargs"]}
+            for kwargs in FLAGS.config.dataset_kwargs["dataset_kwargs_list"]
+        ]
+
+    sample_weights = FLAGS.config.dataset_kwargs.get(
+        "sample_weights",
+        [1.0] * len(FLAGS.config.dataset_kwargs["dataset_kwargs_list"]),
     )
     train_data = make_interleaved_dataset(
-        FLAGS.config.dataset_kwargs["common_kwargs"],
-        FLAGS.config.dataset_kwargs["data_kwargs_list"],
-        FLAGS.config.dataset_kwargs["transform_kwargs"],
+        FLAGS.config.dataset_kwargs["dataset_kwargs_list"],
+        FLAGS.config.dataset_kwargs["traj_transform_kwargs"],
+        FLAGS.config.dataset_kwargs["frame_transform_kwargs"],
         train=True,
         sample_weights=sample_weights,
-        shared_threads=48,
-        shared_read_threads=48,
-        global_threads=200,
+        balance_weights=FLAGS.config.get("balance_weights", True),
         shuffle_buffer_size=FLAGS.config.shuffle_buffer_size,
         batch_size=FLAGS.config.batch_size,
-        balance_weights=FLAGS.config.get("balance_weights", True),
+        traj_transform_threads=FLAGS.config.dataset_kwargs.get(
+            "traj_transform_threads", None
+        ),
+        traj_read_threads=FLAGS.config.dataset_kwargs.get("traj_read_threads", None),
+        frame_transform_threads=FLAGS.config.dataset_kwargs.get(
+            "frame_transform_threads", None
+        ),
     )
     val_datas = []
     visualizers = []
     val_datasets_kwargs, val_datasets_sample_weights = filter_eval_datasets(
-        FLAGS.config.dataset_kwargs["data_kwargs_list"],
+        FLAGS.config.dataset_kwargs["dataset_kwargs_list"],
         sample_weights,
         FLAGS.config.eval_datasets,
     )
     for dataset_kwargs in val_datasets_kwargs:
-        val_data_kwargs = {
-            **dataset_kwargs,
-            **FLAGS.config.dataset_kwargs["common_kwargs"],
-            **{
+        val_dataset = make_single_dataset(
+            dataset_kwargs={
+                **dataset_kwargs,
+                **FLAGS.config.dataset_kwargs.get("common_dataset_kwargs", {}),
                 "num_parallel_reads": 1,
                 "num_parallel_calls": 1,
                 "shuffle": False,
-            },  # Make validation data loading less demanding
-        }
-        val_transform_kwargs = {
-            **FLAGS.config.dataset_kwargs["transform_kwargs"],
-            **{
+            },
+            traj_transform_kwargs={
+                **FLAGS.config.dataset_kwargs["traj_transform_kwargs"],
                 "num_parallel_calls": 1,
             },
-        }  # Make validation data loading less demanding
-
-        val_dataset = make_single_dataset(
-            val_data_kwargs,
-            val_transform_kwargs,
+            frame_transform_kwargs=FLAGS.config.dataset_kwargs[
+                "frame_transform_kwargs"
+            ],
             train=False,
+            frame_transform_threads=1,
         )
         dataset_statistics = val_dataset.dataset_statistics
         val_datas.append(
@@ -247,7 +254,7 @@ def main(_):
         if save_dir is not None and jax.process_index() == 0:
             with tf.io.gfile.GFile(
                 os.path.join(
-                    save_dir, f"dataset_statistics_{val_data_kwargs['name']}.json"
+                    save_dir, f"dataset_statistics_{dataset_kwargs['name']}.json"
                 ),
                 "w",
             ) as f:
