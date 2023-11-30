@@ -413,7 +413,7 @@ def make_dataset_from_rlds(
     dataset = dataset.map(restructure, num_parallel_calls)
 
     if isinstance(dataset_statistics, str):
-        with open(dataset_statistics, "r") as f:
+        with tf.io.gfile.GFile(dataset_statistics, "r") as f:
             dataset_statistics = json.load(f)
     elif dataset_statistics is None:
         # tries to load from cache, otherwise computes on the fly

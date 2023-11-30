@@ -4,6 +4,7 @@ from functools import partial
 import json
 import os
 import os.path as osp
+import subprocess
 
 from absl import app, flags, logging
 import flax
@@ -187,7 +188,7 @@ def main(_):
     sample_weights = (
         FLAGS.config.dataset_kwargs["sample_weights"]
         if "sample_weights" in FLAGS.config.dataset_kwargs
-        else None
+        else [1.0] * len(FLAGS.config.dataset_kwargs["data_kwargs_list"])
     )
     train_data = make_interleaved_dataset(
         FLAGS.config.dataset_kwargs["common_kwargs"],
@@ -333,6 +334,14 @@ def main(_):
         wandb.config.update(
             dict(example_batch_spec=example_batch_spec), allow_val_change=True
         )
+
+        # Save the git hash
+        process = subprocess.Popen(
+            ["git", "rev-parse", "HEAD"], shell=False, stdout=subprocess.PIPE
+        )
+        git_head_hash = process.communicate()[0].strip()
+        with open(os.path.join(save_dir, "git_hash.txt"), "wb") as f:
+            f.write(git_head_hash)
 
     if FLAGS.config.get("wandb_resume_id", None) is not None:
         train_state = state_checkpointer.restore(
@@ -556,9 +565,13 @@ def main(_):
 
             for data_kwargs, visualizer in zip(val_datasets_kwargs, visualizers):
                 for mode, policy_fn in modal_policy_fns.items():
-                    raw_infos = visualizer.raw_evaluations(policy_fn, max_trajs=100)
+                    raw_infos = visualizer.raw_evaluations(
+                        policy_fn, max_trajs=FLAGS.config.trajs_for_metrics
+                    )
                     metrics = visualizer.metrics_for_wandb(raw_infos)
-                    images = visualizer.visualize_for_wandb(policy_fn, max_trajs=8)
+                    images = visualizer.visualize_for_wandb(
+                        policy_fn, max_trajs=FLAGS.config.trajs_for_viz
+                    )
                     wandb_log(
                         {
                             f"offline_metrics_{data_kwargs['name']}/{mode}": metrics,

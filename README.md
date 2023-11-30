@@ -31,7 +31,7 @@ See the [Jax Github page](https://github.com/google/jax) for more details on ins
 
 Test the installation by training on the debug dataset:
 ```
-python train.py --config config.py:ci_debug_dataset  --name debug
+python train.py --config experiments/dibya/debug_config.py  --name debug
 ```
 
 ## Training
@@ -46,7 +46,7 @@ please reach out to [pertsch@berkeley.edu](mailto:pertsch@berkeley.edu) or downl
 To train foundational ORCA policies, you can follow the example command below. You can modify hyperparameters like
 dataset, batch size etc. in [config.py](config.py).
 ```
-python train.py --config config.py:transformer_bc_bridge --name=orca_bridge --config.dataset_kwargs.data_kwargs_list[0].data_dir=<...> --config.save_dir=<...>
+python train.py --config config.py:vit_s --name=orca --config.dataset_kwargs.oxe_kwargs.data_dir=... --config.dataset_kwargs.oxe_kwargs.data_mix=oxe_magic_soup ...
 ```
 
 ## Code Structure
@@ -67,7 +67,8 @@ Steps to contribute:
 1. Fork the repo and create your branch from `master`.
 2. Use `pre-commit` to enable code checks and auto-formatting.
 3. Test that a basic training starts with the debug dataset with: ```
-python experiments/main/train.py --config experiments/main/configs/train_config.py:ci_debug_dataset  --name debug```
+python train.py --config experiments/dibya/debug_config.py  --name debug
+```
 
 
 ## FAQ
