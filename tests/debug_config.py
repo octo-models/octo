@@ -9,7 +9,7 @@ def get_config():
     del base_config["dataset_kwargs"]["oxe_kwargs"]
     config = update_config(
         base_config,
-        num_steps=20,
+        num_steps=2,
         optimizer=dict(
             learning_rate=dict(
                 warmup_steps=1,
@@ -18,8 +18,8 @@ def get_config():
         batch_size=64,
         shuffle_buffer_size=1000,
         num_val_batches=1,
-        log_interval=10,
-        eval_interval=10,
+        log_interval=1,
+        eval_interval=2,
         eval_datasets=None,
         trajs_for_metrics=1,
         trajs_for_viz=1,
@@ -27,7 +27,7 @@ def get_config():
             "data_kwargs_list": [
                 {
                     "name": "bridge_dataset",
-                    "data_dir": "./datasets/debug_dataset",
+                    "data_dir": "./tests/debug_dataset",
                     "image_obs_keys": ["image_0"],
                     "state_obs_keys": ["state"],
                 },
