@@ -303,7 +303,10 @@ def main(_):
         construct_rng,
         *model_init_args,
     )["params"]
-    tx, lr_callable = create_optimizer(params_shape, FLAGS.config.optimizer.to_dict())
+    tx, lr_callable, param_norm_callable = create_optimizer(
+        params_shape.unfreeze(),
+        FLAGS.config.optimizer.to_dict(),
+    )
     train_state = create_train_state(
         construct_rng,
         model_def,
@@ -395,14 +398,13 @@ def main(_):
             state.params, state, batch, dropout_rng, train=True
         )
         grad_norm = optax.global_norm(grads)
-        param_norm = optax.global_norm(state.params)
         updates, _ = state.tx.update(grads, state.opt_state, state.params)
         update_norm = optax.global_norm(updates)
         info.update(
             {
                 "grad_norm": grad_norm,
-                "param_norm": param_norm,
                 "update_norm": update_norm,
+                "param_norm": param_norm_callable(state.params),
                 "learning_rate": lr_callable(state.step),
             }
         )

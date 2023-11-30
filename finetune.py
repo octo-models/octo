@@ -177,10 +177,14 @@ def main(_):
 
     rng = jax.random.PRNGKey(FLAGS.config.seed)
 
-    tx, lr_callable = create_optimizer(model.params, FLAGS.config.optimizer.to_dict())
+    params = model.params.unfreeze()
+    tx, lr_callable, param_norm_callable = create_optimizer(
+        params,
+        FLAGS.config.optimizer.to_dict(),
+    )
     train_state = TrainState.create(
         apply_fn=model.model_def.apply,
-        params=model.params,
+        params=params,
         tx=tx,
         rng=rng,
     )
@@ -290,14 +294,13 @@ def main(_):
         )
         # Gradient Metrics (TODO: Does the finetuner need these?) ###
         grad_norm = optax.global_norm(grads)
-        param_norm = optax.global_norm(state.params)
         updates, _ = state.tx.update(grads, state.opt_state, state.params)
         update_norm = optax.global_norm(updates)
         info.update(
             {
                 "grad_norm": grad_norm,
-                "param_norm": param_norm,
                 "update_norm": update_norm,
+                "param_norm": param_norm_callable(state.params),
                 "learning_rate": lr_callable(state.step),
             }
         )

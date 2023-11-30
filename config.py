@@ -60,6 +60,7 @@ def get_config(
                 ),
                 weight_decay=0.1,
                 clip_gradient=1.0,
+                frozen_keys=tuple(),
             ),
             batch_size=1024,
             eval_batch_size=128,
@@ -75,8 +76,8 @@ def get_config(
             resume_path=placeholder(str),
             text_processor="muse_embedding",
             text_processor_kwargs=dict(),
-            pretrained_loaders=[],
-            pretrained_loader_kwargs=[],
+            pretrained_loaders=tuple(),
+            pretrained_loader_kwargs=tuple(),
             wandb=dict(
                 project="orca",
                 group=placeholder(str),
