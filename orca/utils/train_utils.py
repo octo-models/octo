@@ -263,7 +263,7 @@ def create_optimizer(params_or_params_shape, optimizer_kwargs: dict):
         )
 
         zero_frozen_params = lambda params: jax.tree_map(
-            lambda x, y: x if y == "trainable" else 0,
+            lambda x, y: x if y == "trainable" else jnp.zeros(()),
             params,
             param_partitions,
         )
