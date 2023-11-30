@@ -4,32 +4,35 @@ from config import update_config, wrap
 
 def get_config(config_string=None):
     base_config = get_base_config(config_string)
-
+    del base_config["model"]["observation_tokenizers"]
     config = update_config(
         base_config,
         optimizer=dict(
             frozen_keys=("*hf_model*",),
         ),
         model={
-            "observation_tokenizers": [
-                (
-                    "image_tokenizer",
-                    {
-                        "num_tokens": 256,
-                        "encoder": "small-stem-16",
-                        "encoder_kwargs": dict(),
-                        "task_stack_keys": [
-                            "image_.*"
-                        ],  # by default, early fuse goal images into visual encoder
-                    },
-                ),
-            ],
-            "task_tokenizers": [
-                (
-                    "language_tokenizer",
-                    {"encoder": "t5-base", "finetune_encoder": False},
-                ),
-            ],
+            "observation_tokenizers": {
+                "image": {
+                    "cls_name": "image_tokenizer",
+                    "kwargs": dict(
+                        num_tokens=256,
+                        obs_stack_keys=["image_.*"],
+                        task_stack_keys=["image_.*"],
+                        task_film_keys=[],
+                        encoder="small-stem-16",
+                        encoder_kwargs=dict(),
+                    ),
+                },
+            },
+            "task_tokenizers": {
+                "language": {
+                    "cls_name": "language_tokenizer",
+                    "kwargs": dict(
+                        encoder="t5-base",
+                        finetune_encoder=False,
+                    ),
+                },
+            },
         },
         text_processor="hf_tokenizer",
         text_processor_kwargs=dict(
