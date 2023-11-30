@@ -68,7 +68,7 @@ def get_config(
             ),
             batch_size=1024,
             eval_batch_size=128,
-            prefetch_num_batches=5,
+            prefetch_num_batches=0,
             shuffle_buffer_size=100000,
             val_shuffle_buffer_size=1000,
             num_val_batches=16,
