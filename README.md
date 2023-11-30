@@ -31,7 +31,7 @@ See the [Jax Github page](https://github.com/google/jax) for more details on ins
 
 Test the installation by training on the debug dataset:
 ```
-python train.py --config experiments/dibya/debug_config.py  --name debug
+python train.py --config tests/debug_config.py --debug
 ```
 
 ## Training
@@ -67,7 +67,7 @@ Steps to contribute:
 1. Fork the repo and create your branch from `master`.
 2. Use `pre-commit` to enable code checks and auto-formatting.
 3. Test that a basic training starts with the debug dataset with: ```
-python train.py --config experiments/dibya/debug_config.py  --name debug
+python train.py --config tests/debug_config.py
 ```
 
 
