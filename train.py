@@ -263,9 +263,16 @@ def main(_):
                     f,
                 )
 
-    train_data_iter = map(shard, map(process_text, train_data.iterator()))
+    train_data_iter = map(
+        shard,
+        map(
+            process_text,
+            train_data.iterator(prefetch=FLAGS.config.prefetch_num_batches),
+        ),
+    )
     val_data_iters = [
-        map(shard, map(process_text, val_data.iterator())) for val_data in val_datas
+        map(shard, map(process_text, val_data.iterator(prefetch=0)))
+        for val_data in val_datas
     ]
 
     example_batch = next(train_data_iter)
