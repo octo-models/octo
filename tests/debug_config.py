@@ -26,22 +26,17 @@ def get_config():
         trajs_for_metrics=1,
         trajs_for_viz=1,
         dataset_kwargs={
-            "data_kwargs_list": [
+            "dataset_kwargs_list": [
                 {
                     "name": "bridge_dataset",
                     "data_dir": "./tests/debug_dataset",
                     "image_obs_keys": ["image_0"],
                     "state_obs_keys": ["state"],
                 },
-            ],  # common_kwargs override specific kwargs from data_kwargs_list
-            "common_kwargs": dict(
-                ram_budget=1,  # limit RAM per dataset
-                num_parallel_reads=1,  # for reading from GCS
-                num_parallel_calls=1,  # for the less CPU-intensive ops in initial dataset construction
-            ),
-            "transform_kwargs": dict(
-                num_parallel_calls=1,  # for the most CPU-intensive ops (decoding, resizing, augmenting)
-            ),
+            ],
+            "traj_transform_threads": 1,  # shared between all datasets
+            "traj_read_threads": 1,  # shared between all datasets
+            "frame_transform_threads": 4,  # not shared between datasets
         },
     )
     return config

@@ -114,7 +114,7 @@ def get_dataset_config(modality="multimodal", window_size=1):
         raise ValueError(f"Unknown modality {modality}")
 
     return {
-        # oxe_kwargs will generate data_kwargs_list and sampling weights
+        # oxe_kwargs will generate dataset_kwargs_list and sampling weights
         "oxe_kwargs": dict(
             data_mix=placeholder(str),
             # for v4 TPUs: "gs://rail-orca-central2/resize_336_336"
@@ -123,18 +123,19 @@ def get_dataset_config(modality="multimodal", window_size=1):
             n_wrist_cameras=0,
             load_depth=False,
         ),
-        # common_kwargs override specific kwargs from data_kwargs_list
-        "common_kwargs": dict(
-            ram_budget=1,  # limit RAM per dataset
-            num_parallel_reads=8,  # for reading from GCS
-            num_parallel_calls=16,  # for the less CPU-intensive ops in initial dataset construction
+        # common_dataset_kwargs override specific kwargs from dataset_kwargs_list
+        "common_dataset_kwargs": dict(
             action_proprio_normalization_type=normalization_type,
         ),
-        "transform_kwargs": dict(
-            resize_size=(256, 256),
-            num_parallel_calls=32,  # for the most CPU-intensive ops (decoding, resizing, augmenting)
+        "traj_transform_kwargs": dict(
             window_size=window_size,
             additional_action_window_size=0,
+            goal_relabeling_strategy="uniform",
+            subsample_length=100,
+            **task_augmentation,
+        ),
+        "frame_transform_kwargs": dict(
+            resize_size=(256, 256),
             image_augment_kwargs=dict(
                 random_resized_crop=dict(scale=[0.8, 1.0], ratio=[0.9, 1.1]),
                 random_brightness=[0.2],
@@ -149,9 +150,10 @@ def get_dataset_config(modality="multimodal", window_size=1):
                     "random_hue",
                 ],
             ),
-            goal_relabeling_strategy="uniform",
-            **task_augmentation,
         ),
+        "traj_transform_threads": 48,  # shared between all datasets
+        "traj_read_threads": 48,  # shared between all datasets
+        "frame_transform_threads": 200,  # not shared between datasets
     }
 
 
