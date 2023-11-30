@@ -60,6 +60,7 @@ RLDS_TRAJECTORY_MAP_TRANSFORMS = {
     "fmb_dataset": fmb_dataset_transform,
     "bridge_dataset": bridge_dataset_transform,
     "aloha_screwdriver_dataset": aloha_dataset_transform,
+    "aloha_sim_cube_scripted_dataset": aloha_dataset_transform,
     # Open X-Embodiment Datasets
     "fractal20220817_data": rt1_dataset_transform,
     "kuka": kuka_dataset_transform,
