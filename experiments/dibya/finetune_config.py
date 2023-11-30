@@ -38,7 +38,7 @@ def get_config(
     }
 
     if mode == "full":
-        frozen_keys = tuple()
+        frozen_keys = None
     elif mode == "head_only":
         frozen_keys = ("orca_transformer.*",)
     elif mode == "head_mlp_only":
@@ -47,6 +47,8 @@ def get_config(
             "heads_*.map_head.probe",
             "heads_*.map_head.MultiHeadDotProductAttention_0.*",
         )
+    elif mode == "frozen_transformer":
+        frozen_keys = ("orca_transformer.BlockTransformer_0.*",)
     else:
         raise ValueError("Invalid mode")
 
