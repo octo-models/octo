@@ -262,4 +262,15 @@ def create_optimizer(params_or_params_shape, optimizer_kwargs: dict):
             "To see a detailed list of frozen params, set logging level to DEBUG."
         )
 
-    return tx, lr_callable
+        zero_frozen_params = lambda params: jax.tree_map(
+            lambda x, y: x if y == "trainable" else 0,
+            params,
+            param_partitions,
+        )
+        param_norm_callable = lambda params: optax.global_norm(
+            zero_frozen_params(params)
+        )
+    else:
+        param_norm_callable = optax.global_norm
+
+    return tx, lr_callable, param_norm_callable
