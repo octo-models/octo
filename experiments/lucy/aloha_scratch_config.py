@@ -1,12 +1,15 @@
 from config import get_config as get_base_config
 from config import update_config, wrap
 
+from orca.data.utils.data_utils import StateEncoding, ActionEncoding
+
 
 def get_config(config_string=None):
     base_config = get_base_config(config_string)
     del base_config["dataset_kwargs"]["oxe_kwargs"]
     config = update_config(
         base_config,
+        eval_datasets=None,
         batch_size=128,
         eval_interval=500,
         save_interval=500,
@@ -20,7 +23,7 @@ def get_config(config_string=None):
                         task_stack_keys=[],
                         task_film_keys=[],
                         encoder="small-stem-16",
-                        encoder_kwargs=dict(),
+                        encoder_kwargs=dict(use_film=False),
                     ),
                 },
                 "proprio": {
@@ -52,7 +55,7 @@ def get_config(config_string=None):
         dataset_kwargs=dict(
             data_kwargs_list=[
                 dict(
-                    name="aloha_cube_sim_scripted_dataset",
+                    name="aloha_sim_cube_scripted_dataset",
                     data_dir="gs://rail-orca-central2",
                     image_obs_keys=["top"],
                     state_obs_keys=["state"],
