@@ -43,13 +43,15 @@ def get_config(
 ):
     print("Creating config with: ", locals())
     num_steps = FieldReference(default=int(2e6))
+    window_size = FieldReference(default=1)
     return ConfigDict(
         dict(
             seed=42,
             num_steps=num_steps,
             save_dir=placeholder(str),
             model=get_model_config(transformer_size),
-            dataset_kwargs=get_dataset_config(modality),
+            window_size=window_size,
+            dataset_kwargs=get_dataset_config(modality, window_size),
             optimizer=dict(
                 learning_rate=dict(
                     init_value=0.0,
@@ -94,7 +96,7 @@ def get_config(
     )
 
 
-def get_dataset_config(modality="multimodal"):
+def get_dataset_config(modality="multimodal", window_size=1):
     normalization_type = "normal"
     if modality == "multimodal":
         task_augmentation = dict(
@@ -129,7 +131,7 @@ def get_dataset_config(modality="multimodal"):
         "transform_kwargs": dict(
             resize_size=(256, 256),
             num_parallel_calls=32,  # for the most CPU-intensive ops (decoding, resizing, augmenting)
-            window_size=1,
+            window_size=window_size,
             additional_action_window_size=0,
             image_augment_kwargs=dict(
                 random_resized_crop=dict(scale=[0.8, 1.0], ratio=[0.9, 1.1]),
