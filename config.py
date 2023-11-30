@@ -32,6 +32,7 @@ def wrap(f):
             else:
                 args.append(e)
         return f(*args, **kwargs)
+
     return wrapped_f
 
 
@@ -148,6 +149,7 @@ def get_dataset_config(modality="multimodal"):
             **task_augmentation,
         ),
     }
+
 
 def get_transformer_kwargs(transformer_size):
     assert transformer_size in ["dummy", "vanilla", "vit_s", "vit_b", "vit_l"]
