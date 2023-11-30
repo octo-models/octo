@@ -83,7 +83,6 @@ class MAPHead(nn.Module):
 
     @nn.compact
     def __call__(self, x, train=True):
-
         *batch_dims, l, d = x.shape
         x = x.reshape(-1, l, d)
         batch_size = x.shape[0]
@@ -179,7 +178,7 @@ class Transformer(nn.Module):
     num_heads: int
     dropout_rate: float = 0.1
     attention_dropout_rate: float = 0.1
-    add_position_embedding: bool = True
+    add_position_embedding: bool = False
 
     @nn.compact
     def __call__(self, x, attention_mask, *, train):

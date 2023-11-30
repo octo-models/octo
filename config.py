@@ -153,6 +153,11 @@ def get_dataset_config(modality="multimodal"):
 
 def get_transformer_kwargs(transformer_size):
     assert transformer_size in ["dummy", "vanilla", "vit_s", "vit_b", "vit_l"]
+    default_params = {
+        "attention_dropout_rate": 0.0,
+        "add_position_embedding": False,
+    }
+
     TRANSFORMER_SIZES = {
         "dummy": dict(
             num_layers=1,
@@ -195,7 +200,10 @@ def get_transformer_kwargs(transformer_size):
     }
     return dict(
         token_embedding_size=TOKEN_DIMS[transformer_size],
-        transformer_kwargs=TRANSFORMER_SIZES[transformer_size],
+        transformer_kwargs={
+            **default_params,
+            **TRANSFORMER_SIZES[transformer_size],
+        },
     )
 
 
