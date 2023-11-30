@@ -54,6 +54,7 @@ def get_config(
                 ),
                 weight_decay=0.1,
                 clip_gradient=1.0,
+                frozen_keys=[],
             ),
             batch_size=1024,
             eval_batch_size=128,

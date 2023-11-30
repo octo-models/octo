@@ -229,7 +229,7 @@ def create_optimizer(params_or_params_shape, optimizer_kwargs: dict):
         # path is a string of .-separated module names, e.g. ('orca_transformer.BlockTransformer_0...')
         param_partitions = flax.traverse_util.path_aware_map(
             lambda path, v: "frozen"
-            if any([fnmatch(".".joint(path), key) for key in frozen_keys])
+            if any([fnmatch(".".join(path), key) for key in frozen_keys])
             else "trainable",
             params_or_params_shape,
         )
