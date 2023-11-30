@@ -246,32 +246,44 @@ class PretrainedModel:
     @staticmethod
     def _merge_pretrained_params(target_params, pretrained_params):
         """Copies pre-trained params for every param that has corresponding key + shape."""
+        flat_target_params = flax.traverse_util.flatten_dict(target_params)
+        flat_pretrained_params = flax.traverse_util.flatten_dict(pretrained_params)
+        keys_to_update = [
+            k
+            for k in flat_target_params
+            if k in flat_pretrained_params
+            and flat_target_params[k].shape == flat_pretrained_params[k].shape
+        ]
+        missing_keys = [
+            k for k in flat_target_params if k not in flat_pretrained_params
+        ]
+        shape_mismatch_keys = [
+            k
+            for k in flat_target_params
+            if k in flat_pretrained_params
+            and flat_target_params[k].shape != flat_pretrained_params[k].shape
+        ]
 
-        def merge_params(target, pretrained, path=""):
-            for key in target:
-                key_path = path + "." + key
-                if key in pretrained:
-                    if isinstance(target[key], dict):
-                        merge_params(target[key], pretrained[key], key_path)
-                    else:
-                        if target[key].shape == pretrained[key].shape:
-                            print(
-                                f"Initializing {key_path} with pre-trained weights. Shape: {target[key].shape}"
-                            )
-                            target[key] = pretrained[key]
-                        else:
-                            logging.warning(
-                                f"Shapes for {key_path} changed -- skipping. "
-                                f"Pre-trained: {pretrained[key].shape}, target: {target[key].shape}"
-                            )
-                else:
-                    logging.warning(
-                        f"Can't find {key_path} in pre-trained model -- skipping."
-                    )
+        for key in keys_to_update:
+            logging.debug(f"Param copied from pre-trained: {'.'.join(key)}")
+        if missing_keys or shape_mismatch_keys:
+            logging.info(
+                "########## Parameters skipped during model loading: ##########"
+            )
+            for key in missing_keys:
+                logging.info(
+                    f"Param missing in pre-trained model, skipping: {'.'.join(key)}"
+                )
+            for key in shape_mismatch_keys:
+                logging.info(
+                    f"Param with differing shape in pre-trained model, skipping: {'.'.join(key)}"
+                )
 
-        target_params = target_params.unfreeze()
-        merge_params(target_params, pretrained_params)
-        return target_params
+        flat_target_params = flax.core.copy(
+            flat_target_params, {k: flat_pretrained_params[k] for k in keys_to_update}
+        )
+        target_params = flax.traverse_util.unflatten_dict(flat_target_params)
+        return flax.core.freeze(target_params)
 
 
 class HeadWrapper:

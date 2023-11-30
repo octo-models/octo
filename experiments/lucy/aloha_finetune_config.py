@@ -118,23 +118,11 @@ def get_config():
             )
         ),
         observation_tokenizers={
-            "image": {
-                "cls_name": "image_tokenizer",
-                "kwargs": dict(
-                    num_tokens=256,
-                    obs_stack_keys=["image_.*"],
-                    task_stack_keys=["image_.*"],
-                    task_film_keys=["language_instruction"],
-                    encoder="small-stem-16",
-                    encoder_kwargs=dict(use_film=True),
-                ),
-            },
             "proprio": {
                 "cls_name": "lowdim_obs_tokenizer",
                 "kwargs": dict(
                     n_bins=256,
-                    bin_type=base_config["dataset_kwargs"]["common_kwargs"][
-                        "action_proprio_normalization_type"],
+                    bin_type="normal",
                     low=-2.,
                     high=2.,
                     obs_keys=["proprio"],
@@ -144,5 +132,5 @@ def get_config():
         task_tokenizers=dict(),
     )
     config['overwrite_example_batch_path'] = (
-        "gs://karl-central-2/orca_finetune/aloha_sim_scratch_vit_s_20231130_080455/example_batch.msgpack")
+        "gs://karl-central-2/orca_finetune/aloha_sim_scratch_vit_s_textcond_20231130_213043/example_batch.msgpack")
     return ConfigDict(config)
