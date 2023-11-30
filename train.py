@@ -160,7 +160,7 @@ def main(_):
         text_processor = text_processors[FLAGS.config.text_processor](
             **FLAGS.config.text_processor_kwargs
         )
-        zero_text = text_processor.encode([""])[0]
+        zero_text = jax.tree_map(lambda x: x[0], text_processor.encode([""]))
 
     def process_text(batch):
         if text_processor is None:

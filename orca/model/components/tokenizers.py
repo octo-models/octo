@@ -134,22 +134,21 @@ class LanguageTokenizer(nn.Module):
      Args:
          num_tokens (int): Number of output tokens (not enforced).
          encoder (str, optional): Optional HuggingFace AutoModel name for encoding input IDs.
-         projection_dim (int, optional): Optional output Dense layer projection dimension.
+         finetune_encoder (bool, optional): Optional finetune last layers of the language model.
     """
 
-    num_tokens: int = 1
     encoder: str = None
-    projection_dim: int = None
+    finetune_encoder: bool = False
 
     def setup(self):
-        if self.projection_dim:
-            self.projection = nn.Dense(self.projection_dim, use_bias=False)
-
         if self.encoder is not None:
-            from transformers import AutoConfig, FlaxAutoModel
+            from transformers import AutoConfig, FlaxAutoModel, FlaxT5EncoderModel
 
             config = AutoConfig.from_pretrained(self.encoder)
-            self.hf_model = FlaxAutoModel.from_config(config).module
+            if "t5" in self.encoder:
+                self.hf_model = FlaxT5EncoderModel(config).module
+            else:
+                self.hf_model = FlaxAutoModel.from_config(config).module
 
     def __call__(
         self,
@@ -159,7 +158,6 @@ class LanguageTokenizer(nn.Module):
     ):
         if self.encoder is not None:
             tokens = self.hf_model(**tasks["language_instruction"]).last_hidden_state
-            tokens = jax.lax.stop_gradient(tokens)
         else:
             # add a time dimension to language
             if tasks["language_instruction"].ndim == 2:
@@ -167,8 +165,8 @@ class LanguageTokenizer(nn.Module):
             else:
                 tokens = tasks["language_instruction"]
 
-        if self.projection_dim is not None:
-            tokens = self.projection(tokens)
+        if not self.finetune_encoder:
+            tokens = jax.lax.stop_gradient(tokens)
 
         return tokens
 
