@@ -1,7 +1,7 @@
 from copy import deepcopy
 
 from ml_collections import ConfigDict
-from ml_collections.config_dict import placeholder
+from ml_collections.config_dict import FieldReference, placeholder
 
 
 def update_config(config, **kwargs):
@@ -11,444 +11,226 @@ def update_config(config, **kwargs):
     return new_config
 
 
-def get_config(config_string):
-    base_wandb_config = dict(
-        project="orca", group=placeholder(str), entity=placeholder(str)
-    )
+def wrap(f):
+    """Simple wrapper to enable passing config strings to `get_config`
 
-    base_config = dict(
-        batch_size=256,
-        eval_batch_size=128,
-        shuffle_buffer_size=1000,
-        val_shuffle_buffer_size=1000,
-        num_val_batches=8,
-        num_steps=int(2e6),
-        start_step=placeholder(int),
-        log_interval=100,
-        eval_interval=5000,
-        save_interval=5000,
-        save_dir=placeholder(str),
-        seed=42,
-        text_processor=None,
-        text_processor_kwargs=dict(),
-        pretrained_weights=[],
-        wandb=base_wandb_config,
-        wandb_resume_id=placeholder(str),
-        eval_datasets=None,
-    )
+    Usage:
 
-    # params that need to be specified multiple places
-    normalization_type = "normal"
+    python train.py --config=config.py:vit_s,multimodal
+    python train.py --config=config.py:transformer_size=vit_s
+    """
 
-    base_data_config = dict(
-        window_size=4,
-        additional_action_window_size=0,
-        image_augment_kwargs=dict(
-            random_resized_crop=dict(scale=[0.8, 1.0], ratio=[0.9, 1.1]),
-            random_brightness=[0.2],
-            random_contrast=[0.8, 1.2],
-            random_saturation=[0.8, 1.2],
-            random_hue=[0.1],
-            augment_order=[
-                "random_resized_crop",
-                "random_brightness",
-                "random_contrast",
-                "random_saturation",
-                "random_hue",
+    def wrapped_f(config_string=None):
+        if config_string is None:
+            return f()
+        elements = config_string.split(",")
+        args, kwargs = [], {}
+        for e in elements:
+            if "=" in e:
+                k, v = e.split("=")
+                kwargs[k] = v
+            else:
+                args.append(e)
+        return f(*args, **kwargs)
+
+    return wrapped_f
+
+
+@wrap
+def get_config(
+    transformer_size="vit_s",
+    modality="multimodal",
+):
+    print("Creating config with: ", locals())
+    num_steps = FieldReference(default=int(2e6))
+    return ConfigDict(
+        dict(
+            seed=42,
+            num_steps=num_steps,
+            save_dir=placeholder(str),
+            model=get_model_config(transformer_size),
+            dataset_kwargs=get_dataset_config(modality),
+            optimizer=dict(
+                learning_rate=dict(
+                    init_value=0.0,
+                    peak_value=3e-4,
+                    warmup_steps=2000,
+                    decay_steps=num_steps,
+                    end_value=0.0,
+                ),
+                weight_decay=0.1,
+                clip_gradient=1.0,
+                frozen_keys=tuple(),
+            ),
+            batch_size=1024,
+            eval_batch_size=128,
+            shuffle_buffer_size=100000,
+            val_shuffle_buffer_size=1000,
+            num_val_batches=16,
+            start_step=placeholder(int),
+            log_interval=100,
+            eval_interval=5000,
+            save_interval=5000,
+            trajs_for_metrics=100,
+            trajs_for_viz=8,
+            resume_path=placeholder(str),
+            text_processor="muse_embedding",
+            text_processor_kwargs=dict(),
+            pretrained_loaders=tuple(),
+            pretrained_loader_kwargs=tuple(),
+            wandb=dict(
+                project="orca",
+                group=placeholder(str),
+                entity=placeholder(str),
+            ),
+            wandb_resume_id=placeholder(str),
+            eval_datasets=[
+                "bridge_dataset",
+                "taco_play",
+                "berkeley_cable_routing",
+                "berkeley_autolab_ur5",
             ],
-        ),
-        goal_relabeling_strategy="uniform",
+        )
     )
 
-    base_bridge_data_config = {
-        "common_kwargs": {"action_proprio_normalization_type": normalization_type},
-        "transform_kwargs": base_data_config,
-        "data_kwargs_list": [
-            {
-                "name": "bridge_dataset",
-                "data_dir": "/nfs/kun2/datasets/tfds",
-                "image_obs_keys": ["image_0"],
-                "state_obs_keys": ["state"],
-            },
-        ],
+
+def get_dataset_config(modality="multimodal"):
+    normalization_type = "normal"
+    if modality == "multimodal":
+        task_augmentation = dict(
+            task_augmentation_strategy="delete_task_conditioning",
+            task_augmentation_kwargs=dict(
+                delete_key_groups_probs=[
+                    (["image_*"], 0.5),
+                    (["language_instruction"], 0.5),
+                ],
+            ),
+        )
+    else:
+        raise ValueError(f"Unknown modality {modality}")
+
+    return {
+        # oxe_kwargs will generate data_kwargs_list and sampling weights
+        "oxe_kwargs": dict(
+            data_mix=placeholder(str),
+            # for v4 TPUs: "gs://rail-orca-central2/resize_336_336"
+            data_dir=placeholder(str),
+            n_third_person_cameras=1,
+            n_wrist_cameras=0,
+            load_depth=False,
+        ),
+        # common_kwargs override specific kwargs from data_kwargs_list
+        "common_kwargs": dict(
+            ram_budget=1,  # limit RAM per dataset
+            num_parallel_reads=8,  # for reading from GCS
+            num_parallel_calls=16,  # for the less CPU-intensive ops in initial dataset construction
+            action_proprio_normalization_type=normalization_type,
+        ),
+        "transform_kwargs": dict(
+            resize_size=(256, 256),
+            num_parallel_calls=32,  # for the most CPU-intensive ops (decoding, resizing, augmenting)
+            window_size=1,
+            additional_action_window_size=0,
+            image_augment_kwargs=dict(
+                random_resized_crop=dict(scale=[0.8, 1.0], ratio=[0.9, 1.1]),
+                random_brightness=[0.2],
+                random_contrast=[0.8, 1.2],
+                random_saturation=[0.8, 1.2],
+                random_hue=[0.1],
+                augment_order=[
+                    "random_resized_crop",
+                    "random_brightness",
+                    "random_contrast",
+                    "random_saturation",
+                    "random_hue",
+                ],
+            ),
+            goal_relabeling_strategy="uniform",
+            **task_augmentation,
+        ),
     }
 
-    base_optimizer_config = dict(
-        learning_rate=dict(
-            init_value=0.0,
-            peak_value=3e-4,
-            warmup_steps=2000,
-            decay_steps=int(2e6),
-            end_value=0.0,
-        ),
-        weight_decay=0.01,
-        clip_gradient=placeholder(float),
-    )
 
-    base_model_config = dict(
-        token_embedding_size=256,
-        max_horizon=10,
-        readouts=dict(action=7),
-        transformer_kwargs=dict(
+def get_transformer_kwargs(transformer_size):
+    assert transformer_size in ["dummy", "vanilla", "vit_s", "vit_b", "vit_l"]
+    TRANSFORMER_SIZES = {
+        "dummy": dict(
+            num_layers=1,
+            mlp_dim=256,
+            num_attention_heads=2,
+            dropout_rate=0.1,
+        ),
+        "vanilla": dict(
             num_layers=4,
             mlp_dim=1024,
             num_attention_heads=8,
             dropout_rate=0.1,
         ),
-        heads=dict(
-            action=dict(
-                cls_name="token_per_dim_action_head",
-                kwargs=dict(
-                    pred_horizon=1,
-                    action_dim=7,
-                    vocab_size=256,
-                    normalization_type=normalization_type,
-                    readout_key="action",
-                ),
-            ),
+        "vit_s": dict(
+            num_layers=12,
+            mlp_dim=1536,
+            num_attention_heads=6,
+            dropout_rate=0.0,
         ),
-    )
-
-    base_tokenizer_kwargs = dict(
-        encoder="resnetv1-34-bridge",
-        encoder_kwargs=dict(
-            pooling_method="none", add_spatial_coordinates=True, act="swish"
+        "vit_b": dict(
+            num_layers=12,
+            mlp_dim=3072,
+            num_attention_heads=12,
+            dropout_rate=0.0,
         ),
-        task_stack_keys=[
-            "image_.*"
-        ],  # by default, early fuse goal images into visual encoder
-    )
-
-    base_task_augmentation_kwargs = dict(
-        task_augmentation_strategy="drop_keys_independent",
-        task_augmentation_kwargs=dict(
-            drop_key_groups_probs=[(["image_0"], 0.5), (["language_instruction"], 0.5)],
-            allow_drop_all=False,
-        ),
-    )
-
-    possible_structures = {
-        "gc_bridge": ConfigDict(
-            dict(
-                model=update_config(
-                    base_model_config,
-                    observation_tokenizers=[
-                        (
-                            "image_tokenizer",
-                            {"num_tokens": 64, **base_tokenizer_kwargs},
-                        ),
-                    ],
-                    task_tokenizers=[],
-                ),
-                optimizer=base_optimizer_config,
-                dataset_kwargs=base_bridge_data_config,
-                **base_config,
-            )
-        ),
-        "gc_r2d2": ConfigDict(
-            dict(
-                model=update_config(
-                    base_model_config,
-                    observation_tokenizers=[
-                        (
-                            "image_tokenizer",
-                            {"num_tokens": 60, **base_tokenizer_kwargs},
-                        ),
-                    ],
-                    task_tokenizers=[],
-                ),
-                optimizer=base_optimizer_config,
-                dataset_kwargs={
-                    "common_kwargs": {
-                        "action_proprio_normalization_type": normalization_type
-                    },
-                    "data_kwargs_list": [
-                        {
-                            "name": "r2_d2_pen",
-                            "data_dir": "/nfs/kun2/datasets/r2d2/tfds",
-                            "image_obs_keys": [
-                                "exterior_image_1_left",
-                                "exterior_image_2_left",
-                                "wrist_image_left",
-                            ],
-                            "state_obs_keys": ["joint_position"],
-                        },
-                    ],
-                    "transform_kwargs": base_data_config,
-                },
-                **base_config,
-            )
-        ),
-        "gc_bridge_r2d2": ConfigDict(
-            dict(
-                model=update_config(
-                    base_model_config,
-                    observation_tokenizers=[
-                        (
-                            "image_tokenizer",
-                            {"num_tokens": 60, **base_tokenizer_kwargs},
-                        ),
-                    ],
-                    task_tokenizers=[],
-                ),
-                optimizer=base_optimizer_config,
-                dataset_kwargs={
-                    "common_kwargs": {
-                        "action_proprio_normalization_type": normalization_type
-                    },
-                    "data_kwargs_list": [
-                        {
-                            "name": "r2_d2_pen",
-                            "data_dir": "/nfs/kun2/datasets/r2d2/tfds",
-                            "image_obs_keys": [
-                                "exterior_image_1_left",
-                                "exterior_image_2_left",
-                                "wrist_image_left",
-                            ],
-                            "state_obs_keys": ["joint_position"],
-                        },
-                        {
-                            "name": "bridge_dataset",
-                            "data_dir": "/nfs/kun2/datasets/tfds",
-                            "image_obs_keys": ["image_0", None, None],
-                            "state_obs_keys": ["state"],
-                        },
-                    ],
-                    "transform_kwargs": update_config(
-                        base_data_config,
-                        resize_size=(180, 320),
-                    ),
-                },
-                **base_config,
-            )
-        ),
-        "lc_film_bridge": ConfigDict(
-            dict(
-                model=update_config(
-                    base_model_config,
-                    observation_tokenizers=[
-                        (
-                            "image_tokenizer",
-                            update_config(
-                                base_tokenizer_kwargs,
-                                num_tokens=64,
-                                task_stack_keys=[],
-                                task_film_keys=["language_instruction"],
-                                encoder="resnetv1-34-bridge-film",
-                            ),
-                        ),
-                    ],
-                    task_tokenizers=[],
-                ),
-                optimizer=base_optimizer_config,
-                dataset_kwargs=base_bridge_data_config,
-                **update_config(
-                    base_config,
-                    text_processor="muse_embedding",
-                ),
-            )
-        ),
-        "lc_bridge": ConfigDict(
-            dict(
-                model=update_config(
-                    base_model_config,
-                    observation_tokenizers=[
-                        (
-                            "image_tokenizer",
-                            update_config(
-                                base_tokenizer_kwargs,
-                                num_tokens=64,
-                                task_stack_keys=[],
-                            ),
-                        ),
-                    ],
-                    task_tokenizers=[
-                        ("language_tokenizer", {"num_tokens": 1}),
-                    ],
-                ),
-                optimizer=base_optimizer_config,
-                dataset_kwargs=base_bridge_data_config,
-                **update_config(
-                    base_config,
-                    text_processor="muse_embedding",
-                ),
-            )
-        ),
-        "lc_distilbert_bridge": ConfigDict(
-            dict(
-                model=update_config(
-                    base_model_config,
-                    observation_tokenizers=[
-                        (
-                            "image_tokenizer",
-                            update_config(
-                                base_tokenizer_kwargs,
-                                num_tokens=64,
-                                task_stack_keys=[],
-                            ),
-                        ),
-                    ],
-                    task_tokenizers=[
-                        (
-                            "language_tokenizer",
-                            {
-                                "num_tokens": 64,
-                                "projection_dim": 512,
-                                "encoder": "distilbert-base-uncased",
-                            },
-                        ),
-                    ],
-                ),
-                optimizer=base_optimizer_config,
-                dataset_kwargs=base_bridge_data_config,
-                **update_config(
-                    base_config,
-                    text_processor="hf_tokenizer",
-                    text_processor_kwargs=dict(
-                        tokenizer_name="distilbert-base-uncased",
-                        encode_with_model=False,
-                    ),
-                    pretrained_weights=["distilbert"],
-                ),
-            )
-        ),
-        "multimodal_independent_bridge": ConfigDict(
-            dict(
-                model=update_config(
-                    base_model_config,
-                    observation_tokenizers=[
-                        (
-                            "image_tokenizer",
-                            update_config(
-                                base_tokenizer_kwargs,
-                                num_tokens=64,
-                                task_stack_keys=["image_.*"],
-                                task_film_keys=["language_instruction"],
-                                encoder="resnetv1-34-bridge-film",
-                            ),
-                        ),
-                    ],
-                    task_tokenizers=[],
-                ),
-                optimizer=base_optimizer_config,
-                dataset_kwargs=update_config(
-                    base_bridge_data_config,
-                    transform_kwargs=dict(
-                        **base_data_config,
-                        **base_task_augmentation_kwargs,
-                    ),
-                ),
-                **update_config(
-                    base_config,
-                    text_processor="muse_embedding",
-                ),
-            )
-        ),
-        "multimodal_switch_bridge": ConfigDict(
-            dict(
-                model=update_config(
-                    base_model_config,
-                    observation_tokenizers=[
-                        (
-                            "image_tokenizer",
-                            update_config(
-                                base_tokenizer_kwargs,
-                                num_tokens=64,
-                                task_stack_keys=["image_.*"],
-                                task_film_keys=["language_instruction"],
-                                encoder="resnetv1-34-bridge-film",
-                            ),
-                        ),
-                    ],
-                    task_tokenizers=[],
-                ),
-                optimizer=base_optimizer_config,
-                dataset_kwargs=update_config(
-                    base_bridge_data_config,
-                    transform_kwargs=dict(
-                        task_augmentation_strategy="delete_task_conditioning",
-                        task_augmentation_kwargs=dict(
-                            delete_key_groups_probs=[
-                                (["image_*"], 0.5),
-                                (["language_instruction"], 0.5),
-                            ],
-                        ),
-                    ),
-                ),
-                **update_config(
-                    base_config,
-                    text_processor="muse_embedding",
-                ),
-            )
-        ),
-        "ci_debug_dataset": ConfigDict(
-            dict(
-                model=dict(
-                    token_embedding_size=256,
-                    max_horizon=10,
-                    readouts=dict(action=7),
-                    transformer_kwargs=dict(
-                        num_layers=4,
-                        mlp_dim=1024,
-                        num_attention_heads=8,
-                        dropout_rate=0.1,
-                    ),
-                    heads=dict(
-                        action=dict(
-                            cls_name="token_per_dim_action_head",
-                            kwargs=dict(
-                                pred_horizon=1,
-                                action_dim=7,
-                                vocab_size=256,
-                                normalization_type=normalization_type,
-                                readout_key="action",
-                            ),
-                        )
-                    ),
-                    observation_tokenizers=[
-                        (
-                            "image_tokenizer",
-                            dict(
-                                num_tokens=64,
-                                encoder="resnetv1-18-bridge",
-                                encoder_kwargs=dict(
-                                    pooling_method="none",
-                                    add_spatial_coordinates=True,
-                                    act="swish",
-                                ),
-                                task_stack_keys=[
-                                    "image_.*"
-                                ],  # by default, early fuse goal images into visual encoder
-                            ),
-                        ),
-                    ],
-                    task_tokenizers=[],
-                ),
-                optimizer=base_optimizer_config,
-                dataset_kwargs={
-                    "common_kwargs": {
-                        "action_proprio_normalization_type": normalization_type
-                    },
-                    "data_kwargs_list": [
-                        {
-                            "name": "bridge_dataset",
-                            "data_dir": "./datasets/debug_dataset",
-                            "image_obs_keys": ["image_0"],
-                            "state_obs_keys": ["state"],
-                        },
-                    ],
-                    "transform_kwargs": base_data_config,
-                },
-                **update_config(
-                    base_config,
-                    batch_size=2,
-                    num_steps=20,
-                    eval_interval=10,
-                    save_interval=10,
-                    log_interval=10,
-                ),
-            )
+        "vit_l": dict(
+            num_layers=24,
+            mlp_dim=4096,
+            num_attention_heads=16,
+            dropout_rate=0.1,
         ),
     }
 
-    return possible_structures[config_string]
+    TOKEN_DIMS = {
+        "dummy": 256,
+        "vanilla": 256,
+        "vit_s": 384,
+        "vit_b": 768,
+        "vit_l": 1024,
+    }
+    return dict(
+        token_embedding_size=TOKEN_DIMS[transformer_size],
+        transformer_kwargs=TRANSFORMER_SIZES[transformer_size],
+    )
+
+
+def get_model_config(transformer_size):
+    normalization_type = "normal"
+    base_tokenizer_kwargs = dict(
+        encoder="small-stem-16",
+        encoder_kwargs=dict(use_film=True),
+    )
+
+    return {
+        **get_transformer_kwargs(transformer_size),
+        "max_horizon": 10,
+        "readouts": dict(),
+        "heads": dict(
+            action=dict(
+                cls_name="mse_action_head",
+                kwargs=dict(
+                    pred_horizon=1,
+                    action_dim=7,
+                    readout_key="obs",
+                ),
+            )
+        ),
+        "observation_tokenizers": {
+            "image": {
+                "cls_name": "image_tokenizer",
+                "kwargs": dict(
+                    num_tokens=256,
+                    obs_stack_keys=["image_.*"],
+                    task_stack_keys=["image_.*"],
+                    task_film_keys=["language_instruction"],
+                    **base_tokenizer_kwargs,
+                ),
+            },
+        },
+        "task_tokenizers": dict(),
+    }

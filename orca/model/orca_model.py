@@ -61,8 +61,8 @@ class OrcaTransformer(nn.Module):
         max_horizon (int): The maximum number of timesteps that the transformer can be run with.
     """
 
-    observation_tokenizers: Sequence[nn.Module]
-    task_tokenizers: Sequence[nn.Module]
+    observation_tokenizers: Dict[str, nn.Module]
+    task_tokenizers: Dict[str, nn.Module]
     readouts: Dict[str, int]
     transformer_kwargs: Dict
     token_embedding_size: int = 512
@@ -115,8 +115,8 @@ class OrcaTransformer(nn.Module):
         all_prefix_groups = []
         all_timestep_groups = []
 
-        all_task_names = [f"task_{i}" for i in range(len(self.task_tokenizers))]
-        all_obs_names = [f"obs_{i}" for i in range(len(self.observation_tokenizers))]
+        all_task_names = [f"task_{name}" for name in self.task_tokenizers]
+        all_obs_names = [f"obs_{name}" for name in self.observation_tokenizers]
 
         task_attention_rules = {
             task_name: AttentionRule.CAUSAL for task_name in all_task_names
@@ -127,7 +127,7 @@ class OrcaTransformer(nn.Module):
         }  # Observations attend to all tasks and previous observations causally
 
         # First, add the task tokens
-        for i, tok in enumerate(self.task_tokenizers):
+        for name, tok in self.task_tokenizers.items():
             # Receive inputs from tokenizer and cast to embedding size
             task_tokens = tok(observations, tasks, train=train)
             task_tokens = nn.Dense(self.token_embedding_size)(task_tokens)
@@ -136,16 +136,16 @@ class OrcaTransformer(nn.Module):
 
             # Add positional embedding
             task_pos_embedding = self._create_positional_embedding(
-                f"task_{i}", task_tokens.shape[1], prefix=True
+                f"task_{name}", task_tokens.shape[1], prefix=True
             )
             task_tokens += task_pos_embedding
 
             all_prefix_groups.append(
-                PrefixGroup(f"task_{i}", task_tokens, task_attention_rules)
+                PrefixGroup(f"task_{name}", task_tokens, task_attention_rules)
             )
 
         # Next, add the observation tokens
-        for i, tok in enumerate(self.observation_tokenizers):
+        for name, tok in self.observation_tokenizers.items():
             # Receive inputs from tokenizer and cast to embedding size
             obs_tokens = tok(observations, tasks, train=train)
             obs_tokens = nn.Dense(self.token_embedding_size)(obs_tokens)
@@ -153,12 +153,12 @@ class OrcaTransformer(nn.Module):
 
             # Add positional embedding
             obs_pos_embedding = self._create_positional_embedding(
-                f"obs_{i}", obs_tokens.shape[2], prefix=False
+                f"obs_{name}", obs_tokens.shape[2], prefix=False
             )
             obs_tokens += obs_pos_embedding[:, :horizon, :, :]
 
             all_timestep_groups.append(
-                TimestepGroup(f"obs_{i}", obs_tokens, observation_attention_rules)
+                TimestepGroup(f"obs_{name}", obs_tokens, observation_attention_rules)
             )
 
         # Finally, add the readout tokens
@@ -204,13 +204,29 @@ class OrcaTransformer(nn.Module):
             verbose=verbose,
         )
 
-        return {
-            **{group.name: group.tokens for group in prefix_outputs},
-            **{
+        outputs = dict()
+        outputs.update({group.name: group.tokens for group in prefix_outputs})
+        outputs.update(
+            {
                 group.name.removeprefix("readout_"): group.tokens
                 for group in timestep_outputs
-            },
-        }
+            }
+        )
+
+        if len(prefix_outputs) > 0:
+            outputs["task"] = jnp.concatenate(
+                [group.tokens for group in prefix_outputs], axis=-2
+            )
+        outputs["obs"] = jnp.concatenate(
+            [
+                group.tokens
+                for group in timestep_outputs
+                if group.name.startswith("obs_")
+            ],
+            axis=-2,
+        )
+
+        return outputs
 
     def _create_positional_embedding(self, name, n_tokens, prefix=False):
         if prefix:

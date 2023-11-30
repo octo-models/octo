@@ -4,6 +4,7 @@ from functools import partial
 import json
 import os
 import os.path as osp
+import subprocess
 
 from absl import app, flags, logging
 import flax
@@ -159,7 +160,7 @@ def main(_):
         text_processor = text_processors[FLAGS.config.text_processor](
             **FLAGS.config.text_processor_kwargs
         )
-        zero_text = text_processor.encode([""])[0]
+        zero_text = jax.tree_map(lambda x: x[0], text_processor.encode([""]))
 
     def process_text(batch):
         if text_processor is None:
@@ -187,7 +188,7 @@ def main(_):
     sample_weights = (
         FLAGS.config.dataset_kwargs["sample_weights"]
         if "sample_weights" in FLAGS.config.dataset_kwargs
-        else None
+        else [1.0] * len(FLAGS.config.dataset_kwargs["data_kwargs_list"])
     )
     train_data = make_interleaved_dataset(
         FLAGS.config.dataset_kwargs["common_kwargs"],
@@ -196,6 +197,7 @@ def main(_):
         train=True,
         sample_weights=sample_weights,
         shuffle_buffer_size=FLAGS.config.shuffle_buffer_size,
+        balance_weights=FLAGS.config.get("balance_weights", True),
     ).batch(FLAGS.config.batch_size)
     val_datas = []
     visualizers = []
@@ -268,7 +270,16 @@ def main(_):
     )
 
     # pretrained weights to load
-    pretrained_loaders = [weights_loaders[w] for w in FLAGS.config.pretrained_weights]
+    pretrained_loader_kwargs = FLAGS.config.pretrained_loader_kwargs or [
+        dict() for _ in FLAGS.config.pretrained_loaders
+    ]
+    assert len(pretrained_loader_kwargs) == len(
+        FLAGS.config.pretrained_loaders
+    ), "supply one kwarg dict for each loader!"
+    pretrained_loaders = [
+        partial(weights_loaders[w], **kwargs)
+        for w, kwargs in zip(FLAGS.config.pretrained_loaders, pretrained_loader_kwargs)
+    ]
 
     # ensure construct rng is same on every host
     construct_rng = jax.random.PRNGKey(FLAGS.config.seed)
@@ -292,7 +303,10 @@ def main(_):
         construct_rng,
         *model_init_args,
     )["params"]
-    tx, lr_callable = create_optimizer(params_shape, FLAGS.config.optimizer.to_dict())
+    tx, lr_callable, param_norm_callable = create_optimizer(
+        params_shape.unfreeze(),
+        FLAGS.config.optimizer.to_dict(),
+    )
     train_state = create_train_state(
         construct_rng,
         model_def,
@@ -320,6 +334,14 @@ def main(_):
         wandb.config.update(
             dict(example_batch_spec=example_batch_spec), allow_val_change=True
         )
+
+        # Save the git hash
+        process = subprocess.Popen(
+            ["git", "rev-parse", "HEAD"], shell=False, stdout=subprocess.PIPE
+        )
+        git_head_hash = process.communicate()[0].strip()
+        with tf.io.gfile.GFile(os.path.join(save_dir, "git_hash.txt"), "wb") as f:
+            f.write(git_head_hash)
 
     if FLAGS.config.get("wandb_resume_id", None) is not None:
         train_state = state_checkpointer.restore(
@@ -376,14 +398,13 @@ def main(_):
             state.params, state, batch, dropout_rng, train=True
         )
         grad_norm = optax.global_norm(grads)
-        param_norm = optax.global_norm(state.params)
         updates, _ = state.tx.update(grads, state.opt_state, state.params)
         update_norm = optax.global_norm(updates)
         info.update(
             {
                 "grad_norm": grad_norm,
-                "param_norm": param_norm,
                 "update_norm": update_norm,
+                "param_norm": param_norm_callable(state.params),
                 "learning_rate": lr_callable(state.step),
             }
         )
@@ -543,9 +564,13 @@ def main(_):
 
             for data_kwargs, visualizer in zip(val_datasets_kwargs, visualizers):
                 for mode, policy_fn in modal_policy_fns.items():
-                    raw_infos = visualizer.raw_evaluations(policy_fn, max_trajs=100)
+                    raw_infos = visualizer.raw_evaluations(
+                        policy_fn, max_trajs=FLAGS.config.trajs_for_metrics
+                    )
                     metrics = visualizer.metrics_for_wandb(raw_infos)
-                    images = visualizer.visualize_for_wandb(policy_fn, max_trajs=8)
+                    images = visualizer.visualize_for_wandb(
+                        policy_fn, max_trajs=FLAGS.config.trajs_for_viz
+                    )
                     wandb_log(
                         {
                             f"offline_metrics_{data_kwargs['name']}/{mode}": metrics,

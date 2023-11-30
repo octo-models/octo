@@ -17,8 +17,13 @@ def create_model_def(
 ):
     """
     Args:
-        observation_tokenizers: list of (tokenizer_name, tokenizer_kwargs) tuples
-        task_tokenizers: list of (tokenizer_name, tokenizer_kwargs) tuples
+        observation_tokenizers: dict of {
+            tokenizer_name: {
+                'cls_name': str, # which tokenizer in TOKENIZERS
+                'kwargs': dict
+            }
+        }
+        task_tokenizers: same structure as observation_tokenizers
         readouts: dict of {readout_name: n_tokens_for_readout}
         max_horizon: int
         transformer_kwargs: dict of kwargs for Transformer
@@ -33,12 +38,14 @@ def create_model_def(
     if len(kwargs) > 0:
         logging.warn(f"Extra kwargs passed into create_model_def: {kwargs}")
 
-    observation_tokenizer_defs = tuple(
-        TOKENIZERS[tokenizer](**kwargs) for tokenizer, kwargs in observation_tokenizers
-    )
-    task_tokenizer_defs = tuple(
-        TOKENIZERS[tokenizer](**kwargs) for tokenizer, kwargs in task_tokenizers
-    )
+    observation_tokenizer_defs = {
+        k: TOKENIZERS.get(info["cls_name"])(**info["kwargs"])
+        for k, info in observation_tokenizers.items()
+    }
+    task_tokenizer_defs = {
+        k: TOKENIZERS.get(info["cls_name"])(**info["kwargs"])
+        for k, info in task_tokenizers.items()
+    }
 
     head_defs = {
         k: HEADS.get(head_info["cls_name"])(**head_info["kwargs"])
