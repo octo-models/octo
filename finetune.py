@@ -11,7 +11,7 @@ from flax.traverse_util import flatten_dict
 import jax
 import jax.numpy as jnp
 from jax.sharding import Mesh, NamedSharding, PartitionSpec
-from ml_collections import config_flags
+from ml_collections import config_flags, ConfigDict
 import numpy as np
 import optax
 import orbax.checkpoint
@@ -64,7 +64,8 @@ def main(_):
         Pretrained model: {FLAGS.config.pretrained_path}
         Finetuning Dataset: {FLAGS.config.finetuning_dataset.name}
         Data dir: {FLAGS.config.finetuning_dataset.data_dir}
-        Modality: {FLAGS.config.modality}
+        Task Modality: {FLAGS.config.modality}
+        Finetuning Mode: {FLAGS.config.finetuning_mode}
 
         # Devices: {jax.device_count()}
         Batch size: {FLAGS.config.batch_size} ({FLAGS.config.batch_size // len(devices) } per device)
@@ -117,6 +118,12 @@ def main(_):
         FLAGS.config.pretrained_path,
         step=FLAGS.config.pretrained_step,
     )
+    if "window_size" in model.config:
+        pretraining_horizon = model.config["window_size"]
+    else:
+        pretraining_horizon = model.config["dataset_kwargs"]["traj_transform_kwargs"][
+            "window_size"
+        ]
 
     #########
     #
@@ -165,9 +172,15 @@ def main(_):
     example_batch = next(train_data_iter)
 
     _verify_shapes(
-        example_batch["observation"], model.example_batch["observation"], starting_dim=1
+        example_batch["observation"], model.example_batch["observation"], starting_dim=2
     )
     _verify_shapes(example_batch["tasks"], model.example_batch["tasks"], starting_dim=1)
+
+    finetuning_horizon = example_batch["observation"]["pad_mask"].shape[1]
+    if pretraining_horizon != finetuning_horizon:
+        logging.warning("Model was pretrained with window size %d", pretraining_horizon)
+        logging.warning("Finetuning with window size %d", finetuning_horizon)
+    assert finetuning_horizon <= pretraining_horizon
 
     #########
     #
@@ -206,17 +219,23 @@ def main(_):
         logging.info("Saving to %s", save_dir)
         tf.io.gfile.makedirs(save_dir)
 
+        # Save model config
+        new_config = ConfigDict(flax.core.unfreeze(model.config))
+        new_config.window_size = finetuning_horizon
+
+        fname = tf.io.gfile.join(save_dir, "config.json")
+        with tf.io.gfile.GFile(fname, "w") as config_file:
+            config_file.write(new_config.to_json_best_effort())
+
         # Save finetuning config
         fname = tf.io.gfile.join(save_dir, "finetune_config.json")
         with tf.io.gfile.GFile(fname, "w") as config_file:
             config_file.write(FLAGS.config.to_json_best_effort())
 
-        # Copy model config from pretrained model
-        for fname in ["config.json", "example_batch.msgpack"]:
-            tf.io.gfile.copy(
-                os.path.join(FLAGS.config.pretrained_path, fname),
-                os.path.join(save_dir, fname),
-            )
+        tf.io.gfile.copy(
+            os.path.join(FLAGS.config.pretrained_path, "example_batch.msgpack"),
+            os.path.join(save_dir, "example_batch.msgpack"),
+        )
 
         # Save dataset statistics
         fname = os.path.join(save_dir, "dataset_statistics.json")
