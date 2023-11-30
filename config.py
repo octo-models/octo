@@ -216,21 +216,21 @@ def get_model_config(transformer_size):
                 kwargs=dict(
                     pred_horizon=1,
                     action_dim=7,
-                    readout_key="obs_0",
+                    readout_key="obs",
                 ),
             )
         ),
-        "observation_tokenizers": [
-            (
-                "image_tokenizer",
-                {
-                    "num_tokens": 256,
-                    "obs_stack_keys": ["image_.*"],
-                    "task_stack_keys": ["image_.*"],
-                    "task_film_keys": ["language_instruction"],
+        "observation_tokenizers": {
+            "image": {
+                "cls_name": "image_tokenizer",
+                "kwargs": dict(
+                    num_tokens=256,
+                    obs_stack_keys=["image_.*"],
+                    task_stack_keys=["image_.*"],
+                    task_film_keys=["language_instruction"],
                     **base_tokenizer_kwargs,
-                },
-            ),
-        ],
-        "task_tokenizers": [],
+                ),
+            },
+        },
+        "task_tokenizers": dict(),
     }
