@@ -72,6 +72,7 @@ def get_config(modality="image_conditioned"):
             ),
             weight_decay=0.01,
             clip_gradient=placeholder(float),
+            frozen_keys=tuple(),
         ),
     )
 
