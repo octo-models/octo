@@ -191,6 +191,9 @@ def main(_):
     rng = jax.random.PRNGKey(FLAGS.config.seed)
 
     params = model.params.unfreeze()
+    if FLAGS.config.optimizer.frozen_keys is None:
+        FLAGS.config.optimizer.frozen_keys = model.config["optimizer"]["frozen_keys"]
+
     tx, lr_callable, param_norm_callable = create_optimizer(
         params,
         FLAGS.config.optimizer.to_dict(),
