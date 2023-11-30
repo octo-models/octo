@@ -340,7 +340,7 @@ def main(_):
             ["git", "rev-parse", "HEAD"], shell=False, stdout=subprocess.PIPE
         )
         git_head_hash = process.communicate()[0].strip()
-        with open(os.path.join(save_dir, "git_hash.txt"), "wb") as f:
+        with tf.io.gfile.GFile(os.path.join(save_dir, "git_hash.txt"), "wb") as f:
             f.write(git_head_hash)
 
     if FLAGS.config.get("wandb_resume_id", None) is not None:
