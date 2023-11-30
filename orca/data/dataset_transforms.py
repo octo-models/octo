@@ -5,6 +5,7 @@ import tensorflow as tf
 
 import orca.data.bridge.bridge_utils as bridge
 from orca.data.oxe.oxe_dataset_transforms import *  # noqa: F403
+from orca.data.utils.data_utils import binarize_gripper_actions
 
 
 def r2_d2_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
@@ -35,7 +36,7 @@ def bridge_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
     trajectory["action"] = tf.concat(
         [
             trajectory["action"][:, :6],
-            bridge.binarize_gripper_actions(trajectory["action"][:, -1])[:, None],
+            binarize_gripper_actions(trajectory["action"][:, -1])[:, None],
         ],
         axis=1,
     )
@@ -53,6 +54,8 @@ def aloha_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
 
 RLDS_TRAJECTORY_MAP_TRANSFORMS = {
     "r2_d2": r2_d2_dataset_transform,
+    "r2_d2_pen_cmu_rgb": r2_d2_dataset_transform,
+    "r2_d2_play_cmu_rgb": r2_d2_dataset_transform,
     "r2_d2_pen": r2_d2_dataset_transform,
     "fmb_dataset": fmb_dataset_transform,
     "bridge_dataset": bridge_dataset_transform,

@@ -102,9 +102,9 @@ OXE_DATASET_KWARGS = {
     },
     "nyu_door_opening_surprising_effectiveness": {
         "image_obs_keys": [
+            None,
+            None,
             "image",
-            None,
-            None,
         ],
         "depth_obs_keys": [None, None, None],
         "state_obs_keys": [None] * 8,

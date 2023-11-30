@@ -1,4 +1,5 @@
 import functools as ft
+import logging
 import re
 from typing import Sequence
 
@@ -26,22 +27,28 @@ class TokenLearner(nn.Module):
     """
 
     num_tokens: int
-    bottleneck_dim: int = 64
-    dropout_rate: float = 0.0
+    bottleneck_dim: int = 128
+    dropout_rate: float = 0.1
 
     @nn.compact
     def __call__(self, inputs, train: bool = True):
-        if len(inputs.shape) == 4:
-            inputs = inputs.reshape(inputs.shape[0], -1, inputs.shape[-1])
+        input_4_dims = len(inputs.shape) == 4
+        if input_4_dims:
+            b, t, _, d = inputs.shape
+            inputs = inputs.reshape(b * t, -1, d)
         x = nn.LayerNorm()(inputs)
         x = MlpBlock(
             mlp_dim=self.bottleneck_dim,
             out_dim=self.num_tokens,
             dropout_rate=self.dropout_rate,
-        )(x, train=train)
+        )(x, deterministic=not train)
         x = jnp.transpose(x, (0, 2, 1))  # (batch, num_tokens, h*w)
         x = nn.softmax(x, axis=-1)
-        return jnp.einsum("bna,baf->bnf", x, inputs)
+        x = jnp.einsum("bna,baf->bnf", x, inputs)
+
+        if input_4_dims:
+            x = x.reshape((b, t, self.num_tokens, d))
+        return x
 
 
 class ImageTokenizer(nn.Module):
@@ -127,22 +134,21 @@ class LanguageTokenizer(nn.Module):
      Args:
          num_tokens (int): Number of output tokens (not enforced).
          encoder (str, optional): Optional HuggingFace AutoModel name for encoding input IDs.
-         projection_dim (int, optional): Optional output Dense layer projection dimension.
+         finetune_encoder (bool, optional): Optional finetune last layers of the language model.
     """
 
-    num_tokens: int = 1
     encoder: str = None
-    projection_dim: int = None
+    finetune_encoder: bool = False
 
     def setup(self):
-        if self.projection_dim:
-            self.projection = nn.Dense(self.projection_dim, use_bias=False)
-
         if self.encoder is not None:
-            from transformers import AutoConfig, FlaxAutoModel
+            from transformers import AutoConfig, FlaxAutoModel, FlaxT5EncoderModel
 
             config = AutoConfig.from_pretrained(self.encoder)
-            self.hf_model = FlaxAutoModel.from_config(config).module
+            if "t5" in self.encoder:
+                self.hf_model = FlaxT5EncoderModel(config).module
+            else:
+                self.hf_model = FlaxAutoModel.from_config(config).module
 
     def __call__(
         self,
@@ -152,7 +158,6 @@ class LanguageTokenizer(nn.Module):
     ):
         if self.encoder is not None:
             tokens = self.hf_model(**tasks["language_instruction"]).last_hidden_state
-            tokens = jax.lax.stop_gradient(tokens)
         else:
             # add a time dimension to language
             if tasks["language_instruction"].ndim == 2:
@@ -160,8 +165,8 @@ class LanguageTokenizer(nn.Module):
             else:
                 tokens = tasks["language_instruction"]
 
-        if self.projection_dim is not None:
-            tokens = self.projection(tokens)
+        if not self.finetune_encoder:
+            tokens = jax.lax.stop_gradient(tokens)
 
         return tokens
 

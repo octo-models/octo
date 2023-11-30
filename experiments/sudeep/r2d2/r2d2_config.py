@@ -34,10 +34,7 @@ def get_config(
         pretrained_loader_kwargs=[],
         wandb=base_wandb_config,
         wandb_resume_id=placeholder(str),
-        eval_datasets=[
-            "bridge_dataset",
-            "fractal20220817_data",
-        ],
+        eval_datasets=None,
     )
 
     # params that need to be specified multiple places
@@ -45,7 +42,6 @@ def get_config(
 
     base_data_config = dict(
         window_size=1,
-        additional_action_window_size=0,
         image_augment_kwargs=dict(
             random_resized_crop=dict(scale=[0.8, 1.0], ratio=[0.9, 1.1]),
             random_brightness=[0.2],
@@ -133,11 +129,11 @@ def get_config(
             pooling_method="none",
             add_spatial_coordinates=True,
             act="swish",
-            use_film=True,
+            use_film=False,
         )
     else:
-        encoder = "small-stem-16-film"
-        encoder_kwargs = dict()
+        encoder = "small-stem-8-film"
+        encoder_kwargs = dict(use_film=False)
 
     base_tokenizer_kwargs = dict(
         encoder=encoder,
@@ -145,17 +141,6 @@ def get_config(
         task_stack_keys=[
             "image_.*"
         ],  # by default, early fuse goal images into visual encoder
-    )
-
-    oxe_kwargs = ConfigDict(
-        dict(
-            data_mix=placeholder(str),
-            # for v4 TPUs: "gs://rail-orca-central2/resize_336_336"
-            data_dir=placeholder(str),
-            n_third_person_cameras=1,
-            n_wrist_cameras=0,
-            load_depth=False,
-        )
     )
 
     return ConfigDict(
@@ -166,8 +151,7 @@ def get_config(
                     (
                         "image_tokenizer",
                         {
-                            "num_tokens": 64,
-                            "task_film_keys": ["language_instruction"],
+                            "num_tokens": 256,
                             **base_tokenizer_kwargs,
                         },
                     ),
@@ -176,30 +160,33 @@ def get_config(
             ),
             optimizer=base_optimizer_config,
             dataset_kwargs={
-                "oxe_kwargs": oxe_kwargs,  # this will generate data_kwargs_list and sampling weights
                 # common_kwargs override specific kwargs from data_kwargs_list
                 "common_kwargs": dict(
                     ram_budget=1,  # limit RAM per dataset
                     num_parallel_reads=8,  # for reading from GCS
                     num_parallel_calls=16,  # for the less CPU-intensive ops in initial dataset construction
                     action_proprio_normalization_type=normalization_type,
+                    data_dir="gs://rail-orca-central2",
+                    image_obs_keys=[
+                        "exterior_image_1_left",
+                        "exterior_image_2_left",
+                        "wrist_image_left",
+                    ],
+                    state_obs_keys=["joint_position"],
                 ),
+                "data_kwargs_list": [
+                    {"name": "r2_d2"},
+                    {"name": "r2_d2_pen_cmu_rgb"},
+                    {"name": "r2_d2_play_cmu_rgb"},
+                ],
+                "sample_weights": [0.5, 0.25, 0.25],
                 "transform_kwargs": update_config(
                     base_data_config,
-                    resize_size=(256, 256),
+                    resize_size=(128, 128),
                     num_parallel_calls=16,  # for the most CPU-intensive ops (decoding, resizing, augmenting)
-                    task_augmentation_strategy="delete_task_conditioning",
-                    task_augmentation_kwargs=dict(
-                        delete_key_groups_probs=[
-                            (["image_*"], 0.5),
-                            (["language_instruction"], 0.5),
-                        ],
-                    ),
                 ),
             },
-            **update_config(
-                base_config,
-                text_processor="muse_embedding",
-            ),
+            balance_weights=False,
+            **base_config,
         )
     )

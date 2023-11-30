@@ -185,7 +185,7 @@ def main(_):
     )
 
     # pretrained weights to load
-    pretrained_loaders = [weights_loaders[w] for w in FLAGS.config.pretrained_weights]
+    pretrained_loaders = [weights_loaders[w] for w in FLAGS.config.pretrained_loaders]
 
     lr_schedule = optax.warmup_cosine_decay_schedule(
         init_value=0.0,
