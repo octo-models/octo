@@ -1,5 +1,6 @@
 from collections import defaultdict
 from contextlib import contextmanager
+from fnmatch import fnmatch
 import logging
 import time
 
@@ -224,10 +225,11 @@ def create_optimizer(params_or_params_shape, optimizer_kwargs: dict):
             "trainable": tx,
             "frozen": optax.set_to_zero(),
         }
-        # freeze anything that contains the keys as part of the path
+        # freeze anything that matches fnmatch patterns in `frozen_keys`
+        # path is a string of .-separated module names, e.g. ('orca_transformer.BlockTransformer_0...')
         param_partitions = flax.traverse_util.path_aware_map(
             lambda path, v: "frozen"
-            if any([key in path for key in frozen_keys])
+            if any([fnmatch(".".joint(path), key) for key in frozen_keys])
             else "trainable",
             params_or_params_shape,
         )
@@ -235,7 +237,7 @@ def create_optimizer(params_or_params_shape, optimizer_kwargs: dict):
 
         logging.debug("Frozen params:")
         flax.traverse_util.path_aware_map(
-            lambda path, opt_status: logging.debug(path)
+            lambda path, opt_status: logging.debug(".".join(path))
             if opt_status == "frozen"
             else None,
             param_partitions,
@@ -256,5 +258,8 @@ def create_optimizer(params_or_params_shape, optimizer_kwargs: dict):
         )
         logging.info(f"Num trainable params: {trainable_params:,}.")
         logging.info(f"Num frozen params: {total_params - trainable_params:,}.")
+        logging.info(
+            "To see a detailed list of frozen params, set logging level to DEBUG."
+        )
 
     return tx, lr_callable
