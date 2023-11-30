@@ -215,17 +215,11 @@ def apply_trajectory_transforms(
             num_parallel_calls,
         )
 
-        # move language instruction to tasks dict
-        dataset = dataset.map(
-            lambda traj: {
-                "tasks": {
-                    "language_instruction": traj.pop("language_instruction"),
-                    **traj["tasks"],
-                },
-                **{k: v for k, v in traj.items() if k != "tasks"},
-            },
-            num_parallel_calls,
-        )
+        def move_language_instruction_to_tasks(traj):
+            traj["tasks"]["language_instruction"] = traj.pop("language_instruction")
+            return traj
+
+        dataset = dataset.map(move_language_instruction_to_tasks, num_parallel_calls)
 
     if train and subsample_length is not None:
         dataset = dataset.map(
