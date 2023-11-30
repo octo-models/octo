@@ -168,7 +168,7 @@ class PretrainedModel:
         )
         with tf.io.gfile.GFile(example_batch_path, "rb") as f:
             example_batch = flax.serialization.msgpack_restore(f.read())
-            logging.info(
+            logging.debug(
                 "Loaded example batch with structure: %s",
                 flax.core.pretty_repr(jax.tree_map(jnp.shape, example_batch)),
             )
