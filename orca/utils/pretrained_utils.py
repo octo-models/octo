@@ -191,7 +191,7 @@ class PretrainedModel:
             )
         else:
             example_batch = orig_example_batch
-        logging.info(
+        logging.debug(
             "Using example batch with structure: %s",
             flax.core.pretty_repr(jax.tree_map(jnp.shape, example_batch)),
         )

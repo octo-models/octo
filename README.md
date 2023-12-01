@@ -41,6 +41,14 @@ We use the RLDS data format and provide fast, parallelized data loaders for poli
 please reach out to [pertsch@berkeley.edu](mailto:pertsch@berkeley.edu) or download datasets directly from the
 **"Open X-Embodiment" repo.
 
+### Finetuning ORCA Policies
+
+To finetune foundational ORCA policies, you can follow the example command below. You can modify hyperparameters like dataset, batch size etc. in [experiments/dibya/finetune_config.py](finetune_config.py).
+
+```
+python finetune.py --config=your_finetune_config.py:mode=head_only --config.pretrained_path=...
+```
+
 ### Base Policy Training
 
 To train foundational ORCA policies, you can follow the example command below. You can modify hyperparameters like
@@ -48,6 +56,7 @@ dataset, batch size etc. in [config.py](config.py).
 ```
 python train.py --config config.py:vit_s --name=orca --config.dataset_kwargs.oxe_kwargs.data_dir=... --config.dataset_kwargs.oxe_kwargs.data_mix=oxe_magic_soup ...
 ```
+
 
 ## Code Structure
 

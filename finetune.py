@@ -65,7 +65,8 @@ def main(_):
         Pretrained model: {FLAGS.config.pretrained_path}
         Finetuning Dataset: {FLAGS.config.finetuning_dataset.name}
         Data dir: {FLAGS.config.finetuning_dataset.data_dir}
-        Modality: {FLAGS.config.modality}
+        Task Modality: {FLAGS.config.modality}
+        Finetuning Mode: {FLAGS.config.finetuning_mode}
 
         # Devices: {jax.device_count()}
         Batch size: {FLAGS.config.batch_size} ({FLAGS.config.batch_size // len(devices) } per device)
@@ -194,6 +195,20 @@ def main(_):
         step=FLAGS.config.pretrained_step,
     )
 
+    orig_config = PretrainedModel.load_config(FLAGS.config.pretrained_path)
+    if "window_size" in orig_config:
+        pretraining_horizon = orig_config["window_size"]
+    else:
+        pretraining_horizon = orig_config["dataset_kwargs"]["traj_transform_kwargs"][
+            "window_size"
+        ]
+
+    finetuning_horizon = example_batch["observation"]["pad_mask"].shape[1]
+    if pretraining_horizon != finetuning_horizon:
+        logging.warning("Model was pretrained with window size %d", pretraining_horizon)
+        logging.warning("Finetuning with window size %d", finetuning_horizon)
+    assert finetuning_horizon <= pretraining_horizon
+
     #########
     #
     # Setup Optimizer and Train State
@@ -203,6 +218,9 @@ def main(_):
     rng = jax.random.PRNGKey(FLAGS.config.seed)
 
     params = model.params.unfreeze()
+    if FLAGS.config.optimizer.frozen_keys is None:
+        FLAGS.config.optimizer.frozen_keys = model.config["optimizer"]["frozen_keys"]
+
     tx, lr_callable, param_norm_callable = create_optimizer(
         params,
         FLAGS.config.optimizer.to_dict(),
@@ -231,17 +249,23 @@ def main(_):
         logging.info("Saving to %s", save_dir)
         tf.io.gfile.makedirs(save_dir)
 
+        # Save model config
+        new_config = ConfigDict(flax.core.unfreeze(model.config))
+        new_config.window_size = finetuning_horizon
+
+        fname = tf.io.gfile.join(save_dir, "config.json")
+        with tf.io.gfile.GFile(fname, "w") as config_file:
+            config_file.write(new_config.to_json_best_effort())
+
         # Save finetuning config
         fname = tf.io.gfile.join(save_dir, "finetune_config.json")
         with tf.io.gfile.GFile(fname, "w") as config_file:
             config_file.write(FLAGS.config.to_json_best_effort())
 
-        # Copy model config from pretrained model
-        for fname in ["config.json", "example_batch.msgpack"]:
-            tf.io.gfile.copy(
-                os.path.join(FLAGS.config.pretrained_path, fname),
-                os.path.join(save_dir, fname),
-            )
+        tf.io.gfile.copy(
+            os.path.join(FLAGS.config.pretrained_path, "example_batch.msgpack"),
+            os.path.join(save_dir, "example_batch.msgpack"),
+        )
 
         # Save dataset statistics
         fname = os.path.join(save_dir, "dataset_statistics.json")

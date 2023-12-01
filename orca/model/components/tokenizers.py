@@ -9,13 +9,11 @@ import jax.numpy as jnp
 from jax.scipy.stats import norm
 
 from orca.model.components import encoders
-from orca.model.components.clip import CLIPTextTokenizer, CLIPVisionTokenizer
-from orca.model.components.transformer import MlpBlock
+from orca.model.components.transformer import MAPHead
 
 EPS = 1e-6
 
 
-# adapted from https://github.com/google-research/robotics_transformer/blob/master/tokenizers/token_learner.py
 class TokenLearner(nn.Module):
     """
     Learns to map fixed-length sequence of tokens into specified number of tokens.
@@ -27,28 +25,17 @@ class TokenLearner(nn.Module):
     """
 
     num_tokens: int
-    bottleneck_dim: int = 128
-    dropout_rate: float = 0.1
 
     @nn.compact
     def __call__(self, inputs, train: bool = True):
-        input_4_dims = len(inputs.shape) == 4
-        if input_4_dims:
-            b, t, _, d = inputs.shape
-            inputs = inputs.reshape(b * t, -1, d)
-        x = nn.LayerNorm()(inputs)
-        x = MlpBlock(
-            mlp_dim=self.bottleneck_dim,
-            out_dim=self.num_tokens,
-            dropout_rate=self.dropout_rate,
-        )(x, deterministic=not train)
-        x = jnp.transpose(x, (0, 2, 1))  # (batch, num_tokens, h*w)
-        x = nn.softmax(x, axis=-1)
-        x = jnp.einsum("bna,baf->bnf", x, inputs)
-
-        if input_4_dims:
-            x = x.reshape((b, t, self.num_tokens, d))
-        return x
+        pos_embed = self.param(
+            "pos_embed",
+            nn.initializers.normal(stddev=0.02),
+            (inputs.shape[-2], inputs.shape[-1]),
+        )
+        x = inputs + jnp.broadcast_to(pos_embed, inputs.shape)
+        x = nn.LayerNorm()(x)
+        return MAPHead(num_readouts=self.num_tokens)(x, train=train)
 
 
 class ImageTokenizer(nn.Module):
@@ -118,9 +105,6 @@ class ImageTokenizer(nn.Module):
         image_tokens = jnp.reshape(image_tokens, (b, t, -1, image_tokens.shape[-1]))
 
         if self.use_token_learner:
-            image_tokens = jnp.reshape(
-                image_tokens, (b * t, -1, image_tokens.shape[-1])
-            )
             image_tokens = TokenLearner(num_tokens=self.num_tokens)(
                 image_tokens, train=train
             )
