@@ -96,41 +96,40 @@ def get_config():
     )
     config["data_transforms"] = transform_kwargs
 
-    config["overwrite_model_config"] = dict(
-        token_embedding_size=384,
-        max_horizon=10,
-        transformer_kwargs=dict(
-            num_layers=12,
-            mlp_dim=1536,
-            num_attention_heads=6,
-            dropout_rate=0.0,
-        ),
-        heads=dict(
-            action=dict(
-                cls_name="mse_action_head",
-                kwargs=dict(
-                    pred_horizon=50,
-                    action_dim=14,
-                    vocab_size=256,
-                    normalization_type="normal",
-                    readout_key="obs",
-                ),
+    config["config_delete_keys"] = dict(
+        model=dict(
+            observation_tokenizers=dict(
+                wrist=None
             )
-        ),
-        observation_tokenizers={
-            "proprio": {
-                "cls_name": "lowdim_obs_tokenizer",
-                "kwargs": dict(
-                    n_bins=256,
-                    bin_type="normal",
-                    low=-2.,
-                    high=2.,
-                    obs_keys=["proprio"],
-                ),
-            },
-        },
-        task_tokenizers=dict(),
+        )
     )
-    config['overwrite_example_batch_path'] = (
-        "gs://karl-central-2/orca_finetune/aloha_sim_scratch_vit_s_textcond_20231130_213043/example_batch.msgpack")
+
+    config["update_config"] = dict(
+        model=dict(
+            heads=dict(
+                action=dict(
+                    cls_name="mse_action_head",
+                    kwargs=dict(
+                        pred_horizon=50,
+                        action_dim=14,
+                        vocab_size=256,
+                        normalization_type="normal",
+                        readout_key="obs",
+                    ),
+                )
+            ),
+            observation_tokenizers={
+                "proprio": {
+                    "cls_name": "lowdim_obs_tokenizer",
+                    "kwargs": dict(
+                        n_bins=256,
+                        bin_type="normal",
+                        low=-2.,
+                        high=2.,
+                        obs_keys=["proprio"],
+                    ),
+                },
+            },
+        )
+    )
     return ConfigDict(config)
