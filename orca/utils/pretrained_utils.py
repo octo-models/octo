@@ -13,7 +13,7 @@ import tensorflow as tf
 
 from orca.model import create_model_def
 from orca.model.orca_model import OrcaModel
-from orca.utils.train_utils import create_train_state
+from orca.utils.train_utils import create_train_state, merge_params
 from orca.utils.typing import Any, Data, Dict, Params, Sequence
 
 nonpytree_field = partial(flax.struct.field, pytree_node=False)
@@ -187,8 +187,32 @@ class PretrainedModel:
                 "Checking differences between provided example_batch and pre-trained model example_batch..."
             )
             _verify_shapes(
-                example_batch, orig_example_batch, starting_dim=1, raise_error=False
+                example_batch["observation"],
+                orig_example_batch["observation"],
+                starting_dim=2,
+                raise_error=False,
             )
+            _verify_shapes(
+                example_batch["task"],
+                orig_example_batch["task"],
+                starting_dim=1,
+                raise_error=False,
+            )
+
+            # check whether window size changed compared to pre-training
+            if "window_size" in orig_config:
+                pretraining_horizon = orig_config["window_size"]
+            else:
+                pretraining_horizon = orig_config["dataset_kwargs"][
+                    "traj_transform_kwargs"
+                ]["window_size"]
+            finetuning_horizon = example_batch["observation"]["pad_mask"].shape[1]
+            if pretraining_horizon != finetuning_horizon:
+                logging.warning(
+                    "Model was pretrained with window size %d", pretraining_horizon
+                )
+                logging.warning("Finetuning with window size %d", finetuning_horizon)
+            assert finetuning_horizon <= pretraining_horizon
         else:
             example_batch = orig_example_batch
         logging.debug(
@@ -241,9 +265,7 @@ class PretrainedModel:
                 )
 
             params = _init()["params"]
-            params = cls._merge_pretrained_params(
-                target_params=params, pretrained_params=orig_params
-            )
+            params = merge_params(target_params=params, pretrained_params=orig_params)
         else:
             model_def = orig_model_def
             params = orig_params
@@ -251,52 +273,10 @@ class PretrainedModel:
         return cls(
             model_def=model_def,
             params=params,
-            example_batch=example_batch,
             text_processor=text_processor,
+            example_batch=example_batch,
             config=flax.core.freeze(config.to_dict()),
         )
-
-    @staticmethod
-    def _merge_pretrained_params(target_params, pretrained_params):
-        """Copies pre-trained params for every param that has corresponding key + shape."""
-        flat_target_params = flax.traverse_util.flatten_dict(target_params)
-        flat_pretrained_params = flax.traverse_util.flatten_dict(pretrained_params)
-        keys_to_update = [
-            k
-            for k in flat_target_params
-            if k in flat_pretrained_params
-            and flat_target_params[k].shape == flat_pretrained_params[k].shape
-        ]
-        missing_keys = [
-            k for k in flat_target_params if k not in flat_pretrained_params
-        ]
-        shape_mismatch_keys = [
-            k
-            for k in flat_target_params
-            if k in flat_pretrained_params
-            and flat_target_params[k].shape != flat_pretrained_params[k].shape
-        ]
-
-        for key in keys_to_update:
-            logging.debug(f"Param copied from pre-trained: {'.'.join(key)}")
-        if missing_keys or shape_mismatch_keys:
-            logging.info(
-                "########## Parameters skipped during model loading: ##########"
-            )
-            for key in missing_keys:
-                logging.info(
-                    f"Param missing in pre-trained model, skipping: {'.'.join(key)}"
-                )
-            for key in shape_mismatch_keys:
-                logging.info(
-                    f"Param with differing shape in pre-trained model, skipping: {'.'.join(key)}"
-                )
-
-        flat_target_params = flax.core.copy(
-            flat_target_params, {k: flat_pretrained_params[k] for k in keys_to_update}
-        )
-        target_params = flax.traverse_util.unflatten_dict(flat_target_params)
-        return flax.core.freeze(target_params)
 
 
 class HeadWrapper:
