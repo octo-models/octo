@@ -22,6 +22,7 @@ def get_config():
         num_val_batches=1,
         log_interval=1,
         eval_interval=2,
+        viz_interval=2,
         eval_datasets=None,
         trajs_for_metrics=1,
         trajs_for_viz=1,
