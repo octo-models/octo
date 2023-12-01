@@ -65,7 +65,7 @@ NUM_ACTIONS_FOR_VIS = 8
 def main(_):
     jax_utils.initialize_compilation_cache()
 
-    assert FLAGS.config.batch_size % jax.device_count() == 0
+    assert FLAGS.config.dataset_kwargs.batch_size % jax.device_count() == 0
 
     # create a 1D mesh with a single axis named "batch"
     mesh = Mesh(jax.devices(), axis_names="batch")
@@ -191,28 +191,9 @@ def main(_):
             {**kwargs, **FLAGS.config.dataset_kwargs["common_dataset_kwargs"]}
             for kwargs in FLAGS.config.dataset_kwargs["dataset_kwargs_list"]
         ]
+        del FLAGS.config.dataset_kwargs["common_dataset_kwargs"]
 
-    sample_weights = FLAGS.config.dataset_kwargs.get(
-        "sample_weights",
-        [1.0] * len(FLAGS.config.dataset_kwargs["dataset_kwargs_list"]),
-    )
-    train_data = make_interleaved_dataset(
-        FLAGS.config.dataset_kwargs["dataset_kwargs_list"],
-        FLAGS.config.dataset_kwargs["traj_transform_kwargs"],
-        FLAGS.config.dataset_kwargs["frame_transform_kwargs"],
-        train=True,
-        sample_weights=sample_weights,
-        balance_weights=FLAGS.config.get("balance_weights", True),
-        shuffle_buffer_size=FLAGS.config.shuffle_buffer_size,
-        batch_size=FLAGS.config.batch_size,
-        traj_transform_threads=FLAGS.config.dataset_kwargs.get(
-            "traj_transform_threads", None
-        ),
-        traj_read_threads=FLAGS.config.dataset_kwargs.get("traj_read_threads", None),
-        frame_transform_threads=FLAGS.config.dataset_kwargs.get(
-            "frame_transform_threads", None
-        ),
-    )
+    train_data = make_interleaved_dataset(**FLAGS.config.dataset_kwargs, train=True)
 
     # save dataset statistics
     if save_dir is not None and jax.process_index() == 0:
@@ -236,37 +217,35 @@ def main(_):
     visualizers = []
     val_datasets_kwargs, val_datasets_sample_weights = filter_eval_datasets(
         FLAGS.config.dataset_kwargs["dataset_kwargs_list"],
-        sample_weights,
+        FLAGS.config.dataset_kwargs["sample_weights"],
         FLAGS.config.eval_datasets,
     )
     for dataset_kwargs in val_datasets_kwargs:
         val_dataset = make_single_dataset(
             dataset_kwargs={
                 **dataset_kwargs,
-                **FLAGS.config.dataset_kwargs.get("common_dataset_kwargs", {}),
-                "num_parallel_reads": 1,
-                "num_parallel_calls": 1,
+                "num_parallel_reads": 4,
+                "num_parallel_calls": 4,
                 "shuffle": False,
             },
             traj_transform_kwargs={
                 **FLAGS.config.dataset_kwargs["traj_transform_kwargs"],
-                "num_parallel_calls": 1,
+                "num_parallel_calls": 4,
             },
             frame_transform_kwargs=FLAGS.config.dataset_kwargs[
                 "frame_transform_kwargs"
             ],
             train=False,
-            frame_transform_threads=1,
+            frame_transform_threads=16,
         )
-        dataset_statistics = val_dataset.dataset_statistics
         val_datas.append(
             val_dataset.unbatch()
             .shuffle(FLAGS.config.val_shuffle_buffer_size)
             .repeat()
-            .batch(FLAGS.config.batch_size)
+            .batch(FLAGS.config.dataset_kwargs.batch_size)
         )
         visualizers.append(
-            Visualizer(val_dataset, text_processor=text_processor, cache_trajs=False)
+            Visualizer(val_dataset, text_processor=text_processor, cache_trajs=True)
         )
 
     train_data_iter = map(
@@ -539,7 +518,11 @@ def main(_):
             per_dataset_metrics = []
             for data_kwargs, val_data_iter in zip(val_datasets_kwargs, val_data_iters):
                 metrics = []
-                for _, batch in zip(range(FLAGS.config.num_val_batches), val_data_iter):
+                for _, batch in tqdm.tqdm(
+                    zip(range(FLAGS.config.num_val_batches), val_data_iter),
+                    total=FLAGS.config.num_val_batches,
+                    desc=data_kwargs["name"],
+                ):
                     metrics.append(eval_step(train_state, batch))
                 metrics = jax.tree_map(lambda *xs: np.mean(xs), *metrics)
                 wandb_log({f"validation_{data_kwargs['name']}": metrics}, step=i)

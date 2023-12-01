@@ -66,10 +66,8 @@ def get_config(
                 clip_gradient=1.0,
                 frozen_keys=tuple(),
             ),
-            batch_size=1024,
             eval_batch_size=128,
             prefetch_num_batches=0,
-            shuffle_buffer_size=100000,
             val_shuffle_buffer_size=1000,
             num_val_batches=16,
             start_step=placeholder(int),
@@ -155,6 +153,9 @@ def get_dataset_config(modality="multimodal", window_size=1):
         "traj_transform_threads": 48,  # shared between all datasets
         "traj_read_threads": 48,  # shared between all datasets
         "frame_transform_threads": 200,  # not shared between datasets
+        "shuffle_buffer_size": 100000,  # shared between all datasets
+        "batch_size": 1024,
+        "balance_weights": True,
     }
 
 
