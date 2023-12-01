@@ -102,7 +102,7 @@ class Visualizer:
     dataset: dl.DLataset
     metric_keys: dict = None
     sub_conditions: dict = None
-    cache_trajs: bool = True  # Use the same trajectories every time
+    freeze_trajs: bool = True  # Use the same trajectories every time
     text_processor: object = None
 
     def __post_init__(self):
@@ -229,11 +229,13 @@ class Visualizer:
         return all_traj_info
 
     def get_iterator(self, dataset, n):
-        if self.cache_trajs:
-            if dataset not in self._cached_iterators:
-                self._cached_iterators[n] = dataset.take(n).repeat().as_numpy_iterator()
-            return itertools.islice(self._cached_iterators[n], n)
-        return dataset.take(n).as_numpy_iterator()
+        if dataset not in self._cached_iterators:
+            self._cached_iterators[n] = (
+                dataset.take(n).repeat().as_numpy_iterator()
+                if self.freeze_trajs
+                else dataset.repeat().as_numpy_iterator()
+            )
+        return itertools.islice(self._cached_iterators[n], n)
 
 
 def unnormalize(arr, mean, std, **kwargs):

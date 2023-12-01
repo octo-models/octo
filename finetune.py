@@ -165,7 +165,7 @@ def main(_):
     dataset = make_single_dataset(data_kwargs, transform_kwargs, train=True)
     val_dataset = make_single_dataset(data_kwargs, transform_kwargs, train=False)
     visualizer = Visualizer(
-        val_dataset, text_processor=text_processor, cache_trajs=False
+        val_dataset, text_processor=text_processor, freeze_trajs=False
     )
 
     def create_iterator(dataset):

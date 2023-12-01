@@ -245,7 +245,7 @@ def main(_):
             .batch(FLAGS.config.dataset_kwargs.batch_size)
         )
         visualizers.append(
-            Visualizer(val_dataset, text_processor=text_processor, cache_trajs=True)
+            Visualizer(val_dataset, text_processor=text_processor, freeze_trajs=False)
         )
 
     train_data_iter = map(
