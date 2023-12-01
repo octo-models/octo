@@ -213,6 +213,25 @@ def main(_):
             "frame_transform_threads", None
         ),
     )
+
+    # save dataset statistics
+    if save_dir is not None and jax.process_index() == 0:
+        for dataset_kwargs, dataset_statistics in zip(
+            FLAGS.config.dataset_kwargs["dataset_kwargs_list"],
+            train_data.dataset_statistics,
+        ):
+            with tf.io.gfile.GFile(
+                os.path.join(
+                    save_dir, f"dataset_statistics_{dataset_kwargs['name']}.json"
+                ),
+                "w",
+            ) as f:
+                json.dump(
+                    jax.tree_map(lambda x: x.tolist(), dataset_statistics),
+                    f,
+                )
+
+    # create validation datasets and visualizers
     val_datas = []
     visualizers = []
     val_datasets_kwargs, val_datasets_sample_weights = filter_eval_datasets(
@@ -249,19 +268,6 @@ def main(_):
         visualizers.append(
             Visualizer(val_dataset, text_processor=text_processor, cache_trajs=False)
         )
-
-        # save normalization constants for evaluation
-        if save_dir is not None and jax.process_index() == 0:
-            with tf.io.gfile.GFile(
-                os.path.join(
-                    save_dir, f"dataset_statistics_{dataset_kwargs['name']}.json"
-                ),
-                "w",
-            ) as f:
-                json.dump(
-                    jax.tree_map(lambda x: x.tolist(), dataset_statistics),
-                    f,
-                )
 
     train_data_iter = map(
         shard,
