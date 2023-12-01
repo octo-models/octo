@@ -9,6 +9,7 @@ from flax.training import train_state
 import jax
 from jax.experimental import multihost_utils
 import jax.numpy as jnp
+from ml_collections import ConfigDict
 import numpy as np
 import optax
 
@@ -274,3 +275,75 @@ def create_optimizer(params_or_params_shape, optimizer_kwargs: dict):
         param_norm_callable = optax.global_norm
 
     return tx, lr_callable, param_norm_callable
+
+
+def check_config_diff(new_conf, old_conf, silent=False):
+    """Checks for differences between new config and old config dicts."""
+    new_conf_flat = flax.traverse_util.flatten_dict(
+        new_conf.to_dict() if isinstance(new_conf, ConfigDict) else new_conf
+    )
+    old_conf_flat = flax.traverse_util.flatten_dict(
+        old_conf.to_dict() if isinstance(old_conf, ConfigDict) else old_conf
+    )
+
+    # check for missing / new keys
+    if set(new_conf_flat.keys()) != set(old_conf_flat.keys()) and not silent:
+        logging.info(
+            "New config contains extra items: %s",
+            set(new_conf_flat.keys()) - set(old_conf_flat.keys()),
+        )
+        logging.info(
+            "New config doesn't contain items: %s",
+            set(old_conf_flat.keys()) - set(new_conf_flat.keys()),
+        )
+
+    # print differing key values
+    mismatched_keys = {
+        k: (new_conf_flat[k], old_conf_flat[k])
+        for k in new_conf_flat
+        if k in old_conf_flat and new_conf_flat[k] != old_conf_flat[k]
+    }
+    if mismatched_keys and not silent:
+        logging.info(
+            "New config contains keys with new values: %s",
+            flax.core.pretty_repr(mismatched_keys),
+        )
+    return mismatched_keys or (set(new_conf_flat.keys()) != set(old_conf_flat.keys()))
+
+
+def merge_params(target_params, pretrained_params):
+    """Copies pre-trained params into target_params for every param that has corresponding key + shape."""
+    flat_target_params = flax.traverse_util.flatten_dict(target_params)
+    flat_pretrained_params = flax.traverse_util.flatten_dict(pretrained_params)
+    keys_to_update = [
+        k
+        for k in flat_target_params
+        if k in flat_pretrained_params
+        and flat_target_params[k].shape == flat_pretrained_params[k].shape
+    ]
+    missing_keys = [k for k in flat_target_params if k not in flat_pretrained_params]
+    shape_mismatch_keys = [
+        k
+        for k in flat_target_params
+        if k in flat_pretrained_params
+        and flat_target_params[k].shape != flat_pretrained_params[k].shape
+    ]
+
+    for key in keys_to_update:
+        logging.debug(f"Param copied from pre-trained: {'.'.join(key)}")
+    if missing_keys or shape_mismatch_keys:
+        logging.info("########## Parameters skipped during model loading: ##########")
+        for key in missing_keys:
+            logging.info(
+                f"Param missing in pre-trained model, skipping: {'.'.join(key)}"
+            )
+        for key in shape_mismatch_keys:
+            logging.info(
+                f"Param with differing shape in pre-trained model, skipping: {'.'.join(key)}"
+            )
+
+    flat_target_params = flax.core.copy(
+        flat_target_params, {k: flat_pretrained_params[k] for k in keys_to_update}
+    )
+    target_params = flax.traverse_util.unflatten_dict(flat_target_params)
+    return flax.core.freeze(target_params)
