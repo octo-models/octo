@@ -25,9 +25,9 @@ from orca.utils.jax_utils import initialize_compilation_cache
 from orca.utils.pretrained_utils import _verify_shapes, PretrainedModel
 from orca.utils.train_utils import (
     batched_apply,
+    check_config_diff,
     create_optimizer,
     format_name_with_config,
-    print_config_diff,
     Timer,
     TrainState,
 )
@@ -129,7 +129,7 @@ def main(_):
 
     config = ConfigDict(flax.traverse_util.unflatten_dict(flat_config))
     config.update(FLAGS.config.get("update_config", ConfigDict()))
-    print_config_diff(config, orig_config)
+    check_config_diff(config, orig_config)
 
     #########
     #
