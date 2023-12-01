@@ -66,7 +66,6 @@ def get_config():
             ),
             weight_decay=0.0,
             clip_gradient=placeholder(float),
-            # frozen_keys=['BlockTransformer_0'],
             frozen_keys=tuple(),
         ),
     )

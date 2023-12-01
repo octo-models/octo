@@ -172,7 +172,10 @@ class PretrainedModel:
         """
         orig_config = cls.load_config(checkpoint_path)
         if config is None:
+            use_new_config = False
             config = orig_config
+        else:
+            use_new_config = True
 
         orig_example_batch_path = tf.io.gfile.join(
             checkpoint_path, "example_batch.msgpack"
@@ -180,6 +183,9 @@ class PretrainedModel:
         with tf.io.gfile.GFile(orig_example_batch_path, "rb") as f:
             orig_example_batch = flax.serialization.msgpack_restore(f.read())
         if example_batch is not None:
+            logging.info(
+                "Checking differences between provided example_batch and pre-trained model example_batch..."
+            )
             _verify_shapes(
                 example_batch, orig_example_batch, starting_dim=1, raise_error=False
             )
@@ -218,25 +224,29 @@ class PretrainedModel:
             tf.io.gfile.join(checkpoint_path, "default"), orig_params_shape
         )
 
-        # create new model, then copy params from original model into new model
-        model_def = create_model_def(
-            **config["model"].to_dict(),
-        )
-
-        @jax.jit
-        def _init():
-            return model_def.init(
-                rng,
-                example_batch["observation"],
-                example_batch["tasks"],
-                example_batch["observation"]["pad_mask"],
-                train=False,
+        if use_new_config:
+            # create new model, then copy params from original model into new model
+            model_def = create_model_def(
+                **config["model"].to_dict(),
             )
 
-        params = _init()["params"]
-        params = cls._merge_pretrained_params(
-            target_params=params, pretrained_params=orig_params
-        )
+            @jax.jit
+            def _init():
+                return model_def.init(
+                    rng,
+                    example_batch["observation"],
+                    example_batch["tasks"],
+                    example_batch["observation"]["pad_mask"],
+                    train=False,
+                )
+
+            params = _init()["params"]
+            params = cls._merge_pretrained_params(
+                target_params=params, pretrained_params=orig_params
+            )
+        else:
+            model_def = orig_model_def
+            params = orig_params
 
         return cls(
             model_def=model_def,
