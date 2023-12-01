@@ -115,13 +115,18 @@ def main(_):
     #########
 
     config = PretrainedModel.load_config(FLAGS.config.pretrained_path)
-    flat_config = flax.traverse_util.flatten_dict(config)
-    for key in flax.traverse_util.flatten_dict(
-        FLAGS.config.get("config_delete_keys", {})
+    flat_config = flax.traverse_util.flatten_dict(
+        config.to_dict(), keep_empty_nodes=True
+    )
+    for d_key in flax.traverse_util.flatten_dict(
+        FLAGS.config.get("config_delete_keys", ConfigDict()).to_dict()
     ):
-        del flat_config[key]
+        for c_key in list(flat_config.keys()):
+            if ".".join(c_key).startswith(".".join(d_key)):
+                del flat_config[c_key]
+
     config = ConfigDict(flax.traverse_util.unflatten_dict(flat_config))
-    config.update(FLAGS.config.get("update_config", {}))
+    config.update(FLAGS.config.get("update_config", ConfigDict()))
 
     #########
     #
