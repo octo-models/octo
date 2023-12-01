@@ -11,7 +11,7 @@ from flax.traverse_util import flatten_dict
 import jax
 import jax.numpy as jnp
 from jax.sharding import Mesh, NamedSharding, PartitionSpec
-from ml_collections import config_flags
+from ml_collections import config_flags, ConfigDict
 import numpy as np
 import optax
 import orbax.checkpoint
@@ -20,6 +20,7 @@ import tqdm
 import wandb
 
 from orca.data.dataset import make_single_dataset
+from orca.data.utils.text_processing import text_processors
 from orca.utils.jax_utils import initialize_compilation_cache
 from orca.utils.pretrained_utils import _verify_shapes, PretrainedModel
 from orca.utils.train_utils import (
@@ -109,18 +110,18 @@ def main(_):
 
     #########
     #
-    # Load Pretrained Model
+    # Load Pretraining Config + optionally modify
     #
     #########
 
-    model = PretrainedModel.load_pretrained(
-        FLAGS.config.pretrained_path,
-        step=FLAGS.config.pretrained_step,
-        overwrite_model_config=FLAGS.config.get("overwrite_model_config", None),
-        overwrite_example_batch_path=FLAGS.config.get(
-            "overwrite_example_batch_path", None
-        ),
-    )
+    config = PretrainedModel.load_config(FLAGS.config.pretrained_path)
+    flat_config = flax.traverse_util.flatten_dict(config)
+    for key in flax.traverse_util.flatten_dict(
+        FLAGS.config.get("config_delete_keys", {})
+    ):
+        del flat_config[key]
+    config = ConfigDict(flax.traverse_util.unflatten_dict(flat_config))
+    config.update(FLAGS.config.get("update_config", {}))
 
     #########
     #
@@ -128,7 +129,13 @@ def main(_):
     #
     #########
 
-    text_processor = model.text_processor
+    # create text processor
+    if config["text_processor"] is None:
+        text_processor = None
+    else:
+        text_processor = text_processors[config["text_processor"]](
+            **config["text_processor_kwargs"]
+        )
 
     def process_text(batch):
         if text_processor is None:
@@ -168,10 +175,19 @@ def main(_):
 
     example_batch = next(train_data_iter)
 
-    _verify_shapes(
-        example_batch["observation"], model.example_batch["observation"], starting_dim=1
+    #########
+    #
+    # Load Pretrained Model
+    #
+    #########
+
+    model = PretrainedModel.load_pretrained(
+        FLAGS.config.pretrained_path,
+        config=config,
+        example_batch=example_batch,
+        text_processor=text_processor,
+        step=FLAGS.config.pretrained_step,
     )
-    _verify_shapes(example_batch["tasks"], model.example_batch["tasks"], starting_dim=1)
 
     #########
     #

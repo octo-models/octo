@@ -11,7 +11,6 @@ import optax
 import orbax.checkpoint
 import tensorflow as tf
 
-from orca.data.utils.text_processing import text_processors
 from orca.model import create_model_def
 from orca.model.orca_model import OrcaModel
 from orca.utils.train_utils import create_train_state
@@ -136,55 +135,73 @@ class PretrainedModel:
         )
 
     @classmethod
+    def load_config(
+        cls,
+        checkpoint_path: str,
+    ):
+        config_path = tf.io.gfile.join(checkpoint_path, "config.json")
+        with tf.io.gfile.GFile(config_path, "r") as f:
+            config = json.load(f)
+            config = ConfigDict(config)
+        return config
+
+    @classmethod
     def load_pretrained(
         cls,
         checkpoint_path: str,
-        config_path: Optional[str] = None,
-        example_batch_path: Optional[str] = None,
-        overwrite_model_config: Optional[Dict[str, Any]] = None,
-        overwrite_example_batch_path: Optional[str] = None,
+        config: Optional[Dict[str, Any]] = None,
+        example_batch: Optional[Dict[str, Any]] = None,
+        text_processor: Optional[Any] = None,
         step: Optional[int] = None,
     ):
         """Loads a pretrained model from a checkpoint. Important: this method expects the
         params-only checkpoint, not the full TrainState used for resuming training.
 
+        This method operates in three steps:
+            1. Load original model params with original config & example batch
+            2. Create *new* model params with provided config (defaults to original config if config=None)
+            3. Copy over all parameters from original model that have same key+shape in new model.
+
         Args:
             checkpoint_path (str): A path to either a directory of checkpoints or a single checkpoint.
-            config_path (str): Path to config.json. If None, defaults to checkpoint_path/config.json.
-            example_batch_path (str): Path to example_batch.msgpack. If None, defaults to checkpoint_path/example_batch.msgpack.
+            config (Dict[str, Any], optional): Config dict. If None, defaults to checkpoint_path/config.json.
+            example_batch (Dict[str, Any], optional): Example_batch. If None,
+                defaults to checkpoint_path/example_batch.msgpack.
+            text_processor (Any, optional): Preprocessor for text inputs.
             step (int, optional): If multiple checkpoints are present, which one to load. Defaults to the latest.
         """
-        if config_path is None:
-            config_path = tf.io.gfile.join(checkpoint_path, "config.json")
-        if example_batch_path is None:
-            example_batch_path = tf.io.gfile.join(
-                checkpoint_path, "example_batch.msgpack"
-            )
+        orig_config = cls.load_config(checkpoint_path)
+        if config is None:
+            config = orig_config
 
-        with tf.io.gfile.GFile(config_path, "r") as f:
-            config = json.load(f)
-            config = ConfigDict(config)
-
-        model_def = create_model_def(
-            **config["model"].to_dict(),
+        orig_example_batch_path = tf.io.gfile.join(
+            checkpoint_path, "example_batch.msgpack"
         )
-        with tf.io.gfile.GFile(example_batch_path, "rb") as f:
-            example_batch = flax.serialization.msgpack_restore(f.read())
-            logging.info(
-                "Loaded example batch with structure: %s",
-                flax.core.pretty_repr(jax.tree_map(jnp.shape, example_batch)),
+        with tf.io.gfile.GFile(orig_example_batch_path, "rb") as f:
+            orig_example_batch = flax.serialization.msgpack_restore(f.read())
+        if example_batch is not None:
+            _verify_shapes(
+                example_batch, orig_example_batch, starting_dim=1, raise_error=False
             )
+        else:
+            example_batch = orig_example_batch
+        logging.info(
+            "Using example batch with structure: %s",
+            flax.core.pretty_repr(jax.tree_map(jnp.shape, example_batch)),
+        )
 
-        # compute params shape without using any FLOPs
+        # load params into original model shape
+        orig_model_def = create_model_def(
+            **orig_config["model"].to_dict(),
+        )
         rng = jax.random.PRNGKey(0)
-        params_shape = jax.eval_shape(
-            partial(model_def.init, train=False),
+        orig_params_shape = jax.eval_shape(
+            partial(orig_model_def.init, train=False),
             rng,
-            example_batch["observation"],
-            example_batch["tasks"],
-            example_batch["observation"]["pad_mask"],
+            orig_example_batch["observation"],
+            orig_example_batch["tasks"],
+            orig_example_batch["observation"]["pad_mask"],
         )["params"]
-
         all_steps = orbax.checkpoint.utils.checkpoint_steps(checkpoint_path)
         if all_steps:
             if step is not None and step not in all_steps:
@@ -197,49 +214,35 @@ class PretrainedModel:
                 checkpoint_path,
             )
 
-        params = orbax.checkpoint.PyTreeCheckpointer().restore(
-            tf.io.gfile.join(checkpoint_path, "default"), params_shape
+        orig_params = orbax.checkpoint.PyTreeCheckpointer().restore(
+            tf.io.gfile.join(checkpoint_path, "default"), orig_params_shape
         )
 
-        if overwrite_model_config:
-            # initialize new model, copy over all pre-trained params with fitting shape
-            config["model"].update(overwrite_model_config)
-            model_def = create_model_def(
-                **config["model"].to_dict(),
+        # create new model, then copy params from original model into new model
+        model_def = create_model_def(
+            **config["model"].to_dict(),
+        )
+
+        @jax.jit
+        def _init():
+            return model_def.init(
+                rng,
+                example_batch["observation"],
+                example_batch["tasks"],
+                example_batch["observation"]["pad_mask"],
+                train=False,
             )
-            if overwrite_example_batch_path:
-                with tf.io.gfile.GFile(overwrite_example_batch_path, "rb") as f:
-                    example_batch = flax.serialization.msgpack_restore(f.read())
-                    logging.info(
-                        "Loaded overwrite example batch with structure: %s",
-                        flax.core.pretty_repr(jax.tree_map(jnp.shape, example_batch)),
-                    )
 
-            # Initializing the model in a jit avoids running the model on CPU
-            @jax.jit
-            def _init():
-                return model_def.init(
-                    rng,
-                    example_batch["observation"],
-                    example_batch["tasks"],
-                    example_batch["observation"]["pad_mask"],
-                    train=False,
-                )
-
-            params = cls._merge_pretrained_params(_init()["params"], params)
-
-        if config["text_processor"] is None:
-            text_processor = None
-        else:
-            text_processor = text_processors[config["text_processor"]](
-                **config["text_processor_kwargs"]
-            )
+        params = _init()["params"]
+        params = cls._merge_pretrained_params(
+            target_params=params, pretrained_params=orig_params
+        )
 
         return cls(
             model_def=model_def,
             params=params,
-            text_processor=text_processor,
             example_batch=example_batch,
+            text_processor=text_processor,
             config=flax.core.freeze(config.to_dict()),
         )
 
@@ -299,7 +302,13 @@ class HeadWrapper:
         return partial(self.__call__, head_method_name=name)
 
 
-def _verify_shapes(pytree, example_pytree, starting_dim: int = 0, strict: bool = False):
+def _verify_shapes(
+    pytree,
+    example_pytree,
+    starting_dim: int = 0,
+    strict: bool = False,
+    raise_error: bool = True,
+):
     weak_fail, fail = False, False
     pytree_flat = flax.traverse_util.flatten_dict(pytree)
     example_pytree_flat = flax.traverse_util.flatten_dict(example_pytree)
@@ -330,5 +339,5 @@ def _verify_shapes(pytree, example_pytree, starting_dim: int = 0, strict: bool =
         )
         fail = True
 
-    if fail or (weak_fail and strict):
+    if raise_error and (fail or (weak_fail and strict)):
         raise AssertionError("Provided pytree does not match example pytree.")
