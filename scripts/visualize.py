@@ -122,7 +122,7 @@ def main(_):
             train=False,
         )
         visualizers.append(
-            Visualizer(val_dataset, text_processor=text_processor, cache_trajs=False)
+            Visualizer(val_dataset, text_processor=text_processor, freeze_trajs=False)
         )
 
     list_of_checkpoints = ocp.utils.checkpoint_steps_paths(FLAGS.checkpoints)
