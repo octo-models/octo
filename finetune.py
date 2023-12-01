@@ -27,6 +27,7 @@ from orca.utils.train_utils import (
     batched_apply,
     create_optimizer,
     format_name_with_config,
+    print_config_diff,
     Timer,
     TrainState,
 )
@@ -115,9 +116,9 @@ def main(_):
     #
     #########
 
-    config = PretrainedModel.load_config(FLAGS.config.pretrained_path)
+    orig_config = PretrainedModel.load_config(FLAGS.config.pretrained_path)
     flat_config = flax.traverse_util.flatten_dict(
-        config.to_dict(), keep_empty_nodes=True
+        orig_config.to_dict(), keep_empty_nodes=True
     )
     for d_key in flax.traverse_util.flatten_dict(
         FLAGS.config.get("config_delete_keys", ConfigDict()).to_dict()
@@ -128,6 +129,7 @@ def main(_):
 
     config = ConfigDict(flax.traverse_util.unflatten_dict(flat_config))
     config.update(FLAGS.config.get("update_config", ConfigDict()))
+    print_config_diff(config, orig_config)
 
     #########
     #
@@ -195,20 +197,6 @@ def main(_):
         step=FLAGS.config.pretrained_step,
     )
 
-    orig_config = PretrainedModel.load_config(FLAGS.config.pretrained_path)
-    if "window_size" in orig_config:
-        pretraining_horizon = orig_config["window_size"]
-    else:
-        pretraining_horizon = orig_config["dataset_kwargs"]["traj_transform_kwargs"][
-            "window_size"
-        ]
-
-    finetuning_horizon = example_batch["observation"]["pad_mask"].shape[1]
-    if pretraining_horizon != finetuning_horizon:
-        logging.warning("Model was pretrained with window size %d", pretraining_horizon)
-        logging.warning("Finetuning with window size %d", finetuning_horizon)
-    assert finetuning_horizon <= pretraining_horizon
-
     #########
     #
     # Setup Optimizer and Train State
@@ -251,7 +239,7 @@ def main(_):
 
         # Save model config
         new_config = ConfigDict(flax.core.unfreeze(model.config))
-        new_config.window_size = finetuning_horizon
+        new_config.window_size = example_batch["observation"]["pad_mask"].shape[1]
 
         fname = tf.io.gfile.join(save_dir, "config.json")
         with tf.io.gfile.GFile(fname, "w") as config_file:
