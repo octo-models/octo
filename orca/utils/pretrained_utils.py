@@ -184,14 +184,14 @@ class PretrainedModel:
                 "Checking differences between provided example_batch and pre-trained model example_batch..."
             )
             logging.info("Checking input observation:...")
-            _verify_shapes(
+            changed_input = _verify_shapes(
                 example_batch["observation"],
                 orig_example_batch["observation"],
                 starting_dim=2,
                 raise_error=False,
             )
             logging.info("Checking task definition:...")
-            _verify_shapes(
+            changed_input = changed_input or _verify_shapes(
                 example_batch["tasks"],
                 orig_example_batch["tasks"],
                 starting_dim=1,
@@ -214,6 +214,7 @@ class PretrainedModel:
             assert finetuning_horizon <= pretraining_horizon
         else:
             example_batch = orig_example_batch
+            changed_input = False
         logging.debug(
             "Using example batch with structure: %s",
             flax.core.pretty_repr(jax.tree_map(jnp.shape, example_batch)),
@@ -247,7 +248,10 @@ class PretrainedModel:
             tf.io.gfile.join(checkpoint_path, "default"), orig_params_shape
         )
 
-        if check_config_diff(config["model"], orig_config["model"], silent=True):
+        if (
+            check_config_diff(config["model"], orig_config["model"], silent=True)
+            or changed_input
+        ):
             # create new model, then copy params from original model into new model
             model_def = create_model_def(
                 **config["model"].to_dict(),
@@ -297,6 +301,7 @@ def _verify_shapes(
     starting_dim: int = 0,
     strict: bool = False,
     raise_error: bool = True,
+    silent=False,
 ):
     weak_fail, fail = False, False
     pytree_flat = flax.traverse_util.flatten_dict(pytree)
@@ -304,14 +309,15 @@ def _verify_shapes(
 
     # Check that all elements are present
     if set(pytree_flat.keys()) != set(example_pytree_flat.keys()):
-        logging.warning(
-            "Provided pytree contains extra items: %s",
-            set(pytree_flat.keys()) - set(example_pytree_flat.keys()),
-        )
-        logging.warning(
-            "Provided pytree doesn't contain items: %s",
-            set(example_pytree_flat.keys()) - set(pytree_flat.keys()),
-        )
+        if not silent:
+            logging.warning(
+                "Provided pytree contains extra items: %s",
+                set(pytree_flat.keys()) - set(example_pytree_flat.keys()),
+            )
+            logging.warning(
+                "Provided pytree doesn't contain items: %s",
+                set(example_pytree_flat.keys()) - set(pytree_flat.keys()),
+            )
         weak_fail = True
 
     mismatched_keys = {
@@ -322,11 +328,14 @@ def _verify_shapes(
         != example_pytree_flat[k].shape[starting_dim:]
     }
     if mismatched_keys:
-        logging.warning(
-            "Provided pytree contains mismatched shapes: %s",
-            flax.core.pretty_repr(mismatched_keys),
-        )
+        if not silent:
+            logging.warning(
+                "Provided pytree contains mismatched shapes: %s",
+                flax.core.pretty_repr(mismatched_keys),
+            )
         fail = True
 
     if raise_error and (fail or (weak_fail and strict)):
         raise AssertionError("Provided pytree does not match example pytree.")
+
+    return weak_fail or fail
