@@ -549,6 +549,7 @@ def main(_):
             wandb_log({"validation_aggregate": agg_metrics}, step=i)
             timer.tock("val")
 
+        if (i + 1) % FLAGS.config.viz_interval == 0:
             logging.info("Visualizing...")
             timer.tick("visualize")
 
