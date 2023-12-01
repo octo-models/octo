@@ -13,7 +13,7 @@ import tensorflow as tf
 
 from orca.model import create_model_def
 from orca.model.orca_model import OrcaModel
-from orca.utils.train_utils import create_train_state, merge_params
+from orca.utils.train_utils import check_config_diff, create_train_state, merge_params
 from orca.utils.typing import Any, Data, Dict, Params, Sequence
 
 nonpytree_field = partial(flax.struct.field, pytree_node=False)
@@ -172,10 +172,7 @@ class PretrainedModel:
         """
         orig_config = cls.load_config(checkpoint_path)
         if config is None:
-            use_new_config = False
             config = orig_config
-        else:
-            use_new_config = True
 
         orig_example_batch_path = tf.io.gfile.join(
             checkpoint_path, "example_batch.msgpack"
@@ -186,15 +183,17 @@ class PretrainedModel:
             logging.info(
                 "Checking differences between provided example_batch and pre-trained model example_batch..."
             )
+            logging.info("Checking input observation:...")
             _verify_shapes(
                 example_batch["observation"],
                 orig_example_batch["observation"],
                 starting_dim=2,
                 raise_error=False,
             )
+            logging.info("Checking task definition:...")
             _verify_shapes(
-                example_batch["task"],
-                orig_example_batch["task"],
+                example_batch["tasks"],
+                orig_example_batch["tasks"],
                 starting_dim=1,
                 raise_error=False,
             )
@@ -248,7 +247,7 @@ class PretrainedModel:
             tf.io.gfile.join(checkpoint_path, "default"), orig_params_shape
         )
 
-        if use_new_config:
+        if check_config_diff(config["model"], orig_config["model"], silent=True):
             # create new model, then copy params from original model into new model
             model_def = create_model_def(
                 **config["model"].to_dict(),

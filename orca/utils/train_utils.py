@@ -277,8 +277,8 @@ def create_optimizer(params_or_params_shape, optimizer_kwargs: dict):
     return tx, lr_callable, param_norm_callable
 
 
-def print_config_diff(new_conf, old_conf):
-    """Prints differences between new config and old config dicts."""
+def check_config_diff(new_conf, old_conf, silent=False):
+    """Checks for differences between new config and old config dicts."""
     new_conf_flat = flax.traverse_util.flatten_dict(
         new_conf.to_dict() if isinstance(new_conf, ConfigDict) else new_conf
     )
@@ -287,7 +287,7 @@ def print_config_diff(new_conf, old_conf):
     )
 
     # check for missing / new keys
-    if set(new_conf_flat.keys()) != set(old_conf_flat.keys()):
+    if set(new_conf_flat.keys()) != set(old_conf_flat.keys()) and not silent:
         logging.info(
             "New config contains extra items: %s",
             set(new_conf_flat.keys()) - set(old_conf_flat.keys()),
@@ -303,11 +303,12 @@ def print_config_diff(new_conf, old_conf):
         for k in new_conf_flat
         if k in old_conf_flat and new_conf_flat[k] != old_conf_flat[k]
     }
-    if mismatched_keys:
+    if mismatched_keys and not silent:
         logging.info(
             "New config contains keys with new values: %s",
             flax.core.pretty_repr(mismatched_keys),
         )
+    return mismatched_keys or (set(new_conf_flat.keys()) != set(old_conf_flat.keys()))
 
 
 def merge_params(target_params, pretrained_params):
