@@ -626,4 +626,7 @@ def make_interleaved_dataset(
         dataset = dataset.map(fn, frame_transform_threads)
 
     dataset = dataset.batch(batch_size, num_parallel_calls=frame_transform_threads)
+
+    # save for later
+    dataset.dataset_statistics = all_dataset_statistics
     return dataset
