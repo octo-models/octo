@@ -2,6 +2,7 @@ from copy import deepcopy
 
 from ml_collections import ConfigDict
 from ml_collections.config_dict import FieldReference, placeholder
+from config import wrap
 
 from orca.data.utils.data_utils import ActionEncoding, StateEncoding
 
@@ -13,7 +14,8 @@ def update_config(config, **kwargs):
     return new_config
 
 
-def get_config():
+@wrap
+def get_config(mode="full"):
     # If starting with an ORCA-wrist model, there should be two image keys
     # first image key should be the third-person view
     # and second image key should be the wrist view
@@ -37,6 +39,21 @@ def get_config():
         num_parallel_calls=16,  # for initial dataset construction
     )
 
+    if mode == "full":
+        frozen_keys = None
+    elif mode == "head_only":
+        frozen_keys = ("orca_transformer.*",)
+    elif mode == "head_mlp_only":
+        frozen_keys = (
+            "orca_transformer.*",
+            "heads_*.map_head.probe",
+            "heads_*.map_head.MultiHeadDotProductAttention_0.*",
+        )
+    elif mode == "frozen_transformer":
+        frozen_keys = ("orca_transformer.BlockTransformer_0.*",)
+    else:
+        raise ValueError("Invalid mode")
+
     max_steps = FieldReference(20000)
 
     config = dict(
@@ -56,6 +73,7 @@ def get_config():
         ),
         finetuning_dataset=FINETUNING_KWARGS,
         modality=None,
+        finetuning_mode=mode,
         optimizer=dict(
             learning_rate=dict(
                 init_value=0.0,
@@ -66,7 +84,7 @@ def get_config():
             ),
             weight_decay=0.0,
             clip_gradient=placeholder(float),
-            frozen_keys=tuple(),
+            frozen_keys=frozen_keys,
         ),
     )
 
