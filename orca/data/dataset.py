@@ -315,7 +315,6 @@ def make_dataset_from_rlds(
     state_obs_keys: Union[str, List[str]] = [],
     state_encoding: StateEncoding = StateEncoding.NONE,
     action_encoding: ActionEncoding = ActionEncoding.EEF_POS,
-    ram_budget: Optional[int] = None,
     action_proprio_normalization_type: Optional[str] = None,
     dataset_statistics: Optional[Union[dict, str]] = None,
     num_parallel_reads: int = tf.data.AUTOTUNE,
@@ -337,7 +336,6 @@ def make_dataset_from_rlds(
             Get concatenated and mapped to "proprio". Inserts 1d padding for each None key.
         state_encoding (StateEncoding): type of state encoding used, e.g. joint angles vs EEF pose.
         action_encoding (ActionEncoding): type of action encoding used, e.g. joint delta vs EEF delta.
-        ram_budget (int, optional): limits the RAM used by tf.data.AUTOTUNE, unit: GB, forwarded to AutotuneOptions.
         action_proprio_normalization_type (Optional[str], optional): The type of normalization to perform on the action,
             proprio, or both. Can be "normal" (mean 0, std 1) or "bounds" (normalized to [-1, 1]).
         dataset_statistics: (dict|str, optional): dict (or path to JSON file) that contains dataset
@@ -369,8 +367,6 @@ def make_dataset_from_rlds(
     dataset = dl.DLataset.from_rlds(
         builder, split=split, shuffle=shuffle, num_parallel_reads=num_parallel_reads
     )
-    if ram_budget:
-        dataset = dataset.with_ram_budget(ram_budget)
 
     image_obs_keys = (
         [image_obs_keys] if not isinstance(image_obs_keys, Sequence) else image_obs_keys
@@ -509,6 +505,9 @@ def make_single_dataset(
     for fn in get_frame_transforms(**frame_transform_kwargs, train=train):
         dataset = dataset.frame_map(fn, frame_transform_threads)
 
+    # this seems to reduce memory usage without affecting speed
+    dataset = dataset.with_ram_budget(1)
+
     # save for later
     dataset.dataset_statistics = dataset_statistics
     return dataset
@@ -626,6 +625,9 @@ def make_interleaved_dataset(
         dataset = dataset.map(fn, frame_transform_threads)
 
     dataset = dataset.batch(batch_size, num_parallel_calls=frame_transform_threads)
+
+    # this seems to reduce memory usage without affecting speed
+    dataset = dataset.with_ram_budget(1)
 
     # save for later
     dataset.dataset_statistics = all_dataset_statistics
