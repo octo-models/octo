@@ -624,7 +624,7 @@ def make_interleaved_dataset(
     for fn in get_frame_transforms(**frame_transform_kwargs, train=train):
         dataset = dataset.map(fn, frame_transform_threads)
 
-    dataset = dataset.batch(batch_size, num_parallel_calls=frame_transform_threads)
+    dataset = dataset.batch(batch_size)
 
     # this seems to reduce memory usage without affecting speed
     dataset = dataset.with_ram_budget(1)

@@ -261,7 +261,6 @@ def normalize_action_and_proprio(traj, metadata, normalization_type):
     raise ValueError(f"Unknown normalization type {normalization_type}")
 
 
-@tf.function(jit_compile=True)
 def binarize_gripper_actions(actions: tf.Tensor) -> tf.Tensor:
     """Converts gripper actions from continous to binary values (0 and 1).
 
