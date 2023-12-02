@@ -1,4 +1,5 @@
 from copy import deepcopy
+import functools
 
 from ml_collections import ConfigDict
 from ml_collections.config_dict import FieldReference, placeholder
@@ -20,6 +21,7 @@ def wrap(f):
     python train.py --config=config.py:transformer_size=vit_s
     """
 
+    @functools.wraps(f)
     def wrapped_f(config_string=None):
         if config_string is None:
             return f()
