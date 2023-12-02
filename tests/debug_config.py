@@ -17,8 +17,6 @@ def get_config():
                 warmup_steps=1,
             ),
         ),
-        batch_size=64,
-        shuffle_buffer_size=1000,
         num_val_batches=1,
         log_interval=1,
         eval_interval=2,
@@ -38,6 +36,10 @@ def get_config():
             "traj_transform_threads": 1,  # shared between all datasets
             "traj_read_threads": 1,  # shared between all datasets
             "frame_transform_threads": 4,  # not shared between datasets
+            "batch_size": 64,
+            "sample_weights": None,
+            "shuffle_buffer_size": 1000,
+            "balance_weights": True,
         },
     )
     return config
