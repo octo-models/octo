@@ -512,6 +512,18 @@ def main(_):
         with timer("train"):
             train_state, update_info = train_step(train_state, batch)
 
+        if (i + 1) % FLAGS.config.save_interval == 0 and save_dir is not None:
+            params_checkpointer.save(
+                i + 1,
+                train_state.params,
+                {"save_args": orbax_utils.save_args_from_target(train_state.params)},
+            )
+            state_checkpointer.save(
+                i + 1,
+                train_state,
+                {"save_args": orbax_utils.save_args_from_target(train_state)},
+            )
+
         if (i + 1) % FLAGS.config.eval_interval == 0:
             logging.info("Evaluating...")
             timer.tick("val")
@@ -587,18 +599,6 @@ def main(_):
                         step=i,
                     )
             timer.tock("visualize")
-
-        if (i + 1) % FLAGS.config.save_interval == 0 and save_dir is not None:
-            params_checkpointer.save(
-                i + 1,
-                train_state.params,
-                {"save_args": orbax_utils.save_args_from_target(train_state.params)},
-            )
-            state_checkpointer.save(
-                i + 1,
-                train_state,
-                {"save_args": orbax_utils.save_args_from_target(train_state)},
-            )
 
         timer.tock("total")
 
