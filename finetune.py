@@ -64,8 +64,8 @@ def main(_):
         ORCA Finetuning Script
         ======================
         Pretrained model: {FLAGS.config.pretrained_path}
-        Finetuning Dataset: {FLAGS.config.finetuning_dataset.name}
-        Data dir: {FLAGS.config.finetuning_dataset.data_dir}
+        Finetuning Dataset: {FLAGS.config.dataset_kwargs.name}
+        Data dir: {FLAGS.config.dataset_kwargs.data_dir}
         Task Modality: {FLAGS.config.modality}
         Finetuning Mode: {FLAGS.config.finetuning_mode}
 
@@ -159,11 +159,20 @@ def main(_):
         del batch["dataset_name"]
         return batch
 
-    data_kwargs = FLAGS.config.finetuning_dataset
-    transform_kwargs = FLAGS.config.data_transforms
-
-    dataset = make_single_dataset(data_kwargs, transform_kwargs, train=True)
-    val_dataset = make_single_dataset(data_kwargs, transform_kwargs, train=False)
+    dataset = make_single_dataset(
+        FLAGS.config.dataset_kwargs,
+        FLAGS.config.traj_transform_kwargs,
+        FLAGS.config.frame_transform_kwargs,
+        train=True,
+        frame_transform_threads=FLAGS.config.frame_transform_threads,
+    )
+    val_dataset = make_single_dataset(
+        FLAGS.config.dataset_kwargs,
+        FLAGS.config.traj_transform_kwargs,
+        FLAGS.config.frame_transform_kwargs,
+        train=False,
+        frame_transform_threads=FLAGS.config.frame_transform_threads,
+    )
     visualizer = Visualizer(
         val_dataset, text_processor=text_processor, freeze_trajs=False
     )
