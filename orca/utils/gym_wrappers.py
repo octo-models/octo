@@ -62,7 +62,7 @@ class HistoryWrapper(gym.Wrapper):
         self.history = deque(maxlen=self.horizon)
         self.num_obs = 0
 
-        # self.observation_space = space_stack(self.env.observation_space, self.horizon)
+        self.observation_space = space_stack(self.env.observation_space, self.horizon)
 
     def step(self, action):
         obs, reward, done, trunc, info = self.env.step(action)
@@ -107,6 +107,7 @@ class RHCWrapper(gym.Wrapper):
             if done or trunc:
                 break
 
+        # pass through all infos, also return full observation and reward sequence in infos
         infos = listdict2dictlist(infos)
         infos["rewards"] = rewards
         infos["observations"] = observations

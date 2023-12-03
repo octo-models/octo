@@ -275,6 +275,7 @@ class RolloutVisualizer:
         vis_fps (int): FPS of logged rollout video
         video_subsample_rate (int): Subsampling rate for video logging (to reduce video size for high-frequency control)
         norm_statistics_path (str, optional): Optional path to stats for de-normalizing policy actionsi & proprio.
+        text_processor (object, optional): Used to encode language instruction in task if not None.
     """
 
     env_name: str
@@ -300,7 +301,8 @@ class RolloutVisualizer:
 
     def run_rollouts(self, policy_fn, n_rollouts=10, n_vis_rollouts=3):
         def extract_images(obs):
-            return jnp.concatenate([obs[k] for k in obs if "image_" in k], axis=-2)
+            # obs has [window_size, ...] shape, only use first time step
+            return jnp.concatenate([obs[k][0] for k in obs if "image_" in k], axis=-2)
 
         def listdict2dictlist(LD):
             return {k: [dic[k] for dic in LD] for k in LD[0]}
@@ -356,7 +358,7 @@ class RolloutVisualizer:
         rollout_info["episode_returns"] = wandb.Histogram(
             rollout_info["episode_returns"]
         )
-        metrics = rollout_info.pop(["episode_metrics"])
+        metrics = rollout_info.pop("episode_metrics")
         for metric in metrics:
             rollout_info[metric] = wandb.Histogram(metrics[metric])
             rollout_info[f"avg_{metric}"] = np.mean(metrics[metric])

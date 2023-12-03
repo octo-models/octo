@@ -251,7 +251,7 @@ def main(_):
     )
     env = HistoryWrapper(env, FLAGS.horizon)
     # env = TemporalEnsembleWrapper(env, FLAGS.pred_horizon)
-    env = RHCWrapper(env, FLAGS.pred_horizon, FLAGS.exec_horizon)
+    env = RHCWrapper(env, FLAGS.exec_horizon)
 
     goal_image = jnp.zeros((FLAGS.im_size, FLAGS.im_size, 3), dtype=np.uint8)
     goal_instruction = ""
