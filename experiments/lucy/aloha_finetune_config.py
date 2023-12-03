@@ -157,7 +157,6 @@ def get_config(mode="full"):
             dict(
                 max_episode_length=200,
                 action_chunk=50,
-                vis_render_size=(320, 240),
                 vis_fps=25,
                 video_subsample_rate=2,
                 norm_statistics_path="gs://rail-orca-central2/aloha_sim_cube_scripted_dataset/1.0.0/dataset_statistics_707801797899cdd91dcb18bd45463cf73ac935bfd6ac6b62456653e96f120a5f.json",
@@ -168,7 +167,6 @@ def get_config(mode="full"):
             dict(
                 max_episode_length=200,
                 action_chunk=30,
-                vis_render_size=(320, 240),
                 vis_fps=25,
                 video_subsample_rate=2,
                 norm_statistics_path="gs://rail-orca-central2/aloha_sim_cube_scripted_dataset/1.0.0/dataset_statistics_707801797899cdd91dcb18bd45463cf73ac935bfd6ac6b62456653e96f120a5f.json",
