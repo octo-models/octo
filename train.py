@@ -1,4 +1,3 @@
-import copy
 import datetime
 from functools import partial
 import json
@@ -6,7 +5,6 @@ import os
 import os.path as osp
 import subprocess
 
-from absl import app, flags, logging
 import flax
 from flax.training import orbax_utils
 from flax.traverse_util import flatten_dict
@@ -17,10 +15,18 @@ from jax.sharding import Mesh, NamedSharding, PartitionSpec
 from ml_collections import config_flags
 import numpy as np
 import optax
-import orbax.checkpoint
-import tensorflow as tf
 import tqdm
 import wandb
+
+# WARNING: importing orbax before tensorflow silences important logging from tensorflow (╯°□°)╯︵ ┻━┻
+# isort: off
+
+from absl import app, flags, logging
+import tensorflow as tf
+import orbax.checkpoint
+
+# isort: on
+
 
 import orca
 from orca.data.dataset import make_interleaved_dataset, make_single_dataset
@@ -38,13 +44,6 @@ from orca.utils.train_utils import (
     Timer,
 )
 from orca.utils.visualization_lib import Visualizer
-
-try:
-    from jax_smi import initialise_tracking  # type: ignore
-
-    initialise_tracking()
-except ImportError:
-    pass
 
 FLAGS = flags.FLAGS
 
