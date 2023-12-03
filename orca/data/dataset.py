@@ -514,17 +514,18 @@ def make_single_dataset(
 
 
 def make_interleaved_dataset(
+    *,
     dataset_kwargs_list: List[dict],
     traj_transform_kwargs: dict,
     frame_transform_kwargs: dict,
     train: bool,
-    sample_weights: Optional[List[float]] = None,
-    balance_weights: bool = True,
-    shuffle_buffer_size: int = 10000,
-    batch_size: int = 64,
-    traj_transform_threads: Optional[int] = None,
-    traj_read_threads: Optional[int] = None,
-    frame_transform_threads: int = tf.data.AUTOTUNE,
+    sample_weights: Optional[List[float]],
+    balance_weights: bool,
+    shuffle_buffer_size: int,
+    batch_size: int,
+    traj_transform_threads: Optional[int],
+    traj_read_threads: Optional[int],
+    frame_transform_threads: int,
 ) -> dl.DLataset:
     """Creates an interleaved dataset from list of dataset kwargs. Returns a dataset of batched frames.
 
@@ -595,16 +596,12 @@ def make_interleaved_dataset(
             num_parallel_reads=reads,
             dataset_statistics=dataset_statistics,
         )
-        dataset = (
-            apply_trajectory_transforms(
-                dataset,
-                **traj_transform_kwargs,
-                num_parallel_calls=threads,
-                train=train,
-            )
-            .flatten(num_parallel_calls=threads)
-            .repeat()
-        )
+        dataset = apply_trajectory_transforms(
+            dataset.repeat(),
+            **traj_transform_kwargs,
+            num_parallel_calls=threads,
+            train=train,
+        ).flatten(num_parallel_calls=threads)
         action_encodings.append(
             dataset_kwargs.get("action_encoding", ActionEncoding.EEF_POS)
         )
