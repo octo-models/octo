@@ -250,7 +250,7 @@ def apply_trajectory_transforms(
 
 def get_frame_transforms(
     train: bool,
-    image_augment_kwargs: dict,
+    image_augment_kwargs: Optional[dict] = None,
     resize_size: Optional[Tuple[int, int]] = None,
 ) -> List[Callable[[dict], dict]]:
     """
@@ -293,7 +293,7 @@ def get_frame_transforms(
             )
         )
 
-    if train:
+    if train and image_augment_kwargs is not None:
         # augment all images with the same seed, skipping padding images
         def aug(frame):
             seed = tf.random.uniform([2], maxval=tf.dtypes.int32.max, dtype=tf.int32)
