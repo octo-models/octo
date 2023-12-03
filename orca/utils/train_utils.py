@@ -166,6 +166,8 @@ def batched_apply(fn, batch_size):
 
 
 def filter_eval_datasets(dataset_kwargs_list, sample_weights, eval_datasets=None):
+    if sample_weights is None:
+        sample_weights = [1.0] * len(dataset_kwargs_list)
     if eval_datasets is None:
         return dataset_kwargs_list, sample_weights
     else:

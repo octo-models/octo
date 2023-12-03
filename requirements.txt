@@ -10,7 +10,7 @@ optax==0.1.5
 absl-py >= 0.12.0
 scipy >= 1.6.0
 wandb >= 0.12.14
-tensorflow==2.13.0
+tensorflow==2.15.0
 einops >= 0.6.1
 imageio >= 2.31.1
 moviepy >= 1.0.3
@@ -18,9 +18,9 @@ pre-commit == 3.3.3
 transformers >= 4.31.0
 tensorflow_hub >= 0.14.0
 tensorflow_text >= 2.13.0
-tensorflow_probability == 0.21.0
-tensorflow_datasets >= 4.9.2
+tensorflow_probability == 0.23.0
+tensorflow_datasets == 4.9.2
 tensorflow_graphics == 2021.12.3
-dlimp @ git+https://github.com/kvablack/dlimp@6e1eab9f74ec1498e50a3a5571ae011f472a6feb
+dlimp @ git+https://github.com/kvablack/dlimp@9e29390ccb1404f9a6079207c8bdac53c9a7d4ef
 plotly >= 5.16.1
 matplotlib

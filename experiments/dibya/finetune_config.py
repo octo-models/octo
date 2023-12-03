@@ -32,7 +32,6 @@ def get_config(
         "action_encoding": ActionEncoding.EEF_POS,
         "action_proprio_normalization_type": "normal",
         # If the default data loading speed is too slow, try these:
-        # and "num_parallel_calls" in `transform_kwargs` below
         # "num_parallel_reads": 8,  # for reading from disk / GCS
         # "num_parallel_calls": 16,  # for initial dataset construction
     }
@@ -70,7 +69,7 @@ def get_config(
         wandb=dict(
             project="orca_finetune", group=placeholder(str), entity=placeholder(str)
         ),
-        finetuning_dataset=FINETUNING_KWARGS,
+        dataset_kwargs=FINETUNING_KWARGS,
         modality=task,
         finetuning_mode=mode,
         window_size=window_size,
@@ -107,9 +106,18 @@ def get_config(
     else:
         raise ValueError("Invalid modality")
 
-    transform_kwargs = dict(
+    traj_transform_kwargs = dict(
         window_size=window_size,
         additional_action_window_size=0,
+        goal_relabeling_strategy=goal_relabeling_strategy,
+        task_augmentation_strategy="delete_task_conditioning",
+        task_augmentation_kwargs=dict(
+            delete_key_groups_probs=delete_key_groups_probs,
+        ),
+        # If the default data loading speed is too slow, try these:
+        # num_parallel_calls=16,  # for less CPU-intensive ops
+    )
+    frame_transform_kwargs = dict(
         resize_size=(256, 256),
         image_augment_kwargs=dict(
             random_resized_crop=dict(scale=[0.8, 1.0], ratio=[0.9, 1.1]),
@@ -125,13 +133,12 @@ def get_config(
                 "random_hue",
             ],
         ),
-        goal_relabeling_strategy=goal_relabeling_strategy,
-        task_augmentation_strategy="delete_task_conditioning",
-        task_augmentation_kwargs=dict(
-            delete_key_groups_probs=delete_key_groups_probs,
-        ),
-        # If the default data loading speed is too slow, try these:
-        # num_parallel_calls=16,  # for the most CPU-intensive ops (decoding, resizing, augmenting)
     )
-    config["data_transforms"] = transform_kwargs
+    # If the default data loading speed is too slow, try these:
+    config[
+        "frame_transform_threads"
+    ] = 16  # for the most CPU-intensive ops (decoding, resizing, augmenting)
+
+    config["traj_transform_kwargs"] = traj_transform_kwargs
+    config["frame_transform_kwargs"] = frame_transform_kwargs
     return ConfigDict(config)
