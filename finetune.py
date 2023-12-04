@@ -88,6 +88,9 @@ def main(_):
     # Our model will be replicated across devices (we are only doing data parallelism, not model parallelism)
     replicated_sharding = NamedSharding(mesh, PartitionSpec())
 
+    # prevent tensorflow from using GPU memory since it's only used for data loading
+    tf.config.set_visible_devices([], "GPU")
+
     #########
     #
     # Setup WandB
