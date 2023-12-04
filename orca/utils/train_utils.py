@@ -349,3 +349,29 @@ def merge_params(target_params, pretrained_params):
     )
     target_params = flax.traverse_util.unflatten_dict(flat_target_params)
     return flax.core.freeze(target_params)
+
+
+def process_text(batch, text_processor):
+    if text_processor is None:
+        batch["tasks"].pop("language_instruction")
+    else:
+        batch["tasks"]["language_instruction"] = text_processor.encode(
+            [s.decode("utf-8") for s in batch["tasks"]["language_instruction"]]
+        )
+    return batch
+
+
+def remove_text(tasks, zero_text):
+    if "language_instruction" in tasks:
+        new_language = jax.tree_map(
+            lambda x, example: jnp.broadcast_to(example[None], x.shape),
+            tasks["language_instruction"],
+            zero_text,
+        )
+        tasks = flax.core.copy(tasks, {"language_instruction": new_language})
+    return tasks
+
+
+def remove_images(tasks):
+    new_images = {k: jnp.zeros_like(v) for k, v in tasks.items() if "image" in k}
+    return flax.core.copy(tasks, new_images)
