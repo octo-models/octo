@@ -11,6 +11,7 @@ import optax
 import orbax.checkpoint
 import tensorflow as tf
 
+from orca.data.utils.text_processing import text_processors
 from orca.model import create_model_def
 from orca.model.orca_model import OrcaModel
 from orca.utils.train_utils import check_config_diff, create_train_state, merge_params
@@ -272,6 +273,11 @@ class PretrainedModel:
         else:
             model_def = orig_model_def
             params = orig_params
+
+        if not text_processor and config["text_processor"] is not None:
+            text_processor = text_processors[config["text_processor"]](
+                **config.get("text_processor_kwargs", {})
+            )
 
         return cls(
             model_def=model_def,
