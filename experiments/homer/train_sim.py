@@ -23,6 +23,7 @@ from orca.utils.train_utils import (
     Timer,
 )
 from orca.utils.visualization_lib import Visualizer
+from orca.utils.eval_utils import sample_actions
 
 try:
     from jax_smi import initialise_tracking  # type: ignore
@@ -259,31 +260,6 @@ def main(_):
     def eval_step(state, batch):
         loss, info = loss_fn(state.params, state, batch, state.rng, train=False)
         return info
-
-    @partial(jax.jit, static_argnames="argmax")
-    def sample_actions(
-        observations,
-        goals,
-        state,
-        rng,
-        argmax=False,
-        temperature=1.0,
-    ):
-        # add batch dim
-        observations = jax.tree_map(lambda x: x[None], observations)
-        goals = jax.tree_map(lambda x: x[None], goals)
-        actions = state.apply_fn(
-            {"params": state.params},
-            observations,
-            goals,
-            train=False,
-            argmax=argmax,
-            rng=rng,
-            temperature=temperature,
-            method="predict_action",
-        )
-        # remove batch dim
-        return actions[0]
 
     def wandb_log(info, step):
         wandb.log(flatten_dict(info, sep="/"), step=step)
