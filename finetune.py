@@ -217,7 +217,7 @@ def main(_):
 
     rng = jax.random.PRNGKey(FLAGS.config.seed)
 
-    params = model.params.unfreeze()
+    params = model.params
     if FLAGS.config.optimizer.frozen_keys is None:
         FLAGS.config.optimizer.frozen_keys = model.config["optimizer"]["frozen_keys"]
 
@@ -250,7 +250,7 @@ def main(_):
         tf.io.gfile.makedirs(save_dir)
 
         # Save model config
-        new_config = ConfigDict(flax.core.unfreeze(model.config))
+        new_config = ConfigDict(model.config)
         new_config.window_size = example_batch["observation"]["pad_mask"].shape[1]
 
         fname = tf.io.gfile.join(save_dir, "config.json")
