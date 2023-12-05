@@ -24,20 +24,6 @@ import orbax.checkpoint
 import tqdm
 import wandb
 
-from orca.utils.train_callbacks import (
-    SaveCallback,
-    ValidationCallback,
-    VisualizationCallback,
-)
-
-# WARNING: importing orbax before tensorflow silences important logging from tensorflow (╯°□°)╯︵ ┻━┻
-# isort: off
-
-from absl import app, flags, logging
-import tensorflow as tf
-
-# isort: on
-
 import orca
 from orca.data.dataset import make_interleaved_dataset
 from orca.data.oxe.oxe_dataset_mixes import make_oxe_dataset_kwargs_and_weights, mixes
@@ -45,6 +31,11 @@ from orca.data.utils.text_processing import text_processors
 from orca.model import create_model_def
 from orca.model.components.hf_weight_loaders import weights_loaders
 from orca.utils import jax_utils
+from orca.utils.train_callbacks import (
+    SaveCallback,
+    ValidationCallback,
+    VisualizationCallback,
+)
 from orca.utils.train_utils import (
     create_optimizer,
     create_train_state,
