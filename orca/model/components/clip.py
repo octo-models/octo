@@ -1,4 +1,3 @@
-from flax.core.frozen_dict import freeze
 import flax.linen as nn
 import jax
 from transformers import CLIPTextConfig, CLIPVisionConfig, FlaxCLIPModel
@@ -88,10 +87,9 @@ def clip_weights_loader(params):
             if isinstance(params[k], type(params)):
                 find_and_replace(params[k], key, replacement)
 
-    params = params.unfreeze()
     find_and_replace(params, "clip_vision_transformer", vision_transformer_params)
     find_and_replace(params, "clip_text_transformer", text_transformer_params)
-    return freeze(params)
+    return params
 
 
 if __name__ == "__main__":

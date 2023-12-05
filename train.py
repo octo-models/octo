@@ -1,4 +1,8 @@
-import copy
+# WARNING: importing tensorflow too late can silence important logging (╯°□°)╯︵ ┻━┻
+import tensorflow as tf
+
+# isort: split
+
 import datetime
 from functools import partial
 import json
@@ -18,7 +22,6 @@ from ml_collections import config_flags
 import numpy as np
 import optax
 import orbax.checkpoint
-import tensorflow as tf
 import tqdm
 import wandb
 
@@ -39,13 +42,6 @@ from orca.utils.train_utils import (
 )
 from orca.utils.visualization_lib import RolloutVisualizer, Visualizer
 
-try:
-    from jax_smi import initialise_tracking  # type: ignore
-
-    initialise_tracking()
-except ImportError:
-    pass
-
 FLAGS = flags.FLAGS
 
 flags.DEFINE_string("name", "experiment", "Experiment name.")
@@ -65,7 +61,7 @@ NUM_ACTIONS_FOR_VIS = 8
 def main(_):
     jax_utils.initialize_compilation_cache()
 
-    assert FLAGS.config.batch_size % jax.device_count() == 0
+    assert FLAGS.config.dataset_kwargs.batch_size % jax.device_count() == 0
 
     # create a 1D mesh with a single axis named "batch"
     mesh = Mesh(jax.devices(), axis_names="batch")
@@ -174,76 +170,36 @@ def main(_):
 
     # load datasets
     if "oxe_kwargs" in FLAGS.config.dataset_kwargs:
-        #
+        # create dataset_kwargs_list from oxe_kwargs
         oxe_kwargs = FLAGS.config.dataset_kwargs["oxe_kwargs"].to_dict()
         del FLAGS.config.dataset_kwargs["oxe_kwargs"]
-        oxe_kwargs["data_mix"] = mixes.get(oxe_kwargs["data_mix"])
+        oxe_kwargs["data_mix"] = mixes[oxe_kwargs["data_mix"]]
         (
             dataset_kwargs_list,
             dataset_sampling_weights,
         ) = make_oxe_dataset_kwargs_and_weights(**oxe_kwargs)
-        FLAGS.config.dataset_kwargs["data_kwargs_list"] = dataset_kwargs_list
+        FLAGS.config.dataset_kwargs["dataset_kwargs_list"] = dataset_kwargs_list
         FLAGS.config.dataset_kwargs["sample_weights"] = dataset_sampling_weights
 
-    sample_weights = (
-        FLAGS.config.dataset_kwargs["sample_weights"]
-        if "sample_weights" in FLAGS.config.dataset_kwargs
-        else [1.0] * len(FLAGS.config.dataset_kwargs["data_kwargs_list"])
-    )
-    train_data = make_interleaved_dataset(
-        FLAGS.config.dataset_kwargs["common_kwargs"],
-        FLAGS.config.dataset_kwargs["data_kwargs_list"],
-        FLAGS.config.dataset_kwargs["transform_kwargs"],
-        train=True,
-        sample_weights=sample_weights,
-        shuffle_buffer_size=FLAGS.config.shuffle_buffer_size,
-        balance_weights=FLAGS.config.get("balance_weights", True),
-    ).batch(FLAGS.config.batch_size)
-    val_datas = []
-    visualizers = []
-    val_datasets_kwargs, val_datasets_sample_weights = filter_eval_datasets(
-        FLAGS.config.dataset_kwargs["data_kwargs_list"],
-        sample_weights,
-        FLAGS.config.eval_datasets,
-    )
-    for dataset_kwargs in val_datasets_kwargs:
-        val_data_kwargs = {
-            **dataset_kwargs,
-            **FLAGS.config.dataset_kwargs["common_kwargs"],
-            **{
-                "num_parallel_reads": 1,
-                "num_parallel_calls": 1,
-                "shuffle": False,
-            },  # Make validation data loading less demanding
-        }
-        val_transform_kwargs = {
-            **FLAGS.config.dataset_kwargs["transform_kwargs"],
-            **{
-                "num_parallel_calls": 1,
-            },
-        }  # Make validation data loading less demanding
+    # override each element of dataset_kwargs_list with common_dataset_kwargs
+    if "common_dataset_kwargs" in FLAGS.config.dataset_kwargs:
+        FLAGS.config.dataset_kwargs["dataset_kwargs_list"] = [
+            {**kwargs, **FLAGS.config.dataset_kwargs["common_dataset_kwargs"]}
+            for kwargs in FLAGS.config.dataset_kwargs["dataset_kwargs_list"]
+        ]
+        del FLAGS.config.dataset_kwargs["common_dataset_kwargs"]
 
-        val_dataset = make_single_dataset(
-            val_data_kwargs,
-            val_transform_kwargs,
-            train=False,
-        )
-        dataset_statistics = val_dataset.dataset_statistics
-        val_datas.append(
-            val_dataset.unbatch()
-            .shuffle(FLAGS.config.val_shuffle_buffer_size)
-            .repeat()
-            .batch(FLAGS.config.batch_size)
-        )
-        visualizers.append(
-            Visualizer(val_dataset, text_processor=text_processor, cache_trajs=False)
-        )
+    train_data = make_interleaved_dataset(**FLAGS.config.dataset_kwargs, train=True)
 
-        # save normalization constants for evaluation
-        if save_dir is not None and jax.process_index() == 0:
+    # save dataset statistics
+    if save_dir is not None and jax.process_index() == 0:
+        for dataset_kwargs, dataset_statistics in zip(
+            FLAGS.config.dataset_kwargs["dataset_kwargs_list"],
+            train_data.dataset_statistics,
+        ):
             with tf.io.gfile.GFile(
                 os.path.join(
-                    save_dir, f"dataset_statistics_{val_data_kwargs['name']}.json"
+                    save_dir, f"dataset_statistics_{dataset_kwargs['name']}.json"
                 ),
                 "w",
             ) as f:
@@ -252,9 +208,52 @@ def main(_):
                     f,
                 )
 
-    train_data_iter = map(shard, map(process_text, train_data.iterator()))
+    # create validation datasets and visualizers
+    val_datas = []
+    visualizers = []
+    val_datasets_kwargs, val_datasets_sample_weights = filter_eval_datasets(
+        FLAGS.config.dataset_kwargs["dataset_kwargs_list"],
+        FLAGS.config.dataset_kwargs["sample_weights"],
+        FLAGS.config.eval_datasets,
+    )
+    for dataset_kwargs in val_datasets_kwargs:
+        val_dataset = make_single_dataset(
+            dataset_kwargs={
+                **dataset_kwargs,
+                "num_parallel_reads": 4,
+                "num_parallel_calls": 4,
+                "shuffle": False,
+            },
+            traj_transform_kwargs={
+                **FLAGS.config.dataset_kwargs["traj_transform_kwargs"],
+                "num_parallel_calls": 4,
+            },
+            frame_transform_kwargs=FLAGS.config.dataset_kwargs[
+                "frame_transform_kwargs"
+            ],
+            train=False,
+            frame_transform_threads=16,
+        )
+        val_datas.append(
+            val_dataset.unbatch()
+            .shuffle(FLAGS.config.val_shuffle_buffer_size)
+            .repeat()
+            .batch(FLAGS.config.dataset_kwargs.batch_size)
+        )
+        visualizers.append(
+            Visualizer(val_dataset, text_processor=text_processor, freeze_trajs=False)
+        )
+
+    train_data_iter = map(
+        shard,
+        map(
+            process_text,
+            train_data.iterator(prefetch=FLAGS.config.prefetch_num_batches),
+        ),
+    )
     val_data_iters = [
-        map(shard, map(process_text, val_data.iterator())) for val_data in val_datas
+        map(shard, map(process_text, val_data.iterator(prefetch=0)))
+        for val_data in val_datas
     ]
 
     # optionally build visualizers for sim env evals
@@ -321,7 +320,7 @@ def main(_):
         *model_init_args,
     )["params"]
     tx, lr_callable, param_norm_callable = create_optimizer(
-        params_shape.unfreeze(),
+        params_shape,
         FLAGS.config.optimizer.to_dict(),
     )
     train_state = create_train_state(
@@ -524,13 +523,29 @@ def main(_):
         with timer("train"):
             train_state, update_info = train_step(train_state, batch)
 
+        if (i + 1) % FLAGS.config.save_interval == 0 and save_dir is not None:
+            params_checkpointer.save(
+                i + 1,
+                train_state.params,
+                {"save_args": orbax_utils.save_args_from_target(train_state.params)},
+            )
+            state_checkpointer.save(
+                i + 1,
+                train_state,
+                {"save_args": orbax_utils.save_args_from_target(train_state)},
+            )
+
         if (i + 1) % FLAGS.config.eval_interval == 0:
             logging.info("Evaluating...")
             timer.tick("val")
             per_dataset_metrics = []
             for data_kwargs, val_data_iter in zip(val_datasets_kwargs, val_data_iters):
                 metrics = []
-                for _, batch in zip(range(FLAGS.config.num_val_batches), val_data_iter):
+                for _, batch in tqdm.tqdm(
+                    zip(range(FLAGS.config.num_val_batches), val_data_iter),
+                    total=FLAGS.config.num_val_batches,
+                    desc=data_kwargs["name"],
+                ):
                     metrics.append(eval_step(train_state, batch))
                 metrics = jax.tree_map(lambda *xs: np.mean(xs), *metrics)
                 wandb_log({f"validation_{data_kwargs['name']}": metrics}, step=i)
@@ -557,6 +572,7 @@ def main(_):
             wandb_log({"validation_aggregate": agg_metrics}, step=i)
             timer.tock("val")
 
+        if (i + 1) % FLAGS.config.viz_interval == 0:
             logging.info("Visualizing...")
             timer.tick("visualize")
 
@@ -610,18 +626,6 @@ def main(_):
                         )
 
             timer.tock("visualize")
-
-        if (i + 1) % FLAGS.config.save_interval == 0 and save_dir is not None:
-            params_checkpointer.save(
-                i + 1,
-                train_state.params,
-                {"save_args": orbax_utils.save_args_from_target(train_state.params)},
-            )
-            state_checkpointer.save(
-                i + 1,
-                train_state,
-                {"save_args": orbax_utils.save_args_from_target(train_state)},
-            )
 
         timer.tock("total")
 

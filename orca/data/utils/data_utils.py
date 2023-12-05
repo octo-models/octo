@@ -261,7 +261,6 @@ def normalize_action_and_proprio(traj, metadata, normalization_type):
     raise ValueError(f"Unknown normalization type {normalization_type}")
 
 
-@tf.function(jit_compile=True)
 def binarize_gripper_actions(actions: tf.Tensor) -> tf.Tensor:
     """Converts gripper actions from continous to binary values (0 and 1).
 
@@ -316,3 +315,34 @@ def rel2abs_gripper_actions(actions: tf.Tensor):
 
 def invert_gripper_actions(actions: tf.Tensor):
     return 1 - actions
+
+
+def allocate_threads(n: int, weights: np.ndarray):
+    """
+    Allocates an integer n across an array based on weights. The final array sums to n, but each
+    element is no less than 1.
+    """
+    assert np.all(weights >= 0), "Weights must be non-negative"
+    assert (
+        len(weights) <= n
+    ), "Number of threads must be at least as large as length of weights"
+    weights = np.array(weights) / np.sum(weights)
+
+    allocation = np.zeros_like(weights, dtype=int)
+    while True:
+        # give the remaining elements that would get less than 1 a 1
+        mask = (weights * n < 1) & (weights > 0)
+        if not mask.any():
+            break
+        n -= mask.sum()
+        allocation += mask.astype(int)
+        # recompute the distribution over the remaining elements
+        weights[mask] = 0
+        weights = weights / weights.sum()
+    # allocate the remaining elements
+    fractional, integral = np.modf(weights * n)
+    allocation += integral.astype(int)
+    n -= integral.sum()
+    for i in np.argsort(fractional)[::-1][: int(n)]:
+        allocation[i] += 1
+    return allocation

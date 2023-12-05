@@ -38,8 +38,18 @@ def convert_obs(obs, im_size):
     ).astype(np.uint8)
     # TODO: proprio from robot env doesn't match training proprio,
     # need to add transformation somewhere (probably in PretrainedModel class)
-    # obs = {"image_0": image_obs, "proprio": obs["state"]}
-    return {"image_0": image_obs, "full_image": obs["full_image"]}
+    # NOTE: assume image_1 is not avail
+    return {"image_0": image_obs,
+            "image_1": np.zeros((im_size, im_size, 3), dtype=np.uint8),
+            "proprio": obs["state"],
+            }
+
+
+def null_obs(img_size):
+    return {"image_0": np.zeros((img_size, img_size, 3), dtype=np.uint8),
+            "image_1": np.zeros((img_size, img_size, 3), dtype=np.uint8),
+            "proprio": np.zeros((7,), dtype=np.float64),
+            }
 
 
 class WidowXGym(gym.Env):
@@ -64,15 +74,20 @@ class WidowXGym(gym.Env):
                 "image_0": gym.spaces.Box(
                     low=np.zeros((im_size, im_size, 3)),
                     high=255 * np.ones((im_size, im_size, 3)),
-                    dtype=np.int32,
+                    dtype=np.uint8,
+                ),
+                "image_1": gym.spaces.Box(
+                    low=np.zeros((im_size, im_size, 3)),
+                    high=255 * np.ones((im_size, im_size, 3)),
+                    dtype=np.uint8,
                 ),
                 "proprio": gym.spaces.Box(
-                    low=np.ones((7,)) * -1, high=np.ones((7,)), dtype=np.float32
+                    low=np.ones((7,)) * -1, high=np.ones((7,)), dtype=np.float64
                 ),
             }
         )
         self.action_space = gym.spaces.Box(
-            low=np.zeros((7,)), high=np.ones((7,)), dtype=np.float32
+            low=np.zeros((7,)), high=np.ones((7,)), dtype=np.float64
         )
         self.sticky_gripper_num_steps = sticky_gripper_num_steps
         self.is_gripper_closed = False
@@ -99,7 +114,7 @@ class WidowXGym(gym.Env):
             # this indicates a loss of connection with the server
             # due to an exception in the last step so end the trajectory
             truncated = True
-            obs = None
+            obs = null_obs(self.im_size)  # obs with all zeros
         else:
             obs = convert_obs(raw_obs, self.im_size)
 
@@ -107,6 +122,7 @@ class WidowXGym(gym.Env):
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
+        self.widowx_client.reset()
 
         self.is_gripper_closed = False
         self.num_consecutive_gripper_change_actions = 0

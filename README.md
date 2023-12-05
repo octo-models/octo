@@ -12,25 +12,25 @@ We tokenize **task definitions** (like language instructions or goals), **observ
 and **actions**. Given the sequence of input tokens, the model is trained to predict the action tokens.
 
 ## Installation
-```
+```bash
 conda create -n orca python=3.10
 conda activate orca
 pip install -e .
 pip install -r requirements.txt
 ```
 For GPU:
-```
-pip install --upgrade "jax[cuda11_pip]==0.4.13" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+```bash
+pip install --upgrade "jax[cuda11_pip]==0.4.20" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
 ```
 
 For TPU
 ```
-pip install --upgrade "jax[tpu]==0.4.13" -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
+pip install --upgrade "jax[tpu]==0.4.20" -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
 ```
 See the [Jax Github page](https://github.com/google/jax) for more details on installing Jax.
 
 Test the installation by training on the debug dataset:
-```
+```bash
 python train.py --config tests/debug_config.py --debug
 ```
 
@@ -68,6 +68,17 @@ python train.py --config config.py:vit_s --name=orca --config.dataset_kwargs.oxe
 | Encoders | [tokenizers.py](orca/model/components/tokenizers.py)    | Tokenizers that encode image / text inputs into tokens.                   |
 | Model + Objective | [orca_policy.py](orca/model/orca_policy.py)             | Sort tokens into sequence, run forward pass, compute loss.                |
 | Visualization | [visualization_lib.py](orca/utils/visualization_lib.py) | Utilities for offline qualitative & quantitative eval.                    |
+| Sim Evaluation | [sim_eval.sh](orca/scripts/sim_eval.sh) | Script to run model evaluation.                    |
+
+## Run Evaluation in Simulation
+
+To run evaluation on a trained model, you can use the following command:
+```bash
+# requires pybullet and kinpy to be installed
+bash scripts/sim_eval.sh
+```
+
+This will spawn a `pybullet` environment with a WidowX robot. Since this environment is not used in training, this is purely for testing the pipeline.
 
 ## Contributing
 Experimental things and training/eval scripts should go in `experiments/<your_name>`. To make any changes to files outside of your experiments directory, please open a pull request.

@@ -1,3 +1,5 @@
+import itertools
+
 import matplotlib
 
 matplotlib.use("Agg")
@@ -113,14 +115,13 @@ class Visualizer:
     dataset: dl.DLataset
     metric_keys: dict = None
     sub_conditions: dict = None
-    cache_trajs: bool = True  # Use the same trajectories for metrics every time
-    cache_viz_trajectories: bool = True  # Use same trajs for `visualize` every time
+    freeze_trajs: bool = True  # Use the same trajectories every time
     text_processor: object = None
 
     def __post_init__(self):
         self.action_proprio_stats = self.dataset.dataset_statistics
-        self.trajs, self.viz_trajs = [], []
         self.visualized_trajs = False
+        self._cached_iterators = {}
 
     def metrics_for_wandb(
         self,
@@ -176,15 +177,10 @@ class Visualizer:
         Args:
             policy_fn: See `raw_evaluations`
             max_trajs: The maximum number of trajectories to visualize.
-            add_images: Whether to add images of the trajectory to the visualization. If None, will add images if `cache_viz_trajectories` is False
+            add_images: Whether to add images of the trajectory to the visualization.
         """
 
-        iterator = self.get_maybe_cached_iterator(
-            self.dataset,
-            max_trajs,
-            self.viz_trajs,
-            self.cache_viz_trajectories,
-        )
+        iterator = self.get_iterator(self.dataset, max_trajs)
         visualizations = {}
 
         for n, traj in tqdm.tqdm(enumerate(iterator), total=max_trajs):
@@ -210,11 +206,7 @@ class Visualizer:
             visualizations[f"traj_{n}_mpl_chunk"] = plot_trajectory_overview_mpl(
                 traj, act=info["unnorm_pred_actions_chunk"], **info
             )
-            if (
-                add_images
-                or not self.cache_viz_trajectories
-                or not self.visualized_trajs
-            ):
+            if add_images or not self.visualized_trajs:
                 for key in filter(lambda key: "image" in key, traj["observation"]):
                     images = traj["observation"][key][:, 0]
 
@@ -239,12 +231,7 @@ class Visualizer:
         Returns:
             all_traj_info: A list of dictionaries containing information about each trajectory (pass into `process_for_wandb`)
         """
-        iterator = self.get_maybe_cached_iterator(
-            self.dataset,
-            max_trajs,
-            self.trajs,
-            self.cache_trajs,
-        )
+        iterator = self.get_iterator(self.dataset, max_trajs)
 
         all_traj_info = []
 
@@ -259,17 +246,14 @@ class Visualizer:
             all_traj_info.append(info)
         return all_traj_info
 
-    @staticmethod
-    def get_maybe_cached_iterator(dataset, n, cached_trajs, use_cache):
-        if not use_cache:
-            return dataset.take(n).as_numpy_iterator()
-        else:
-            if len(cached_trajs) < n:
-                new_trajs = list(
-                    dataset.take(n - len(cached_trajs)).as_numpy_iterator()
-                )
-                cached_trajs.extend(new_trajs)
-            return cached_trajs[:n]
+    def get_iterator(self, dataset, n):
+        if dataset not in self._cached_iterators:
+            self._cached_iterators[n] = (
+                dataset.take(n).repeat().as_numpy_iterator()
+                if self.freeze_trajs
+                else dataset.repeat().as_numpy_iterator()
+            )
+        return itertools.islice(self._cached_iterators[n], n)
 
 
 @dataclass
