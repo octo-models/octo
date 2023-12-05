@@ -32,11 +32,12 @@ class PrefixGroup:
 
     name: str
     tokens: jax.Array  # with shape (batch, n_tokens, token_embedding_size)
+    mask: jax.Array # with shape (batch, n_tokens)
     attention_rules: Dict[str, AttentionRule]
 
     def __post_init__(self):
         assert self.tokens.ndim == 3, "PrefixGroup tokens must be (batch, n_tokens, d)"
-
+        assert self.mask.ndim == 2, "PrefixGroup mask must be (batch, n_tokens)"            
 
 @dataclass
 class TimestepGroup:
@@ -44,13 +45,14 @@ class TimestepGroup:
 
     name: str
     tokens: jax.Array  # with shape (batch, horizon, n_tokens, token_embedding_size)
+    mask: jax.Array # with shape (batch, horizon, n_tokens)
     attention_rules: Dict[str, AttentionRule]
 
     def __post_init__(self):
         assert (
             self.tokens.ndim == 4
         ), "TimestepGroup tokens must be (batch, horizon, n_tokens, d))"
-
+        assert self.mask.ndim == 3, "TimestepGroup mask must be (batch, horizon, n_tokens)"
 
 @dataclass
 class TokenMetadata:
@@ -113,7 +115,6 @@ class BlockTransformer(nn.Module):
         self,
         prefix_groups: Sequence[PrefixGroup],
         timestep_groups: Sequence[TimestepGroup],
-        timestep_pad_mask: jax.Array,
         train: bool,
         verbose: bool = False,
     ) -> Tuple[Sequence[PrefixGroup], Sequence[TimestepGroup]]:
@@ -121,6 +122,7 @@ class BlockTransformer(nn.Module):
         Args:
             prefix_groups: A list of PrefixGroup objects.
                 Each group has tokens with shape (batch, n_tokens, token_embedding_size)
+                Each group also indicates 
                 Each group also dictates which other groups it will attend to.
             timestep_groups: A list of TimestepGroup objects.
                 Each group has tokens with shape (batch, horizon, n_tokens, token_embedding_size)
@@ -144,7 +146,7 @@ class BlockTransformer(nn.Module):
 
         # Creates correct attention mask for transformer using group attention rules
         attention_mask = self.generate_attention_mask(
-            prefix_groups, timestep_groups, timestep_pad_mask
+            prefix_groups, timestep_groups
         )
 
         # Assemble input tokens (batch, total_tokens, token_embedding_size)
@@ -241,7 +243,6 @@ class BlockTransformer(nn.Module):
         self,
         prefix_groups: Sequence[PrefixGroup],
         timestep_groups: Sequence[TimestepGroup],
-        timestep_pad_mask: jax.Array,
     ):
         """
         Args:
@@ -276,7 +277,7 @@ class BlockTransformer(nn.Module):
         def _get_position(i, tokens_per_elem):
             return np.searchsorted(np.cumsum(tokens_per_elem), i)
 
-        horizon = timestep_pad_mask.shape[1]
+        horizon = timestep_groups[0].tokens.shape[1]
         tokens_per_prefix_group = [group.tokens.shape[1] for group in prefix_groups]
         tokens_per_timestep_group = [group.tokens.shape[2] for group in timestep_groups]
 
@@ -304,16 +305,15 @@ class BlockTransformer(nn.Module):
                 attention_mask[i, j] = mask
 
         pad_attention_mask = self.generate_pad_attention_mask(
-            timestep_pad_mask, tokens_per_time_step, tokens_for_prefix
+            prefix_groups, timestep_groups
         )
         attention_mask = jnp.logical_and(attention_mask, pad_attention_mask)
         return attention_mask
 
     def generate_pad_attention_mask(
         self,
-        timestep_pad_mask: jax.Array,
-        tokens_per_time_step: int,
-        tokens_for_prefix: int,
+        prefix_groups: Sequence[PrefixGroup],
+        timestep_groups: Sequence[TimestepGroup],
     ):
         """
         Generate attention mask that ignores padding. `timestep_pad_mask` has shape (batch, horizon) and
@@ -321,23 +321,22 @@ class BlockTransformer(nn.Module):
         and then prepend a mask for the task prefix to get shape (batch, total_tokens).
         We broadcast to (batch, num_heads, total_tokens, total_tokens).
         """
-        batch_size, horizon = timestep_pad_mask.shape
-
-        total_tokens = tokens_for_prefix + tokens_per_time_step * horizon
-        sequence_mask = jnp.repeat(timestep_pad_mask, tokens_per_time_step, axis=1)
-        task_mask = jnp.ones((batch_size, tokens_for_prefix), dtype=int)
-        full_mask = jnp.concatenate([task_mask, sequence_mask], axis=1)
-
-        full_mask = jnp.broadcast_to(
-            full_mask[:, None, None, :],
-            (
-                full_mask.shape[0],
-                self.num_attention_heads,
-                total_tokens,
-                total_tokens,
-            ),
+        prefix_pad_mask = jnp.concatenate(
+            [group.mask for group in prefix_groups], axis=1
         )
-        return full_mask
+        timestep_pad_mask = jnp.concatenate(
+            [group.mask for group in timestep_groups], axis=2
+        )
+        timestep_pad_mask = einops.rearrange(
+            timestep_pad_mask,
+            "batch horizon n_tokens -> batch (horizon n_tokens)",
+        )
+        pad_mask = jnp.concatenate([prefix_pad_mask, timestep_pad_mask], axis=1)
+        # pad_mask has shape (batch, total_tokens)
+        pad_mask = jnp.broadcast_to(
+            pad_mask[:, None, None, :], (pad_mask.shape[0], self.num_attention_heads, pad_mask.shape[1], pad_mask.shape[1])
+        )
+        return pad_mask
 
     def pretty_print_attention_mask(
         self,

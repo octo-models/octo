@@ -12,7 +12,18 @@ from orca.model.components import encoders
 from orca.model.components.transformer import MAPHead
 
 EPS = 1e-6
+from dataclasses import dataclass
 
+@dataclass
+class TokenizerOutput:
+    tokens: jax.Array
+    mask: jax.Array = None
+
+    def __post_init__(self):
+        if self.mask is None:
+            self.mask = jnp.ones(self.tokens.shape[:-1])
+        else:
+            assert self.mask.ndim == self.tokens.ndim - 1
 
 class TokenLearner(nn.Module):
     """
@@ -108,7 +119,7 @@ class ImageTokenizer(nn.Module):
             image_tokens = TokenLearner(num_tokens=self.num_tokens)(
                 image_tokens, train=train
             )
-        return image_tokens
+        return TokenizerOutput(image_tokens, mask=observations["image_mask"])
 
 
 class LanguageTokenizer(nn.Module):
@@ -152,7 +163,7 @@ class LanguageTokenizer(nn.Module):
         if not self.finetune_encoder:
             tokens = jax.lax.stop_gradient(tokens)
 
-        return tokens
+        return TokenizerOutput(tokens, mask=tasks["language_mask"]) 
 
 
 class BinTokenizer(nn.Module):
