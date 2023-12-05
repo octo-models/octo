@@ -13,6 +13,7 @@ def create_model_def(
     max_horizon,
     transformer_kwargs,
     heads,
+    proper_pad_mask=False,
     **kwargs,
 ):
     """
@@ -39,11 +40,15 @@ def create_model_def(
         logging.warn(f"Extra kwargs passed into create_model_def: {kwargs}")
 
     observation_tokenizer_defs = {
-        k: TOKENIZERS.get(info["cls_name"])(**info["kwargs"])
+        k: TOKENIZERS.get(info["cls_name"])(
+            **info["kwargs"], proper_pad_mask=proper_pad_mask
+        )
         for k, info in observation_tokenizers.items()
     }
     task_tokenizer_defs = {
-        k: TOKENIZERS.get(info["cls_name"])(**info["kwargs"])
+        k: TOKENIZERS.get(info["cls_name"])(
+            **info["kwargs"], proper_pad_mask=proper_pad_mask
+        )
         for k, info in task_tokenizers.items()
     }
 

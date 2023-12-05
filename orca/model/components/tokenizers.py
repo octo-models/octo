@@ -1,7 +1,7 @@
 import functools as ft
 import logging
 import re
-from typing import Sequence
+from typing import Optional, Sequence
 
 import flax.linen as nn
 import jax
@@ -15,13 +15,11 @@ EPS = 1e-6
 from dataclasses import dataclass
 import os
 
-ENABLE_PAD_MASK = os.environ.get("ENABLE_PAD_MASK", False)
-
 
 @dataclass
 class TokenizerOutput:
     tokens: jax.Array
-    mask: jax.Array = None
+    mask: Optional[jax.Array] = None
 
     def __post_init__(self):
         if self.mask is None:
@@ -83,6 +81,7 @@ class ImageTokenizer(nn.Module):
     obs_stack_keys: Sequence[str] = ("image_.*", "depth_.*")
     task_stack_keys: Sequence[str] = tuple()
     task_film_keys: Sequence[str] = tuple()
+    proper_pad_mask: bool = False
 
     @nn.compact
     def __call__(
@@ -138,7 +137,8 @@ class ImageTokenizer(nn.Module):
         )
         pad_mask = jnp.any(pad_mask, axis=-1)  # (batch_size, horizon)
         pad_mask = jnp.broadcast_to(pad_mask[:, :, None], image_tokens.shape[:-1])
-        if ENABLE_PAD_MASK:
+        if self.proper_pad_mask:
+            print("ENABLE_PAD_MASK")
             return TokenizerOutput(image_tokens, mask=pad_mask)
         return TokenizerOutput(image_tokens)
 
@@ -155,6 +155,7 @@ class LanguageTokenizer(nn.Module):
 
     encoder: str = None
     finetune_encoder: bool = False
+    proper_pad_mask: bool = False
 
     def setup(self):
         if self.encoder is not None:
@@ -184,7 +185,8 @@ class LanguageTokenizer(nn.Module):
         if not self.finetune_encoder:
             tokens = jax.lax.stop_gradient(tokens)
 
-        if ENABLE_PAD_MASK:
+        if self.proper_pad_mask:
+            print("ENABLE_PAD_MASK")
             if "language_instruction" not in tasks["pad_mask_dict"]:
                 return TokenizerOutput(tokens)
 

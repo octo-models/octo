@@ -88,12 +88,12 @@ def get_config(
                 entity=placeholder(str),
             ),
             wandb_resume_id=placeholder(str),
-            eval_datasets=[
+            eval_datasets=(
                 "bridge_dataset",
                 "taco_play",
                 "berkeley_cable_routing",
                 "berkeley_autolab_ur5",
-            ],
+            ),
         )
     )
 
@@ -225,6 +225,7 @@ def get_model_config(transformer_size):
 
     return {
         **get_transformer_kwargs(transformer_size),
+        "proper_pad_mask": False,
         "max_horizon": 10,
         "readouts": dict(),
         "heads": dict(
