@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from functools import partial
 import logging
 import os
+from typing import Callable, Mapping, Optional
 
 import flax
 from flax.training import orbax_utils
@@ -12,23 +13,28 @@ import orbax.checkpoint
 import tensorflow as tf
 import tqdm
 
-from orca.data.dataset import make_interleaved_dataset, make_single_dataset
-from orca.utils.train_utils import batched_apply
-from orca.utils.typing import Any, Batch, Callable, Data, Dict, Optional, Sequence
+from orca.data.dataset import make_single_dataset
+from orca.data.utils.text_processing import TextProcessor
+from orca.utils.train_utils import batched_apply, TrainState
+from orca.utils.typing import Any, Data, Sequence
 from orca.utils.visualization_lib import Visualizer
 
 
 class Callback:
-    def __call__(self, train_state, step):
+    def __call__(self, train_state: TrainState, step: int):
         raise NotImplementedError
 
 
 def create_validation_dataset(
-    dataset_kwargs, traj_transform_kwargs, frame_transform_kwargs, train=False
+    dataset_kwargs: dict,
+    traj_transform_kwargs: dict,
+    frame_transform_kwargs: dict,
+    train: bool = False,
 ):
-    """Creates a tf Dataset for validation and visualization purposes.
+    """Creates a dataset for validation and visualization purposes.
 
-    Overwrites default parameters with more conservative options, to ensure stable memory and CPU consumption
+    Takes the training configuration and overwrites default parameters with more conservative
+    options to ensure stable memory consumption.
     """
     return make_single_dataset(
         dataset_kwargs={
@@ -49,6 +55,10 @@ def create_validation_dataset(
 
 @dataclass
 class SaveCallback(Callback):
+    """Callback that saves checkpoints to `save_dir`. If `save_dir` is None, does nothing.  Also
+    includes an `open` method for saving arbitrary files to `save_dir`.
+    """
+
     save_dir: Optional[str]
 
     def __post_init__(self):
@@ -70,7 +80,7 @@ class SaveCallback(Callback):
                 orbax.checkpoint.PyTreeCheckpointer(),
             )
 
-    def __call__(self, train_state, step):
+    def __call__(self, train_state: TrainState, step: int):
         if self.save_dir is not None and jax.process_index() == 0:
             self.params_checkpointer.save(
                 step,
@@ -82,9 +92,8 @@ class SaveCallback(Callback):
                 train_state,
                 {"save_args": orbax_utils.save_args_from_target(train_state)},
             )
-        return {}
 
-    def open(self, fname, mode):
+    def open(self, fname: str, mode: str):
         if self.save_dir is not None and jax.process_index() == 0:
             logging.info(f"Saving to {tf.io.gfile.join(self.save_dir, fname)}")
             return tf.io.gfile.GFile(tf.io.gfile.join(self.save_dir, fname), mode)
@@ -93,10 +102,9 @@ class SaveCallback(Callback):
 
 
 def remove_text(tasks: Data, zero_text_encoding: Data):
-    """Replaces language encoding inside task dict with that of the empty string
+    """Replaces language encoding inside task dict with that of the empty string.
 
     zero_text_encoding = jax.tree_map(lambda x: x[0], text_processor.encode([""]))
-
     """
     if "language_instruction" in tasks:
         new_language = jax.tree_map(
@@ -117,10 +125,10 @@ def remove_images(tasks: Data):
 @dataclass
 class ValidationCallback(Callback):
     loss_fn: Callable
-    process_batch_fn: Callable[[Batch], Batch]
-    text_processor: Any
-    val_dataset_kwargs_list: Sequence[Dict]
-    dataset_kwargs: Dict
+    process_batch_fn: Callable[[Data], Data]
+    text_processor: Optional[TextProcessor]
+    val_dataset_kwargs_list: Sequence[Mapping[str, Any]]
+    dataset_kwargs: Mapping[str, Any]
     val_shuffle_buffer_size: int
     num_val_batches: int
     modes_to_evaluate: Sequence[str] = ("text_conditioned", "image_conditioned")
@@ -179,7 +187,7 @@ class ValidationCallback(Callback):
 
         self.eval_step = eval_step
 
-    def __call__(self, train_state, step):
+    def __call__(self, train_state: TrainState, step: int):
         wandb_metrics = {}
         for name, val_data_iter in self.val_iterators.items():
             metrics = []
@@ -196,9 +204,9 @@ class ValidationCallback(Callback):
 
 @dataclass
 class VisualizationCallback(Callback):
-    text_processor: Any
-    val_dataset_kwargs_list: Sequence[Dict]
-    dataset_kwargs: Dict
+    text_processor: Optional[TextProcessor]
+    val_dataset_kwargs_list: Sequence[Mapping[str, Any]]
+    dataset_kwargs: Mapping[str, Any]
     eval_batch_size: int
     trajs_for_metrics: int
     trajs_for_viz: int
@@ -268,7 +276,7 @@ class VisualizationCallback(Callback):
 
         self.get_policy_sampled_actions = get_policy_sampled_actions
 
-    def __call__(self, train_state, step):
+    def __call__(self, train_state: TrainState, step: int):
         wandb_metrics = {}
         modal_policy_fns = {
             k: batched_apply(

@@ -1,11 +1,10 @@
 # adapted from https://github.com/google-research/robotics_transformer/blob/master/transformer_network.py
-from typing import Any
+from typing import Optional
 
 import distrax
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
-import numpy as np
 
 from orca.model.components.tokenizers import BinTokenizer
 from orca.utils.typing import PRNGKey
@@ -21,7 +20,7 @@ class BaseTemporalHead(nn.Module):
 
     n_bins: int = 256
     bin_type: str = "uniform"
-    readout_key: str = None
+    readout_key: Optional[str] = None
 
     def setup(self):
         self.readout_proj = nn.Dense(self.n_bins)
@@ -31,7 +30,7 @@ class BaseTemporalHead(nn.Module):
             high=self.n_bins,  # uniform bin size 1
         )
 
-    def __call__(self, embeddings, train=True) -> Any:
+    def __call__(self, embeddings, train=True) -> jax.Array:
         """
         Args:
             embeddings: jnp.ndarray w/ shape (batch_size, horizon, n_tokens, embedding_size)
@@ -128,7 +127,7 @@ class BaseTemporalHead(nn.Module):
         sample_shape: tuple = (),
         rng: PRNGKey = None,
         temperature: float = 1.0,
-    ):
+    ) -> jax.Array:
         # get the logits for the last distance in the horizon
         distance_logits = self.__call__(embeddings, train=train) * temperature
         distance_logits = distance_logits[:, -1]

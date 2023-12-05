@@ -2,9 +2,10 @@
 from typing import Callable, Optional
 
 import flax.linen as nn
+import jax
 import jax.numpy as jnp
 
-from orca.utils.typing import Array, Dtype, PRNGKey, Shape
+from orca.utils.typing import Dtype, PRNGKey, Shape
 
 
 class AddPositionEmbs(nn.Module):
@@ -14,7 +15,7 @@ class AddPositionEmbs(nn.Module):
       posemb_init: positional embedding initializer.
     """
 
-    posemb_init: Callable[[PRNGKey, Shape, Dtype], Array]
+    posemb_init: Callable[[PRNGKey, Shape, Dtype], jax.Array]
 
     @nn.compact
     def __call__(self, inputs):
@@ -43,9 +44,9 @@ class MlpBlock(nn.Module):
     out_dim: Optional[int] = None
     dropout_rate: float = 0.1
     kernel_init: Callable[
-        [PRNGKey, Shape, Dtype], Array
+        [PRNGKey, Shape, Dtype], jax.Array
     ] = nn.initializers.xavier_uniform()
-    bias_init: Callable[[PRNGKey, Shape, Dtype], Array] = nn.initializers.normal(
+    bias_init: Callable[[PRNGKey, Shape, Dtype], jax.Array] = nn.initializers.normal(
         stddev=1e-6
     )
 

@@ -1,20 +1,21 @@
 from functools import partial
 import json
 import logging
-from typing import Optional
+from typing import Any, Optional
 
 import flax
+import flax.struct
 import jax
 import jax.numpy as jnp
 from ml_collections import ConfigDict
 import orbax.checkpoint
 import tensorflow as tf
 
-from orca.data.utils.text_processing import text_processors
+from orca.data.utils.text_processing import text_processors, TextProcessor
 from orca.model import create_model_def
 from orca.model.orca_model import OrcaModel
-from orca.utils.train_utils import check_config_diff, create_train_state, merge_params
-from orca.utils.typing import Any, Data, Dict, Params, Sequence
+from orca.utils.train_utils import check_config_diff, merge_params
+from orca.utils.typing import Config, Data, Params, Sequence
 
 nonpytree_field = partial(flax.struct.field, pytree_node=False)
 
@@ -39,9 +40,9 @@ class PretrainedModel:
 
     model_def: OrcaModel = nonpytree_field()
     params: Params
-    text_processor: Any = nonpytree_field()
+    text_processor: TextProcessor = nonpytree_field()
     example_batch: Data
-    config: flax.core.FrozenDict = nonpytree_field()
+    config: Config = nonpytree_field()
 
     def __call__(self, *args, **kwargs):
         return self.model_def.apply({"params": self.params}, *args, **kwargs)
@@ -63,7 +64,7 @@ class PretrainedModel:
             )
         return head_fns
 
-    def create_tasks(self, goals: Dict[str, Data] = None, texts: Sequence[str] = None):
+    def create_tasks(self, goals: Data = None, texts: Optional[Sequence[str]] = None):
         """Creates tasks dict from goals and texts.
 
         Args:
@@ -151,11 +152,11 @@ class PretrainedModel:
     def load_pretrained(
         cls,
         checkpoint_path: str,
-        config: Optional[Dict[str, Any]] = None,
-        example_batch: Optional[Dict[str, Any]] = None,
+        config: Optional[Config] = None,
+        example_batch: Optional[Data] = None,
         text_processor: Optional[Any] = None,
         step: Optional[int] = None,
-    ):
+    ) -> "PretrainedModel":
         """Loads a pretrained model from a checkpoint. Important: this method expects the
         params-only checkpoint, not the full TrainState used for resuming training.
 
