@@ -185,34 +185,68 @@ def filter_eval_datasets(dataset_kwargs_list, sample_weights, eval_datasets=None
         )
 
 
-def create_optimizer(params_or_params_shape, optimizer_kwargs: dict):
+def create_lr_schedule(name: str, **kwargs):
+    """Creates a learning rate callable.
+
+    Currently supported schedules:
+        cosine: cosine decay with warmup.
+            kwargs: init_value, peak_value, warmup_steps, decay_steps
+        rsqrt: inverse square root decay with warmup, from the "Scaling Vision Transformers" paper.
+            kwargs: init_value, peak_value, warmup_steps, timescale (optional, default 10000)
+
+    Args:
+        name: name of the schedule
+        **kwargs: additional kwargs, which vary by schedule
+    """
+    if name == "cosine":
+        return optax.warmup_cosine_decay_schedule(**kwargs)
+    elif name == "rsqrt":
+        timescale = kwargs.get("timescale", 10000)
+        return optax.join_schedules(
+            [
+                optax.linear_schedule(
+                    init_value=kwargs["init_value"],
+                    end_value=kwargs["peak_value"],
+                    transition_steps=kwargs["warmup_steps"],
+                ),
+                lambda step: kwargs["peak_value"]
+                / jnp.sqrt((step + timescale) / timescale),
+            ],
+            [kwargs["warmup_steps"]],
+        )
+    else:
+        raise ValueError(f"Unsupported lr schedule: {name}")
+
+
+def create_optimizer(params_or_params_shape, **kwargs: dict):
     """Creates optimizer for ORCA.
 
-    Optimizer_kwargs are the kwargs for optax.adamw; if the learning rate is a dict,
-    it is interpreted as the kwargs for optax.warmup_cosine_decay_schedule. If clip_gradient
-    is specified, then gradient clipping is applied.
+    kwargs are the kwargs for optax.adamw; if the "learning_rate" key is a dict, it is interpreted
+    as the kwargs for create_lr_schedule (see above), otherwise it is interpreted as a constant
+    learning rate.
+
+    If clip_gradient is specified, then gradient clipping is applied. If frozen_keys is specified,
+    then those parameters are frozen (i.e. not updated) during training.
 
     Returns:
         tx: an Optax optimizer
         lr_callable: Function that takes the current step and returns the learning rate
     """
-    if isinstance(optimizer_kwargs["learning_rate"], dict):
-        optimizer_kwargs["learning_rate"] = optax.warmup_cosine_decay_schedule(
-            **optimizer_kwargs["learning_rate"]
-        )
-        lr_callable = optimizer_kwargs["learning_rate"]
+    if isinstance(kwargs["learning_rate"], dict):
+        lr_callable = create_lr_schedule(**kwargs["learning_rate"])
     else:
-        lr_callable = lambda _: optimizer_kwargs["learning_rate"]
+        lr_callable = lambda _: kwargs["learning_rate"]
+    kwargs["learning_rate"] = lr_callable
 
     # Following ViT, timm, MAE: this mask skips weight decay on biases and LayerNorm parameters
     wd_mask = jax.tree_util.tree_map_with_path(
         lambda path, x: "kernel" in jax.tree_util.keystr(path), params_or_params_shape
     )
 
-    clip_gradient = optimizer_kwargs.pop("clip_gradient", None)
-    frozen_keys = optimizer_kwargs.pop("frozen_keys", None)
+    clip_gradient = kwargs.pop("clip_gradient", None)
+    frozen_keys = kwargs.pop("frozen_keys", None)
 
-    tx = optax.adamw(mu_dtype=jnp.bfloat16, **optimizer_kwargs, mask=wd_mask)
+    tx = optax.adamw(mu_dtype=jnp.bfloat16, **kwargs, mask=wd_mask)
     if clip_gradient is not None:
         tx = optax.chain(
             optax.clip_by_global_norm(clip_gradient),

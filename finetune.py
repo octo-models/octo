@@ -223,7 +223,7 @@ def main(_):
 
     tx, lr_callable, param_norm_callable = create_optimizer(
         params,
-        FLAGS.config.optimizer.to_dict(),
+        **FLAGS.config.optimizer.to_dict(),
     )
     train_state = TrainState.create(
         apply_fn=model.model_def.apply,
