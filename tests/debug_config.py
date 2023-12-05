@@ -17,13 +17,20 @@ def get_config():
                 warmup_steps=1,
             ),
         ),
-        num_val_batches=1,
+        val_kwargs=dict(
+            val_shuffle_buffer_size=1,
+            num_val_batches=2,
+        ),
+        viz_kwargs=dict(
+            eval_batch_size=2,
+            trajs_for_metrics=4,
+            trajs_for_viz=4,
+            samples_per_state=4,
+        ),
         log_interval=1,
         eval_interval=2,
         viz_interval=2,
         eval_datasets=None,
-        trajs_for_metrics=1,
-        trajs_for_viz=1,
         dataset_kwargs={
             "dataset_kwargs_list": [
                 {
