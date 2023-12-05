@@ -382,18 +382,18 @@ def main(_):
             train_state, update_info = train_step(train_state, batch)
 
         if (i + 1) % FLAGS.config.save_interval == 0 and save_dir is not None:
-            save_callback.callback(train_state, i + 1)
+            save_callback(train_state, i + 1)
 
         if (i + 1) % FLAGS.config.eval_interval == 0:
             logging.info("Evaluating...")
             with timer("eval"):
-                wandb_metrics = val_callback.callback(train_state, i + 1)
+                wandb_metrics = val_callback(train_state, i + 1)
                 wandb_log(wandb_metrics, step=i + 1)
 
         if (i + 1) % FLAGS.config.viz_interval == 0:
             logging.info("Visualizing...")
             with timer("visualize"):
-                wandb_metrics = viz_callback.callback(train_state, i + 1)
+                wandb_metrics = viz_callback(train_state, i + 1)
                 wandb_log(wandb_metrics, step=i + 1)
 
         timer.tock("total")

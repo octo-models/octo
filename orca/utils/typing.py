@@ -15,3 +15,4 @@ Data = Union[Array, Dict[str, "Data"]]
 Batch = Dict[str, Data]
 # A method to be passed into TrainState.__call__
 ModuleMethod = Union[str, Callable, None]
+TextProcessor = Any

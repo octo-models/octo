@@ -13,37 +13,43 @@ import tensorflow as tf
 import tqdm
 
 from orca.data.dataset import make_interleaved_dataset, make_single_dataset
-from orca.utils.train_utils import batched_apply, remove_images, remove_text
-from orca.utils.typing import Any, Batch, Callable, Dict, Optional, Sequence
+from orca.utils.train_utils import batched_apply
+from orca.utils.typing import Any, Batch, Callable, Data, Dict, Optional, Sequence
 from orca.utils.visualization_lib import Visualizer
 
 
 class Callback:
-    def callback(self, train_state, step):
+    def __call__(self, train_state, step):
         raise NotImplementedError
 
 
-def create_validation_dataset(single_dataset_kwargs, dataset_kwargs):
+def create_validation_dataset(
+    dataset_kwargs, traj_transform_kwargs, frame_transform_kwargs, train=False
+):
+    """Creates a tf Dataset for validation and visualization purposes.
+
+    Overwrites default parameters with more conservative options, to ensure stable memory and CPU consumption
+    """
     return make_single_dataset(
         dataset_kwargs={
-            **single_dataset_kwargs,
+            **dataset_kwargs,
             "num_parallel_reads": 4,
             "num_parallel_calls": 4,
             "shuffle": False,
         },
         traj_transform_kwargs={
-            **dataset_kwargs["traj_transform_kwargs"],
+            **traj_transform_kwargs,
             "num_parallel_calls": 4,
         },
-        frame_transform_kwargs=dataset_kwargs["frame_transform_kwargs"],
-        train=False,
+        frame_transform_kwargs=frame_transform_kwargs,
+        train=train,
         frame_transform_threads=16,
     )
 
 
 @dataclass
-class SaveCallback:
-    save_dir: str
+class SaveCallback(Callback):
+    save_dir: Optional[str]
 
     def __post_init__(self):
         if self.save_dir is not None and jax.process_index() == 0:
@@ -64,7 +70,7 @@ class SaveCallback:
                 orbax.checkpoint.PyTreeCheckpointer(),
             )
 
-    def callback(self, train_state, step):
+    def __call__(self, train_state, step):
         if self.save_dir is not None and jax.process_index() == 0:
             self.params_checkpointer.save(
                 step,
@@ -86,8 +92,30 @@ class SaveCallback:
             return open(os.devnull, mode)
 
 
+def remove_text(tasks: Data, zero_text_encoding: Data):
+    """Replaces language encoding inside task dict with that of the empty string
+
+    zero_text_encoding = jax.tree_map(lambda x: x[0], text_processor.encode([""]))
+
+    """
+    if "language_instruction" in tasks:
+        new_language = jax.tree_map(
+            lambda x, example: jnp.broadcast_to(example[None], x.shape),
+            tasks["language_instruction"],
+            zero_text_encoding,
+        )
+        tasks = flax.core.copy(tasks, {"language_instruction": new_language})
+    return tasks
+
+
+def remove_images(tasks: Data):
+    """Replaces images inside task dict with zero (black) images."""
+    new_images = {k: jnp.zeros_like(v) for k, v in tasks.items() if "image" in k}
+    return flax.core.copy(tasks, new_images)
+
+
 @dataclass
-class ValidationCallback:
+class ValidationCallback(Callback):
     loss_fn: Callable
     process_batch_fn: Callable[[Batch], Batch]
     text_processor: Any
@@ -96,6 +124,7 @@ class ValidationCallback:
     val_shuffle_buffer_size: int
     num_val_batches: int
     modes_to_evaluate: Sequence[str] = ("text_conditioned", "image_conditioned")
+    train: bool = False
 
     def __post_init__(self):
         if self.text_processor is not None:
@@ -105,7 +134,10 @@ class ValidationCallback:
         self.val_iterators = {}
         for single_dataset_kwargs in self.val_dataset_kwargs_list:
             val_dataset = create_validation_dataset(
-                single_dataset_kwargs, self.dataset_kwargs
+                single_dataset_kwargs,
+                self.dataset_kwargs["traj_transform_kwargs"],
+                self.dataset_kwargs["frame_transform_kwargs"],
+                train=train,
             )
             val_iterator = (
                 val_dataset.unbatch()
@@ -147,7 +179,7 @@ class ValidationCallback:
 
         self.eval_step = eval_step
 
-    def callback(self, train_state, step):
+    def __call__(self, train_state, step):
         wandb_metrics = {}
         for name, val_data_iter in self.val_iterators.items():
             metrics = []
@@ -163,7 +195,7 @@ class ValidationCallback:
 
 
 @dataclass
-class VisualizationCallback:
+class VisualizationCallback(Callback):
     text_processor: Any
     val_dataset_kwargs_list: Sequence[Dict]
     dataset_kwargs: Dict
@@ -172,6 +204,7 @@ class VisualizationCallback:
     trajs_for_viz: int
     samples_per_state: int
     modes_to_evaluate: str = ("text_conditioned", "image_conditioned")
+    train: bool = False
 
     def __post_init__(self):
         self.zero_text = jax.tree_map(lambda x: x[0], self.text_processor.encode(""))
@@ -179,7 +212,10 @@ class VisualizationCallback:
         self.visualizers = {}
         for single_dataset_kwargs in self.val_dataset_kwargs_list:
             val_dataset = create_validation_dataset(
-                single_dataset_kwargs, self.dataset_kwargs
+                single_dataset_kwargs,
+                self.dataset_kwargs["traj_transform_kwargs"],
+                self.dataset_kwargs["frame_transform_kwargs"],
+                train=train,
             )
             self.visualizers[single_dataset_kwargs["name"]] = Visualizer(
                 val_dataset, text_processor=self.text_processor, freeze_trajs=False
@@ -232,7 +268,7 @@ class VisualizationCallback:
 
         self.get_policy_sampled_actions = get_policy_sampled_actions
 
-    def callback(self, train_state, step):
+    def __call__(self, train_state, step):
         wandb_metrics = {}
         modal_policy_fns = {
             k: batched_apply(

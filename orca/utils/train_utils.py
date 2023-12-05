@@ -14,7 +14,7 @@ import numpy as np
 import optax
 
 from orca.utils import jax_utils
-from orca.utils.typing import PRNGKey
+from orca.utils.typing import Batch, Data, Optional, PRNGKey, TextProcessor
 
 
 class TrainState(train_state.TrainState):
@@ -351,7 +351,13 @@ def merge_params(target_params, pretrained_params):
     return flax.core.freeze(target_params)
 
 
-def process_text(batch, text_processor):
+def process_text(batch: Batch, text_processor: Optional[TextProcessor]):
+    """Encodes the language instruction inside the tasks for a batch.
+
+    If the text processor is None, removes language entirely from the tasks.
+    Expects batch to be a nested dictionary, where
+        batch["tasks"]["language_instruction"] is a sequence of byte strings
+    """
     if text_processor is None:
         batch["tasks"].pop("language_instruction")
     else:
@@ -359,19 +365,3 @@ def process_text(batch, text_processor):
             [s.decode("utf-8") for s in batch["tasks"]["language_instruction"]]
         )
     return batch
-
-
-def remove_text(tasks, zero_text):
-    if "language_instruction" in tasks:
-        new_language = jax.tree_map(
-            lambda x, example: jnp.broadcast_to(example[None], x.shape),
-            tasks["language_instruction"],
-            zero_text,
-        )
-        tasks = flax.core.copy(tasks, {"language_instruction": new_language})
-    return tasks
-
-
-def remove_images(tasks):
-    new_images = {k: jnp.zeros_like(v) for k, v in tasks.items() if "image" in k}
-    return flax.core.copy(tasks, new_images)
