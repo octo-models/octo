@@ -93,6 +93,8 @@ class RHCWrapper(gym.Wrapper):
         self.exec_horizon = exec_horizon
 
     def step(self, actions):
+        if self.exec_horizon == 1 and len(actions.shape) == 1:
+            actions = actions[None]
         assert len(actions) >= self.exec_horizon
         rewards = []
         observations = []
@@ -107,7 +109,6 @@ class RHCWrapper(gym.Wrapper):
             if done or trunc:
                 break
 
-        # pass through all infos, also return full observation and reward sequence in infos
         infos = listdict2dictlist(infos)
         infos["rewards"] = rewards
         infos["observations"] = observations
@@ -132,9 +133,9 @@ class TemporalEnsembleWrapper(gym.Wrapper):
         self.action_space = space_stack(self.env.action_space, self.pred_horizon)
 
     def step(self, actions):
-        assert len(actions) == self.pred_horizon
+        assert len(actions) >= self.pred_horizon
 
-        self.act_history.append(actions)
+        self.act_history.append(actions[: self.pred_horizon])
         num_actions = len(self.act_history)
 
         # select the predicted action for the current step from the history of action chunk predictions

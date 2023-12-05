@@ -48,6 +48,9 @@ class AlohaGymEnv(gym.Env):
         reward = ts.reward
         info = {"images": images}
 
+        if reward == self._env.task.max_reward:
+            self._episode_is_success = 1
+
         return obs, reward, False, False, info
 
     def reset(self, **kwargs):
@@ -62,7 +65,9 @@ class AlohaGymEnv(gym.Env):
         ts = self._env.reset(**kwargs)
         obs, images = self.get_obs(ts)
         info = {"images": images}
-        self._goal_obs = obs   # HACK
+        self._goal_obs = copy.deepcopy(obs)   # HACK
+
+        self._episode_is_success = 0
 
         return obs, info
 
@@ -77,7 +82,7 @@ class AlohaGymEnv(gym.Env):
             if cam_name == 'cam_high':
                 curr_image = crop_resize(curr_image)
 
-            curr_image = cv2.cvtColor(curr_image, cv2.COLOR_BGR2RGB)
+            #curr_image = cv2.cvtColor(curr_image, cv2.COLOR_BGR2RGB)
             vis_images.append(copy.deepcopy(curr_image))
             curr_image = jnp.array(curr_image) # XXX: / 255. ?
             curr_obs[f"image_{i}"] = curr_image
@@ -94,7 +99,12 @@ class AlohaGymEnv(gym.Env):
         assert self._goal_obs, "Need to run reset() before!"
         return {
             "language_instruction": ["pick up the cube and hand it over".encode()],
-            **jax.tree_map(lambda x: x[None], self._goal_obs),
+            **jax.tree_map(lambda x: x[None] * 0, self._goal_obs),
+        }
+
+    def get_episode_metrics(self):
+        return {
+            "success_rate": self._episode_is_success,
         }
 
 
