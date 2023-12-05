@@ -4,8 +4,13 @@ import os
 
 from absl import app, flags, logging
 import numpy as np
+import json
+import tensorflow as tf
 
 from orca.utils.run_eval import run_eval_loop
+from orca.utils.pretrained_utils import PretrainedModel
+from orca.utils.gym_wrappers import UnnormalizeActionProprio
+from orca.utils.eval_utils import download_checkpoint_from_gcs
 
 from widowx_envs.widowx_env_service import WidowXClient, WidowXConfigs, WidowXStatus
 from widowx_wrapper import convert_obs, state_to_eep, wait_for_obs, WidowXGym
@@ -48,7 +53,6 @@ ENV_PARAMS = {
 ##############################################################################
 
 
-
 def main(_):
     # set up the widowx client
     if FLAGS.initial_eep is not None:
@@ -87,6 +91,7 @@ def main(_):
     # this logs the env data
     if FLAGS.enable_envlogger:
         from oxe_envlogger.envlogger import OXEEnvLogger
+
         env = OXEEnvLogger(
             env,
             "widowx",
@@ -94,8 +99,34 @@ def main(_):
             max_episodes_per_file=100,
         )
 
+    assert len(FLAGS.checkpoint_weights_path) == len(FLAGS.checkpoint_step)
+
+    models = {}
+    for weights_path, step in zip(
+        FLAGS.checkpoint_weights_path,
+        FLAGS.checkpoint_step,
+    ):
+        weights_path, step = download_checkpoint_from_gcs(
+            weights_path,
+            step,
+            FLAGS.checkpoint_cache_dir,
+        )
+        assert tf.io.gfile.exists(weights_path), weights_path
+        run_name = weights_path.rpartition("/")[2]
+        models[f"{run_name}-{step}"] = PretrainedModel.load_pretrained(
+            weights_path, step=int(step)
+        )
+
+    metadata_path = os.path.join(
+        FLAGS.checkpoint_weights_path[0], f"dataset_statistics_bridge_dataset.json"
+    )
+    with open(metadata_path, "r") as f:
+        metadata = json.load(f)
+
+    env = UnnormalizeActionProprio(env, metadata, normalization_type="normal")
+
     # run the evaluation loop
-    run_eval_loop(env, custom_goal_condition_init, STEP_DURATION)
+    run_eval_loop(env, models, custom_goal_condition_init, STEP_DURATION)
     del env
 
 
