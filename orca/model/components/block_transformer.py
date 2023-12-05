@@ -2,6 +2,7 @@
 from dataclasses import asdict, dataclass, replace
 from enum import Enum
 import logging
+from typing import Mapping, Tuple
 
 import einops
 import flax
@@ -11,7 +12,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from orca.model.components.transformer import Transformer
-from orca.utils.typing import Dict, PRNGKey, Sequence, Tuple, Union
+from orca.utils.typing import Sequence, Union
 
 
 class AttentionRule(Enum):
@@ -31,8 +32,8 @@ class PrefixGroup:
     """A group of tokens that will be at the beginning of the token sequence. (e.g. task tokens)"""
 
     name: str
-    tokens: jax.Array  # with shape (batch, n_tokens, token_embedding_size)
-    attention_rules: Dict[str, AttentionRule]
+    tokens: jax.typing.ArrayLike  # with shape (batch, n_tokens, token_embedding_size)
+    attention_rules: Mapping[str, AttentionRule]
 
     def __post_init__(self):
         assert self.tokens.ndim == 3, "PrefixGroup tokens must be (batch, n_tokens, d)"
@@ -43,8 +44,8 @@ class TimestepGroup:
     """A group of tokens that is repeated for each timestep. (e.g. observation tokens)"""
 
     name: str
-    tokens: jax.Array  # with shape (batch, horizon, n_tokens, token_embedding_size)
-    attention_rules: Dict[str, AttentionRule]
+    tokens: jax.typing.ArrayLike  # with shape (batch, horizon, n_tokens, token_embedding_size)
+    attention_rules: Mapping[str, AttentionRule]
 
     def __post_init__(self):
         assert (
@@ -61,7 +62,7 @@ class TokenMetadata:
 
     name: str
     timestep: int  # -1 for prefix tokens
-    attention_rules: Dict[str, AttentionRule]
+    attention_rules: Mapping[str, AttentionRule]
 
     @classmethod
     def create(cls, group: Union[PrefixGroup, TimestepGroup], timestep: int):
@@ -113,7 +114,7 @@ class BlockTransformer(nn.Module):
         self,
         prefix_groups: Sequence[PrefixGroup],
         timestep_groups: Sequence[TimestepGroup],
-        timestep_pad_mask: jax.Array,
+        timestep_pad_mask: jax.typing.ArrayLike,
         train: bool,
         verbose: bool = False,
     ) -> Tuple[Sequence[PrefixGroup], Sequence[TimestepGroup]]:
@@ -241,7 +242,7 @@ class BlockTransformer(nn.Module):
         self,
         prefix_groups: Sequence[PrefixGroup],
         timestep_groups: Sequence[TimestepGroup],
-        timestep_pad_mask: jax.Array,
+        timestep_pad_mask: jax.typing.ArrayLike,
     ):
         """
         Args:
@@ -311,7 +312,7 @@ class BlockTransformer(nn.Module):
 
     def generate_pad_attention_mask(
         self,
-        timestep_pad_mask: jax.Array,
+        timestep_pad_mask: jax.typing.ArrayLike,
         tokens_per_time_step: int,
         tokens_for_prefix: int,
     ):

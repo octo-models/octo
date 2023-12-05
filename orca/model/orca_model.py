@@ -1,4 +1,6 @@
 # Written by Dibya
+from typing import Dict, Optional
+
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
@@ -9,7 +11,7 @@ from orca.model.components.block_transformer import (
     PrefixGroup,
     TimestepGroup,
 )
-from orca.utils.typing import Data, Dict, Optional, Sequence
+from orca.utils.typing import Data, Sequence
 
 posemb_init = nn.initializers.normal(stddev=0.02)
 
