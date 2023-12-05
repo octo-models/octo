@@ -2,7 +2,6 @@ import functools as ft
 import os.path as osp
 import pickle as pkl
 
-from flax.core import freeze, unfreeze
 import jax.numpy as jnp
 from transformers import AutoConfig, FlaxAutoModel, FlaxT5EncoderModel
 
@@ -31,10 +30,9 @@ def hf_weights_loader(params, hf_model):
             if isinstance(params[k], type(params)):
                 find_and_replace(params[k], key, replacement)
 
-    params = params.unfreeze()
     find_and_replace(params, "hf_model", model_variables)
     assert replaced, "Failed to load weights"
-    return freeze(params)
+    return params
 
 
 def resnet18_IN_SimCLR_loader(params, checkpoint=None):
@@ -72,14 +70,13 @@ def resnet18_IN_SimCLR_loader(params, checkpoint=None):
                 param_dict[k] = jnp.array(replacement_dict[k])
                 replaced = True
 
-    params = unfreeze(params)
     replace_weights(
         params["orca_transformer"]["observation_tokenizers_0"]["ResNetEncoder_0"],
         checkpoint,
     )
     assert replaced, "Failed to load weights"
     print("loaded resnet18_IN_SimCLR")
-    return freeze(params)
+    return params
 
 
 # index for weight loaders

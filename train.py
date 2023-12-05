@@ -1,3 +1,8 @@
+# WARNING: importing tensorflow too late can silence important logging (╯°□°)╯︵ ┻━┻
+import tensorflow as tf
+
+# isort: split
+
 import datetime
 from functools import partial
 import json
@@ -5,6 +10,7 @@ import os
 import os.path as osp
 import subprocess
 
+from absl import app, flags, logging
 import flax
 from flax.training import orbax_utils
 from flax.traverse_util import flatten_dict
@@ -15,18 +21,9 @@ from jax.sharding import Mesh, NamedSharding, PartitionSpec
 from ml_collections import config_flags
 import numpy as np
 import optax
+import orbax.checkpoint
 import tqdm
 import wandb
-
-# WARNING: importing orbax before tensorflow silences important logging from tensorflow (╯°□°)╯︵ ┻━┻
-# isort: off
-
-from absl import app, flags, logging
-import tensorflow as tf
-import orbax.checkpoint
-
-# isort: on
-
 
 import orca
 from orca.data.dataset import make_interleaved_dataset, make_single_dataset
@@ -306,7 +303,7 @@ def main(_):
         *model_init_args,
     )["params"]
     tx, lr_callable, param_norm_callable = create_optimizer(
-        params_shape.unfreeze(),
+        params_shape,
         FLAGS.config.optimizer.to_dict(),
     )
     train_state = create_train_state(
