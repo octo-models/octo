@@ -1,4 +1,3 @@
-import copy
 import datetime
 from functools import partial
 import json
@@ -6,7 +5,6 @@ import os
 
 from absl import app, flags, logging
 import flax
-from flax.training import orbax_utils
 from flax.traverse_util import flatten_dict
 import jax
 import jax.numpy as jnp
@@ -14,7 +12,6 @@ from jax.sharding import Mesh, NamedSharding, PartitionSpec
 from ml_collections import config_flags, ConfigDict
 import numpy as np
 import optax
-import orbax.checkpoint
 import tensorflow as tf
 import tqdm
 import wandb
@@ -22,14 +19,13 @@ import wandb
 from orca.data.dataset import make_single_dataset
 from orca.data.utils.text_processing import text_processors
 from orca.utils.jax_utils import initialize_compilation_cache
-from orca.utils.pretrained_utils import _verify_shapes, PretrainedModel
+from orca.utils.pretrained_utils import PretrainedModel
 from orca.utils.train_callbacks import (
     SaveCallback,
     ValidationCallback,
     VisualizationCallback,
 )
 from orca.utils.train_utils import (
-    batched_apply,
     check_config_diff,
     create_optimizer,
     format_name_with_config,
@@ -37,7 +33,6 @@ from orca.utils.train_utils import (
     Timer,
     TrainState,
 )
-from orca.utils.visualization_lib import Visualizer
 
 try:
     from jax_smi import initialise_tracking  # type: ignore
@@ -330,20 +325,16 @@ def main(_):
         text_processor=text_processor,
         val_dataset_kwargs_list=dataset_kwargs_list,
         dataset_kwargs=FLAGS.config,
-        val_shuffle_buffer_size=FLAGS.config.shuffle_buffer_size,
-        num_val_batches=FLAGS.config.num_val_batches,
         modes_to_evaluate=modes_to_evaluate,
+        **FLAGS.config.val_kwargs,
     )
 
     viz_callback = VisualizationCallback(
         text_processor=text_processor,
         val_dataset_kwargs_list=dataset_kwargs_list,
         dataset_kwargs=FLAGS.config,
-        eval_batch_size=128,
-        trajs_for_metrics=100,
-        trajs_for_viz=8,
-        samples_per_state=8,
         modes_to_evaluate=modes_to_evaluate,
+        **FLAGS.config.viz_kwargs,
     )
 
     def wandb_log(info, step):

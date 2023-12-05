@@ -6,7 +6,6 @@ import os.path as osp
 import subprocess
 
 import flax
-from flax.training import orbax_utils
 from flax.traverse_util import flatten_dict
 import jax
 from jax.experimental import multihost_utils
@@ -29,20 +28,18 @@ from orca.utils.train_callbacks import (
 
 from absl import app, flags, logging
 import tensorflow as tf
-import orbax.checkpoint
 
 # isort: on
 
 
 import orca
-from orca.data.dataset import make_interleaved_dataset, make_single_dataset
+from orca.data.dataset import make_interleaved_dataset
 from orca.data.oxe.oxe_dataset_mixes import make_oxe_dataset_kwargs_and_weights, mixes
 from orca.data.utils.text_processing import text_processors
-from orca.model import create_model_def, OrcaModel
+from orca.model import create_model_def
 from orca.model.components.hf_weight_loaders import weights_loaders
 from orca.utils import jax_utils
 from orca.utils.train_utils import (
-    batched_apply,
     create_optimizer,
     create_train_state,
     filter_eval_datasets,
@@ -50,7 +47,6 @@ from orca.utils.train_utils import (
     process_text,
     Timer,
 )
-from orca.utils.visualization_lib import Visualizer
 
 FLAGS = flags.FLAGS
 
@@ -357,17 +353,13 @@ def main(_):
         text_processor=text_processor,
         val_dataset_kwargs_list=val_datasets_kwargs_list,
         dataset_kwargs=FLAGS.config.dataset_kwargs,
-        val_shuffle_buffer_size=FLAGS.config.val_shuffle_buffer_size,
-        num_val_batches=FLAGS.config.num_val_batches,
+        **FLAGS.config.val_kwargs.to_dict(),
     )
     viz_callback = VisualizationCallback(
         text_processor=text_processor,
         val_dataset_kwargs_list=val_datasets_kwargs_list,
         dataset_kwargs=FLAGS.config.dataset_kwargs,
-        eval_batch_size=FLAGS.config.eval_batch_size,
-        trajs_for_metrics=FLAGS.config.trajs_for_metrics,
-        trajs_for_viz=FLAGS.config.trajs_for_viz,
-        samples_per_state=NUM_ACTIONS_FOR_VIS,
+        **FLAGS.config.viz_kwargs.to_dict(),
     )
 
     def wandb_log(info, step):
