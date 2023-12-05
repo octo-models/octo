@@ -40,7 +40,7 @@ from orca.utils.train_utils import (
     format_name_with_config,
     Timer,
 )
-from orca.utils.visualization_lib import Visualizer
+from orca.utils.visualization_lib import RolloutVisualizer, Visualizer
 
 FLAGS = flags.FLAGS
 
@@ -255,6 +255,23 @@ def main(_):
         map(shard, map(process_text, val_data.iterator(prefetch=0)))
         for val_data in val_datas
     ]
+
+    # optionally build visualizers for sim env evals
+    if FLAGS.config.get("rollout_envs", None):
+        rollout_visualizers = []
+        for env_name, visualizer_kwargs in FLAGS.config["rollout_envs"]:
+            input_kwargs = dict(
+                env_name=env_name,
+                history_length=FLAGS.config["window_size"],
+                action_chunk=FLAGS.config["model"]["heads"]["action"]["kwargs"].get(
+                    "pred_horizon", 1
+                ),
+                text_processor=text_processor,
+            )
+            input_kwargs.update(visualizer_kwargs)
+            rollout_visualizers.append(RolloutVisualizer(**input_kwargs))
+    else:
+        rollout_visualizers = None
 
     example_batch = next(train_data_iter)
     logging.info(f"Batch size: {example_batch['action'].shape[0]}")
@@ -472,6 +489,8 @@ def main(_):
             )
             return actions
 
+        # actions is (NUM_ACTIONS_FOR_VIS, batch_size, pred_horizon, action_dim)
+        # where actions[:, :, i] predicts the action at timestep "window_size + i"
         actions = state.apply_fn(
             {"params": state.params},
             observations,
@@ -481,11 +500,7 @@ def main(_):
             rngs={"dropout": state.rng},
         )  # We could also have used run_head here, but this is easier to read
 
-        # actions is (NUM_ACTIONS_FOR_VIS, batch_size, pred_horizon, action_dim)
-        # where actions[:, :, i] predicts the action at timestep "window_size + i"
-        actions = actions[..., 0, :]
-
-        # viz expects (batch_size, n_samples, action_dim)
+        # viz expects (batch_size, n_samples, pred_horizon, action_dim)
         actions = jnp.moveaxis(actions, 0, 1)
         return actions
 
@@ -594,6 +609,22 @@ def main(_):
                         },
                         step=i,
                     )
+
+            if rollout_visualizers:
+                for rollout_visualizer in rollout_visualizers:
+                    for mode, policy_fn in modal_policy_fns.items():
+                        logging.info("Running rollouts...")
+                        rollout_infos = rollout_visualizer.run_rollouts(
+                            policy_fn, n_rollouts=FLAGS.config.trajs_for_rollouts
+                        )
+                        wandb_log(
+                            {
+                                f"rollouts_{rollout_visualizer.env_name}"
+                                f"_chunk{rollout_visualizer.action_chunk}/{mode}": rollout_infos,
+                            },
+                            step=i,
+                        )
+
             timer.tock("visualize")
 
         timer.tock("total")

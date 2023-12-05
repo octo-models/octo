@@ -31,7 +31,7 @@ from orca.utils.train_utils import (
     Timer,
     TrainState,
 )
-from orca.utils.visualization_lib import Visualizer
+from orca.utils.visualization_lib import RolloutVisualizer, Visualizer
 
 try:
     from jax_smi import initialise_tracking  # type: ignore
@@ -194,6 +194,28 @@ def main(_):
     val_data_iter = create_iterator(val_dataset)
 
     example_batch = next(train_data_iter)
+
+    #########
+    #
+    # Optionally build visualizers for sim env evals
+    #
+    #########
+
+    if FLAGS.config.get("rollout_envs", None):
+        rollout_visualizers = []
+        for env_name, visualizer_kwargs in FLAGS.config["rollout_envs"]:
+            input_kwargs = dict(
+                env_name=env_name,
+                history_length=FLAGS.config["window_size"],
+                action_chunk=config["model"]["heads"]["action"]["kwargs"].get(
+                    "pred_horizon", 1
+                ),
+                text_processor=text_processor,
+            )
+            input_kwargs.update(visualizer_kwargs)
+            rollout_visualizers.append(RolloutVisualizer(**input_kwargs))
+    else:
+        rollout_visualizers = None
 
     #########
     #
@@ -376,8 +398,9 @@ def main(_):
             sample_shape=(SAMPLES_FOR_VIZ,),
             rng=state.rng,
         )
-        actions = actions[..., 0, :]  # get prediction for current action
-        actions = jnp.moveaxis(actions, 0, 1)  # (batch_size, n_samples, action_dim)
+        actions = jnp.moveaxis(
+            actions, 0, 1
+        )  # (batch_size, n_samples, pred_horizon, action_dim)
         return actions
 
     #########
@@ -438,6 +461,21 @@ def main(_):
                     },
                     step=i,
                 )
+
+            if rollout_visualizers:
+                with timer("rollout"):
+                    for rollout_visualizer in rollout_visualizers:
+                        logging.info("Running rollouts...")
+                        rollout_infos = rollout_visualizer.run_rollouts(
+                            policy_fn, n_rollouts=10
+                        )
+                        wandb_log(
+                            {
+                                f"rollouts_{rollout_visualizer.env_name}"
+                                f"_chunk{rollout_visualizer.action_chunk}": rollout_infos,
+                            },
+                            step=i,
+                        )
 
         if (i + 1) % FLAGS.config.save_interval == 0 and save_dir is not None:
             logging.info("Saving checkpoint...")
