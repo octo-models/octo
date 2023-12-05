@@ -89,6 +89,9 @@ def main(_):
     # Our model will be replicated across devices (we are only doing data parallelism, not model parallelism)
     replicated_sharding = NamedSharding(mesh, PartitionSpec())
 
+    # prevent tensorflow from using GPU memory since it's only used for data loading
+    tf.config.set_visible_devices([], "GPU")
+
     #########
     #
     # Setup WandB
@@ -190,7 +193,7 @@ def main(_):
 
     rng = jax.random.PRNGKey(FLAGS.config.seed)
 
-    params = model.params.unfreeze()
+    params = model.params
     if FLAGS.config.optimizer.frozen_keys is None:
         FLAGS.config.optimizer.frozen_keys = model.config["optimizer"]["frozen_keys"]
 
@@ -223,7 +226,7 @@ def main(_):
         save_callback = SaveCallback(save_dir)
 
         # Save model config
-        new_config = ConfigDict(flax.core.unfreeze(model.config))
+        new_config = ConfigDict(model.config)
         new_config.window_size = example_batch["observation"]["pad_mask"].shape[1]
 
         with save_callback.open("config.json", "w") as config_file:
