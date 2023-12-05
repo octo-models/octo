@@ -81,12 +81,12 @@ class PretrainedModel:
             tasks.update(goals)
         else:
             batch_size = len(texts)
-        tasks = jax.tree_map(
-            lambda example: jnp.zeros(
-                (batch_size, *example.shape[1:]), dtype=example.dtype
-            ),
-            self.example_batch["tasks"],
-        )
+            tasks = jax.tree_map(
+                lambda example: jnp.zeros(
+                    (batch_size, *example.shape[1:]), dtype=example.dtype
+                ),
+                self.example_batch["tasks"],
+            )
 
         if texts is None:
             batch_size = jax.tree_util.tree_leaves(goals)[0].shape[0]
