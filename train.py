@@ -407,12 +407,6 @@ def main(_):
                 "learning_rate": lr_callable(state.step),
             }
         )
-        pad_info = {
-            "main": batch["observation"]["pad_mask"].mean(),
-            "tasks": jax.tree_map(jnp.mean, batch["tasks"]["pad_mask_dict"]),
-            "observation": jax.tree_map(jnp.mean, batch["observation"]["pad_mask"]),
-        }
-        info["pad_info"] = pad_info
         new_state = state.apply_gradients(grads=grads, rng=rng)
         return new_state, info
 
