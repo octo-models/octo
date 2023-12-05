@@ -263,9 +263,7 @@ def main(_):
         for env_name, visualizer_kwargs in FLAGS.config["rollout_envs"]:
             input_kwargs = dict(
                 env_name=env_name,
-                history_length=FLAGS.config["dataset_kwargs"]["transform_kwargs"][
-                    "window_size"
-                ],
+                history_length=FLAGS.config["window_size"],
                 action_chunk=FLAGS.config["model"]["heads"]["action"]["kwargs"].get(
                     "pred_horizon", 1
                 ),
