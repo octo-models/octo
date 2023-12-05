@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, Sequence
 
 from flax.core import FrozenDict
 import jax.numpy as jnp
@@ -13,8 +13,8 @@ class TextProcessor:
     Base class for text tokenization or text embedding.
     """
 
-    def encode(self, strings):
-        pass
+    def encode(self, strings: Sequence[str]):
+        raise NotImplementedError
 
 
 class HFTokenizer(TextProcessor):
@@ -37,7 +37,7 @@ class HFTokenizer(TextProcessor):
         if self.encode_with_model:
             self.model = FlaxAutoModel.from_pretrained(tokenizer_name)
 
-    def encode(self, strings):
+    def encode(self, strings: Sequence[str]):
         # this creates another nested layer with "input_ids", "attention_mask", etc.
         inputs = self.tokenizer(
             strings,
@@ -56,7 +56,7 @@ class MuseEmbedding(TextProcessor):
 
         self.muse_model = hub.load(MULTI_MODULE)
 
-    def encode(self, strings):
+    def encode(self, strings: Sequence[str]):
         with tf.device("/cpu:0"):
             return self.muse_model(strings).numpy()
 
@@ -76,7 +76,7 @@ class CLIPTextProcessor(TextProcessor):
         self.processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
         self.kwargs = tokenizer_kwargs
 
-    def encode(self, strings):
+    def encode(self, strings: Sequence[str]):
         inputs = self.processor(
             text=strings,
             **self.kwargs,
