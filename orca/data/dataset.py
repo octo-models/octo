@@ -225,6 +225,9 @@ def apply_trajectory_transforms(
 
         def move_language_instruction_to_tasks(traj):
             traj["tasks"]["language_instruction"] = traj.pop("language_instruction")
+            traj["tasks"]["pad_mask_dict"]["language_instruction"] = (
+                tf.strings.length(traj["tasks"]["language_instruction"]) != 0
+            )
             return traj
 
         dataset = dataset.map(move_language_instruction_to_tasks, num_parallel_calls)
@@ -233,14 +236,6 @@ def apply_trajectory_transforms(
         dataset = dataset.map(
             partial(_subsample, subsample_length=subsample_length), num_parallel_calls
         )
-
-    def add_pad_mask_dict(traj):
-        traj["tasks"]["pad_mask_dict"]["language_instruction"] = (
-            tf.strings.length(traj["tasks"]["language_instruction"]) != 0
-        )
-        return traj
-
-    dataset = dataset.map(add_pad_mask_dict, num_parallel_calls)
 
     if train and task_augmentation_strategy is not None:
         dataset = dataset.map(
