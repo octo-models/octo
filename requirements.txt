@@ -17,7 +17,7 @@ einops >= 0.6.1
 imageio >= 2.31.1
 moviepy >= 1.0.3
 pre-commit == 3.3.3
-transformers >= 4.31.0
+transformers >= 4.34.1
 tensorflow_hub >= 0.14.0
 tensorflow_text >= 2.13.0
 tensorflow_datasets == 4.9.2
