@@ -417,12 +417,27 @@ def main(_):
                 tasks["language_instruction"],
                 zero_text,
             )
-            tasks = flax.core.copy(tasks, {"language_instruction": new_language})
+            new_pad_dict = flax.core.copy(
+                tasks["pad_mask_dict"],
+                {"language_instruction": jnp.zeros_like(new_language)},
+            )
+            tasks = flax.core.copy(
+                tasks,
+                {"language_instruction": new_language, "pad_mask_dict": new_pad_dict},
+            )
         return tasks
 
     def remove_images(tasks):
         new_images = {k: jnp.zeros_like(v) for k, v in tasks.items() if "image" in k}
-        return flax.core.copy(tasks, new_images)
+        new_pad_dict = flax.core.copy(
+            tasks["pad_mask_dict"],
+            {
+                k: jnp.zeros_like(v)
+                for k, v in tasks["pad_mask_dict"].items()
+                if "image" in k
+            },
+        )
+        return flax.core.copy(tasks, {**new_images, "pad_mask_dict": new_pad_dict})
 
     @partial(
         jax.jit,
