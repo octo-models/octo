@@ -1,7 +1,9 @@
 from config import get_config as get_base_config
 from config import update_config, wrap
+from functools import partial
 
 from orca.data.utils.data_utils import StateEncoding, ActionEncoding
+from experiments.lucy.aloha_wrapper import AlohaGymEnv
 
 
 def get_config(config_string=None):
@@ -13,6 +15,8 @@ def get_config(config_string=None):
         batch_size=128,
         eval_interval=500,
         save_interval=500,
+        trajs_for_rollouts=10,
+        shuffle_buffer_size=50000,
         model={
             "observation_tokenizers": {
                 "image": {
@@ -68,7 +72,29 @@ def get_config(config_string=None):
                 additional_action_window_size=49,
                 action_encoding=ActionEncoding.JOINT_POS_BIMANUAL,
             )
-        )
+        ),
+        rollout_envs=[
+            (
+                "aloha-sim-cube-v0",
+                dict(
+                    max_episode_length=200,
+                    action_chunk=50,
+                    vis_fps=25,
+                    video_subsample_rate=2,
+                    norm_statistics="gs://rail-orca-central2/aloha_sim_cube_scripted_dataset/1.0.0/dataset_statistics_707801797899cdd91dcb18bd45463cf73ac935bfd6ac6b62456653e96f120a5f.json",
+                )
+            ),
+            (
+                "aloha-sim-cube-v0",
+                dict(
+                    max_episode_length=200,
+                    action_chunk=30,
+                    vis_fps=25,
+                    video_subsample_rate=2,
+                    norm_statistics="gs://rail-orca-central2/aloha_sim_cube_scripted_dataset/1.0.0/dataset_statistics_707801797899cdd91dcb18bd45463cf73ac935bfd6ac6b62456653e96f120a5f.json",
+                )
+            )
+        ],
     )
 
     return config

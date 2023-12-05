@@ -43,6 +43,10 @@ def space_stack(space: gym.Space, repeat: int):
         raise ValueError(f"Space {space} is not supported by ORCA Gym wrappers.")
 
 
+def listdict2dictlist(LD):
+    return {k: [dic[k] for dic in LD] for k in LD[0]}
+
+
 class HistoryWrapper(gym.Wrapper):
     """
     Accumulates the observation history into `horizon` size chunks. If the length of the history
@@ -84,24 +88,32 @@ class RHCWrapper(gym.Wrapper):
     we execute `exec_horizon` of them.
     """
 
-    def __init__(self, env: gym.Env, pred_horizon: int, exec_horizon: int):
+    def __init__(self, env: gym.Env, exec_horizon: int):
         super().__init__(env)
-        assert exec_horizon <= pred_horizon
-
-        self.pred_horizon = pred_horizon
         self.exec_horizon = exec_horizon
 
-        self.action_space = space_stack(self.env.action_space, self.pred_horizon)
-
     def step(self, actions):
-        assert len(actions) == self.pred_horizon
+        if self.exec_horizon == 1 and len(actions.shape) == 1:
+            actions = actions[None]
+        assert len(actions) >= self.exec_horizon
+        rewards = []
+        observations = []
+        infos = []
 
         for i in range(self.exec_horizon):
             obs, reward, done, trunc, info = self.env.step(actions[i])
+            observations.append(obs)
+            rewards.append(reward)
+            infos.append(info)
+
             if done or trunc:
                 break
 
-        return obs, reward, done, trunc, info
+        infos = listdict2dictlist(infos)
+        infos["rewards"] = rewards
+        infos["observations"] = observations
+
+        return obs, np.sum(rewards), done, trunc, infos
 
 
 class TemporalEnsembleWrapper(gym.Wrapper):
@@ -121,9 +133,9 @@ class TemporalEnsembleWrapper(gym.Wrapper):
         self.action_space = space_stack(self.env.action_space, self.pred_horizon)
 
     def step(self, actions):
-        assert len(actions) == self.pred_horizon
+        assert len(actions) >= self.pred_horizon
 
-        self.act_history.append(actions)
+        self.act_history.append(actions[: self.pred_horizon])
         num_actions = len(self.act_history)
 
         # select the predicted action for the current step from the history of action chunk predictions
@@ -167,11 +179,23 @@ class UnnormalizeActionProprio(gym.ActionWrapper, gym.ObservationWrapper):
                 f"Unknown action/proprio normalization type: {self.normalization_type}"
             )
 
+    def normalize(self, data, metadata):
+        if self.normalization_type == "normal":
+            return (data / (metadata["std"] + 1e-8)) - metadata["mean"]
+        elif self.normalization_type == "bounds":
+            return (
+                (data + 1) / (2 * (metadata["max"] - metadata["min"] + 1e-8))
+            ) + metadata["min"]
+        else:
+            raise ValueError(
+                f"Unknown action/proprio normalization type: {self.normalization_type}"
+            )
+
     def action(self, action):
         return self.unnormalize(action, self.action_proprio_metadata["action"])
 
     def observation(self, obs):
-        obs["proprio"] = self.unnormalize(
+        obs["proprio"] = self.normalize(
             obs["proprio"], self.action_proprio_metadata["proprio"]
         )
         return obs

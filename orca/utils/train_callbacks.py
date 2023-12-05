@@ -17,7 +17,7 @@ from orca.data.dataset import make_single_dataset
 from orca.data.utils.text_processing import TextProcessor
 from orca.utils.train_utils import batched_apply, TrainState
 from orca.utils.typing import Any, Data, Sequence
-from orca.utils.visualization_lib import Visualizer
+from orca.utils.visualization_lib import RolloutVisualizer, Visualizer
 
 
 class Callback:
@@ -122,6 +122,54 @@ def remove_images(tasks: Data):
     return flax.core.copy(tasks, new_images)
 
 
+@partial(jax.jit, static_argnames=("samples_per_state", "policy_mode"))
+def get_policy_sampled_actions(
+    state, observations, tasks, *, zero_text, samples_per_state, policy_mode=None
+):
+    # only use first horizon timesteps as input to predict_action
+
+    if policy_mode == "text_conditioned":
+        tasks = remove_images(tasks)
+    elif policy_mode == "image_conditioned":
+        tasks = remove_text(tasks, zero_text)
+    elif policy_mode == "unconditioned":
+        tasks = remove_text(remove_images(tasks), zero_text)
+
+    def get_actions(model, observations, tasks, train):
+        transformer_embeddings = model.orca_transformer(
+            observations,
+            tasks,
+            observations["pad_mask"],
+            train=train,
+        )
+
+        actions = model.heads["action"].predict_action(
+            transformer_embeddings,
+            train=train,
+            argmax=False,
+            sample_shape=(samples_per_state,),
+            rng=state.rng,
+        )
+        return actions
+
+    actions = state.apply_fn(
+        {"params": state.params},
+        observations,
+        tasks,
+        train=False,
+        method=get_actions,
+        rngs={"dropout": state.rng},
+    )  # We could also have used run_head here, but this is easier to read
+
+    # actions is (NUM_ACTIONS_FOR_VIS, batch_size, pred_horizon, action_dim)
+    # where actions[:, :, i] predicts the action at timestep "window_size + i"
+    actions = actions[..., 0, :]
+
+    # viz expects (batch_size, n_samples, action_dim)
+    actions = jnp.moveaxis(actions, 0, 1)
+    return actions
+
+
 @dataclass
 class ValidationCallback(Callback):
     loss_fn: Callable
@@ -204,7 +252,7 @@ class ValidationCallback(Callback):
 
 @dataclass
 class VisualizationCallback(Callback):
-    text_processor: Optional[TextProcessor]
+    text_processor: TextProcessor
     val_dataset_kwargs_list: Sequence[Mapping[str, Any]]
     dataset_kwargs: Mapping[str, Any]
     eval_batch_size: int
@@ -229,61 +277,20 @@ class VisualizationCallback(Callback):
                 val_dataset, text_processor=self.text_processor, freeze_trajs=False
             )
 
-        @partial(jax.jit, static_argnames="policy_mode")
-        def get_policy_sampled_actions(state, observations, tasks, policy_mode=None):
-            # only use first horizon timesteps as input to predict_action
-
-            if policy_mode == "text_conditioned":
-                tasks = remove_images(tasks)
-            elif policy_mode == "image_conditioned":
-                tasks = remove_text(tasks, self.zero_text)
-            elif policy_mode == "unconditioned":
-                tasks = remove_text(remove_images(tasks), self.zero_text)
-
-            def get_actions(model, observations, tasks, train):
-                transformer_embeddings = model.orca_transformer(
-                    observations,
-                    tasks,
-                    observations["pad_mask"],
-                    train=train,
-                )
-
-                actions = model.heads["action"].predict_action(
-                    transformer_embeddings,
-                    train=train,
-                    argmax=False,
-                    sample_shape=(self.samples_per_state,),
-                    rng=state.rng,
-                )
-                return actions
-
-            actions = state.apply_fn(
-                {"params": state.params},
-                observations,
-                tasks,
-                train=False,
-                method=get_actions,
-                rngs={"dropout": state.rng},
-            )  # We could also have used run_head here, but this is easier to read
-
-            # actions is (NUM_ACTIONS_FOR_VIS, batch_size, pred_horizon, action_dim)
-            # where actions[:, :, i] predicts the action at timestep "window_size + i"
-            actions = actions[..., 0, :]
-
-            # viz expects (batch_size, n_samples, action_dim)
-            actions = jnp.moveaxis(actions, 0, 1)
-            return actions
-
-        self.get_policy_sampled_actions = get_policy_sampled_actions
-
     def __call__(self, train_state: TrainState, step: int):
         wandb_metrics = {}
         modal_policy_fns = {
-            k: batched_apply(
-                partial(self.get_policy_sampled_actions, train_state, policy_mode=k),
+            mode: batched_apply(
+                partial(
+                    get_policy_sampled_actions,
+                    train_state,
+                    zero_text=self.zero_text,
+                    samples_per_state=self.samples_per_state,
+                    policy_mode=mode,
+                ),
                 self.eval_batch_size,
             )
-            for k in self.modes_to_evaluate
+            for mode in self.modes_to_evaluate
         }
 
         for name, visualizer in self.visualizers.items():
@@ -299,4 +306,51 @@ class VisualizationCallback(Callback):
                         policy_fn, max_trajs=self.trajs_for_viz
                     )
                     wandb_metrics[f"visualizations_{name}/{mode}"] = images
+        return wandb_metrics
+
+
+@dataclass
+class RolloutVisualizationCallback(Callback):
+    visualizer_kwargs_list: Sequence[Mapping[str, Any]]
+    text_processor: TextProcessor
+    trajs_for_rollouts: int
+    action_chunk: int
+    history_length: int
+    modes_to_evaluate: str = ("text_conditioned", "image_conditioned")
+
+    def __post_init__(self):
+        self.zero_text = jax.tree_map(lambda x: x[0], self.text_processor.encode(""))
+
+        self.rollout_visualizers = [
+            RolloutVisualizer(
+                text_processor=self.text_processor,
+                action_chunk=self.action_chunk,
+                history_length=self.history_length,
+                **kwargs,
+            )
+            for kwargs in self.visualizer_kwargs_list
+        ]
+
+    def __call__(self, train_state: TrainState, step: int):
+        wandb_metrics = {}
+        modal_policy_fns = {
+            mode: partial(
+                get_policy_sampled_actions,
+                train_state,
+                zero_text=self.zero_text,
+                samples_per_state=1,
+                policy_mode=mode,
+            )
+            for mode in self.modes_to_evaluate
+        }
+        for rollout_visualizer in self.rollout_visualizers:
+            for mode, policy_fn in modal_policy_fns.items():
+                logging.info(f"Running rollouts for {rollout_visualizer.env_name}")
+                rollout_infos = rollout_visualizer.run_rollouts(
+                    policy_fn, n_rollouts=self.trajs_for_rollouts
+                )
+                wandb_metrics[
+                    f"rollouts_{rollout_visualizer.env_name}_chunk{rollout_visualizer.action_chunk}/{mode}"
+                ] = rollout_infos
+
         return wandb_metrics
