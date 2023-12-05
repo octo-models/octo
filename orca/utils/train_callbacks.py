@@ -137,7 +137,7 @@ class ValidationCallback(Callback):
                 single_dataset_kwargs,
                 self.dataset_kwargs["traj_transform_kwargs"],
                 self.dataset_kwargs["frame_transform_kwargs"],
-                train=train,
+                train=self.train,
             )
             val_iterator = (
                 val_dataset.unbatch()
@@ -215,7 +215,7 @@ class VisualizationCallback(Callback):
                 single_dataset_kwargs,
                 self.dataset_kwargs["traj_transform_kwargs"],
                 self.dataset_kwargs["frame_transform_kwargs"],
-                train=train,
+                train=self.train,
             )
             self.visualizers[single_dataset_kwargs["name"]] = Visualizer(
                 val_dataset, text_processor=self.text_processor, freeze_trajs=False
