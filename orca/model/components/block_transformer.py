@@ -76,7 +76,7 @@ def find_match(pattern_dict: Dict[str, Any], name: str, default: Any) -> Any:
     return default
 
 
-@flax.core.dataclass
+@flax.struct.dataclass
 class TokenMetadata:
     """Attention mask logic supported by AttentionRule. Note that all tokens within the
     same group at the same timestep always attend to each other unless you explicitly have
