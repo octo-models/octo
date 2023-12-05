@@ -11,6 +11,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
+from orca.model.components.base import TokenGroup
 from orca.model.components.transformer import Transformer
 from orca.utils.typing import Dict, PRNGKey, Sequence, Tuple, Union
 
@@ -27,35 +28,33 @@ class AttentionRule(Enum):
     ALL = "all"  # Breaks causal structure! Be careful
 
 
-@dataclass
-class PrefixGroup:
+@flax.struct.dataclass
+class PrefixGroup(TokenGroup):
     """A group of tokens that will be at the beginning of the token sequence. (e.g. task tokens)"""
 
     name: str
-    tokens: jax.Array  # with shape (batch, n_tokens, token_embedding_size)
-    mask: jax.Array  # with shape (batch, n_tokens)
     attention_rules: Dict[str, AttentionRule]
 
     def __post_init__(self):
-        assert self.tokens.ndim == 3, "PrefixGroup tokens must be (batch, n_tokens, d)"
-        assert self.mask.ndim == 2, "PrefixGroup mask must be (batch, n_tokens)"
+        assert (
+            len(self.tokens.shape) == 3
+        ), "PrefixGroup tokens must be (batch, n_tokens, d)"
+        assert len(self.mask.shape) == 2, "PrefixGroup mask must be (batch, n_tokens)"
 
 
-@dataclass
-class TimestepGroup:
+@flax.struct.dataclass
+class TimestepGroup(TokenGroup):
     """A group of tokens that is repeated for each timestep. (e.g. observation tokens)"""
 
-    name: str
-    tokens: jax.Array  # with shape (batch, horizon, n_tokens, token_embedding_size)
-    mask: jax.Array  # with shape (batch, horizon, n_tokens)
-    attention_rules: Dict[str, AttentionRule]
+    name: str = flax.struct.field(pytree_node=False)
+    attention_rules: Dict[str, AttentionRule] = flax.struct.field(pytree_node=False)
 
     def __post_init__(self):
         assert (
-            self.tokens.ndim == 4
+            len(self.tokens.shape) == 4
         ), "TimestepGroup tokens must be (batch, horizon, n_tokens, d))"
         assert (
-            self.mask.ndim == 3
+            len(self.mask.shape) == 3
         ), "TimestepGroup mask must be (batch, horizon, n_tokens)"
 
 

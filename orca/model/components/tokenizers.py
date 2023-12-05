@@ -1,7 +1,7 @@
 import functools as ft
 import logging
 import re
-from typing import Optional, Sequence
+from typing import Dict, Optional, Sequence
 
 import flax.linen as nn
 import jax
@@ -9,6 +9,7 @@ import jax.numpy as jnp
 from jax.scipy.stats import norm
 
 from orca.model.components import encoders
+from orca.model.components.base import TokenGroup
 from orca.model.components.transformer import MAPHead
 
 EPS = 1e-6
@@ -16,16 +17,23 @@ from dataclasses import dataclass
 import os
 
 
-@dataclass
-class TokenizerOutput:
-    tokens: jax.Array
-    mask: Optional[jax.Array] = None
+def generate_proper_pad_mask(
+    tokens: jax.Array, pad_mask_dict: Dict[str, jax.Array], keys: Sequence[str]
+) -> jax.Array:
+    if pad_mask_dict is None:
+        logging.warning("No pad_mask_dict found. Nothing will be masked.")
+        return jnp.ones(tokens.shape[:-1])
+    if not all([key in pad_mask_dict for key in keys]):
+        logging.warning(
+            f"pad_mask_dict missing keys {set(keys) - set(pad_mask_dict.keys())}."
+            "Nothing will be masked."
+        )
+        return jnp.ones(tokens.shape[:-1])
 
-    def __post_init__(self):
-        if self.mask is None:
-            self.mask = jnp.ones(self.tokens.shape[:-1])
-        else:
-            assert self.mask.ndim == self.tokens.ndim - 1
+    pad_mask = jnp.stack([pad_mask_dict[key] for key in keys], axis=-1)
+    pad_mask = jnp.any(pad_mask, axis=-1)
+    pad_mask = jnp.broadcast_to(pad_mask[..., None], tokens.shape[:-1])
+    return pad_mask
 
 
 class TokenLearner(nn.Module):
@@ -103,7 +111,7 @@ class ImageTokenizer(nn.Module):
                 f"No image inputs matching {self.obs_stack_keys} were found."
                 "Skipping tokenizer entirely."
             )
-            assert self.proper_pad_mask, "Cannot skip unless using proper pad mask."
+            assert self.proper_pad_mask, "Cannot skip unless using proper_pad_mask."
             return None
 
         # stack all spatial observation and task inputs
@@ -140,16 +148,16 @@ class ImageTokenizer(nn.Module):
                 image_tokens, train=train
             )
 
-        image_keys = regex_filter(self.obs_stack_keys, sorted(observations.keys()))
-        pad_mask = jnp.stack(
-            [observations["pad_mask_dict"][key] for key in image_keys], axis=-1
-        )
-        pad_mask = jnp.any(pad_mask, axis=-1)  # (batch_size, horizon)
-        pad_mask = jnp.broadcast_to(pad_mask[:, :, None], image_tokens.shape[:-1])
         if self.proper_pad_mask:
-            print("ENABLE_PAD_MASK")
-            return TokenizerOutput(image_tokens, mask=pad_mask)
-        return TokenizerOutput(image_tokens)
+            print("ENABLE_PAD_MASK!!!")
+            pad_mask = generate_proper_pad_mask(
+                image_tokens,
+                observations.get("pad_mask_dict", None),
+                regex_filter(self.obs_stack_keys, sorted(observations.keys())),
+            )
+        else:
+            pad_mask = jnp.ones(image_tokens.shape[:-1])
+        return TokenGroup(image_tokens, pad_mask)
 
 
 class LanguageTokenizer(nn.Module):
@@ -204,18 +212,17 @@ class LanguageTokenizer(nn.Module):
 
         # TODO: incorporate padding info from language tokens here too
         if self.proper_pad_mask:
-            print("ENABLE_PAD_MASK")
+            print("ENABLE_PAD_MASK!!!")
 
-            if "language_instruction" not in tasks["pad_mask_dict"]:
-                return TokenizerOutput(tokens)
-
-            pad_mask = jnp.broadcast_to(
-                tasks["pad_mask_dict"]["language_instruction"][:, None],
-                tokens.shape[:-1],
+            pad_mask = generate_proper_pad_mask(
+                tokens,
+                tasks.get("pad_mask_dict", None),
+                ("language_instruction",),
             )
-            return TokenizerOutput(tokens, mask=pad_mask)
+        else:
+            pad_mask = jnp.ones(tokens.shape[:-1])
 
-        return TokenizerOutput(tokens)
+        return TokenGroup(tokens, pad_mask)
 
 
 class BinTokenizer(nn.Module):
@@ -297,7 +304,8 @@ class LowdimObsTokenizer(BinTokenizer):
             tokens = jax.nn.one_hot(tokenized_inputs, self.n_bins)
         else:
             tokens = tokenizer_inputs[..., None]
-        return TokenizerOutput(tokens)
+        mask = jnp.ones(tokens.shape[:-1])
+        return TokenGroup(tokens, mask)
 
 
 TOKENIZERS = {

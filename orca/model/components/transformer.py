@@ -2,9 +2,11 @@
 from typing import Callable, Optional
 
 import flax.linen as nn
+import jax
 import jax.numpy as jnp
 
-from orca.utils.typing import Array, Dtype, PRNGKey, Shape
+from orca.model.components.base import TokenGroup
+from orca.utils.typing import Array, Dtype, PRNGKey, Shape, Union
 
 
 class AddPositionEmbs(nn.Module):
@@ -82,7 +84,12 @@ class MAPHead(nn.Module):
     num_readouts: int = 1
 
     @nn.compact
-    def __call__(self, x, train=True):
+    def __call__(self, x: Union[jax.Array, TokenGroup], train=True):
+        if isinstance(x, TokenGroup):
+            x, mask = x.tokens, x.mask
+        else:
+            mask = None
+
         *batch_dims, l, d = x.shape
         x = x.reshape(-1, l, d)
         batch_size = x.shape[0]
@@ -94,9 +101,16 @@ class MAPHead(nn.Module):
             x.dtype,
         )
         probe = jnp.tile(probe, [batch_size, 1, 1])
+
+        if mask is not None:
+            mask = mask.reshape(-1, l)
+            mask = jnp.broadcast_to(
+                mask[:, None, None, :], (batch_size, 1, self.num_readouts, l)
+            )
+
         out = nn.MultiHeadDotProductAttention(
             num_heads=self.num_heads, kernel_init=nn.initializers.xavier_uniform()
-        )(probe, x)
+        )(probe, x, mask=mask)
 
         # TODO: dropout on head?
         y = nn.LayerNorm()(out)

@@ -38,7 +38,8 @@ def create_model_def(
     """
     if len(kwargs) > 0:
         logging.warn(f"Extra kwargs passed into create_model_def: {kwargs}")
-
+    if proper_pad_mask:
+        logging.warn("Using proper_pad_mask=True")
     observation_tokenizer_defs = {
         k: TOKENIZERS.get(info["cls_name"])(
             **info["kwargs"], proper_pad_mask=proper_pad_mask
