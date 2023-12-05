@@ -7,10 +7,10 @@ import flax
 import jax
 import jax.numpy as jnp
 from ml_collections import ConfigDict
-import optax
 import orbax.checkpoint
 import tensorflow as tf
 
+from orca.data.utils.text_processing import text_processors
 from orca.model import create_model_def
 from orca.model.orca_model import OrcaModel
 from orca.utils.train_utils import check_config_diff, create_train_state, merge_params
@@ -80,10 +80,12 @@ class PretrainedModel:
             tasks.update(goals)
         else:
             batch_size = len(texts)
-            tasks = {
-                k: jnp.zeros((batch_size, *v.shape[1:]), dtype=v.dtype)
-                for k, v in self.example_batch["tasks"].items()
-            }
+        tasks = jax.tree_map(
+            lambda example: jnp.zeros(
+                (batch_size, *example.shape[1:]), dtype=example.dtype
+            ),
+            self.example_batch["tasks"],
+        )
 
         if texts is None:
             batch_size = jax.tree_util.tree_leaves(goals)[0].shape[0]
@@ -273,12 +275,17 @@ class PretrainedModel:
             model_def = orig_model_def
             params = orig_params
 
+        if not text_processor and config["text_processor"] is not None:
+            text_processor = text_processors[config["text_processor"]](
+                **config.get("text_processor_kwargs", {})
+            )
+
         return cls(
             model_def=model_def,
             params=params,
             text_processor=text_processor,
             example_batch=example_batch,
-            config=flax.core.freeze(config.to_dict()),
+            config=config.to_dict(),
         )
 
 

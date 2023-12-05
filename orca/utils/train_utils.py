@@ -50,7 +50,7 @@ def create_train_state(
 
     return TrainState.create(
         apply_fn=model_def.apply,
-        params=params.unfreeze(),
+        params=params,
         tx=tx,
         rng=state_rng,
     )
@@ -166,6 +166,8 @@ def batched_apply(fn, batch_size):
 
 
 def filter_eval_datasets(dataset_kwargs_list, sample_weights, eval_datasets=None):
+    if sample_weights is None:
+        sample_weights = [1.0] * len(dataset_kwargs_list)
     if eval_datasets is None:
         return dataset_kwargs_list, sample_weights
     else:
@@ -346,4 +348,4 @@ def merge_params(target_params, pretrained_params):
         flat_target_params, {k: flat_pretrained_params[k] for k in keys_to_update}
     )
     target_params = flax.traverse_util.unflatten_dict(flat_target_params)
-    return flax.core.freeze(target_params)
+    return target_params

@@ -17,31 +17,29 @@ def get_config():
                 warmup_steps=1,
             ),
         ),
-        batch_size=64,
-        shuffle_buffer_size=1000,
         num_val_batches=1,
         log_interval=1,
         eval_interval=2,
+        viz_interval=2,
         eval_datasets=None,
         trajs_for_metrics=1,
         trajs_for_viz=1,
         dataset_kwargs={
-            "data_kwargs_list": [
+            "dataset_kwargs_list": [
                 {
                     "name": "bridge_dataset",
                     "data_dir": "./tests/debug_dataset",
                     "image_obs_keys": ["image_0"],
                     "state_obs_keys": ["state"],
                 },
-            ],  # common_kwargs override specific kwargs from data_kwargs_list
-            "common_kwargs": dict(
-                ram_budget=1,  # limit RAM per dataset
-                num_parallel_reads=1,  # for reading from GCS
-                num_parallel_calls=1,  # for the less CPU-intensive ops in initial dataset construction
-            ),
-            "transform_kwargs": dict(
-                num_parallel_calls=1,  # for the most CPU-intensive ops (decoding, resizing, augmenting)
-            ),
+            ],
+            "traj_transform_threads": 1,  # shared between all datasets
+            "traj_read_threads": 1,  # shared between all datasets
+            "frame_transform_threads": 4,  # not shared between datasets
+            "batch_size": 64,
+            "sample_weights": None,
+            "shuffle_buffer_size": 1000,
+            "balance_weights": True,
         },
     )
     return config

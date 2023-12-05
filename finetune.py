@@ -64,8 +64,8 @@ def main(_):
         ORCA Finetuning Script
         ======================
         Pretrained model: {FLAGS.config.pretrained_path}
-        Finetuning Dataset: {FLAGS.config.finetuning_dataset.name}
-        Data dir: {FLAGS.config.finetuning_dataset.data_dir}
+        Finetuning Dataset: {FLAGS.config.dataset_kwargs.name}
+        Data dir: {FLAGS.config.dataset_kwargs.data_dir}
         Task Modality: {FLAGS.config.modality}
         Finetuning Mode: {FLAGS.config.finetuning_mode}
 
@@ -87,6 +87,9 @@ def main(_):
     dp_sharding = NamedSharding(mesh, PartitionSpec("batch"))
     # Our model will be replicated across devices (we are only doing data parallelism, not model parallelism)
     replicated_sharding = NamedSharding(mesh, PartitionSpec())
+
+    # prevent tensorflow from using GPU memory since it's only used for data loading
+    tf.config.set_visible_devices([], "GPU")
 
     #########
     #
@@ -159,13 +162,22 @@ def main(_):
         del batch["dataset_name"]
         return batch
 
-    data_kwargs = FLAGS.config.finetuning_dataset
-    transform_kwargs = FLAGS.config.data_transforms
-
-    dataset = make_single_dataset(data_kwargs, transform_kwargs, train=True)
-    val_dataset = make_single_dataset(data_kwargs, transform_kwargs, train=False)
+    dataset = make_single_dataset(
+        FLAGS.config.dataset_kwargs,
+        FLAGS.config.traj_transform_kwargs,
+        FLAGS.config.frame_transform_kwargs,
+        train=True,
+        frame_transform_threads=FLAGS.config.frame_transform_threads,
+    )
+    val_dataset = make_single_dataset(
+        FLAGS.config.dataset_kwargs,
+        FLAGS.config.traj_transform_kwargs,
+        FLAGS.config.frame_transform_kwargs,
+        train=False,
+        frame_transform_threads=FLAGS.config.frame_transform_threads,
+    )
     visualizer = Visualizer(
-        val_dataset, text_processor=text_processor, cache_trajs=False
+        val_dataset, text_processor=text_processor, freeze_trajs=False
     )
 
     def create_iterator(dataset):
@@ -227,7 +239,7 @@ def main(_):
 
     rng = jax.random.PRNGKey(FLAGS.config.seed)
 
-    params = model.params.unfreeze()
+    params = model.params
     if FLAGS.config.optimizer.frozen_keys is None:
         FLAGS.config.optimizer.frozen_keys = model.config["optimizer"]["frozen_keys"]
 
@@ -260,7 +272,7 @@ def main(_):
         tf.io.gfile.makedirs(save_dir)
 
         # Save model config
-        new_config = ConfigDict(flax.core.unfreeze(model.config))
+        new_config = ConfigDict(model.config)
         new_config.window_size = example_batch["observation"]["pad_mask"].shape[1]
 
         fname = tf.io.gfile.join(save_dir, "config.json")
