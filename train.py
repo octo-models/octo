@@ -419,7 +419,11 @@ def main(_):
             )
             new_pad_dict = flax.core.copy(
                 tasks["pad_mask_dict"],
-                {"language_instruction": jnp.zeros_like(new_language)},
+                {
+                    "language_instruction": jnp.zeros_like(
+                        tasks["pad_mask_dict"]["language_instruction"]
+                    )
+                },
             )
             tasks = flax.core.copy(
                 tasks,
