@@ -361,7 +361,7 @@ def main(_):
         rollout_callback = RolloutVisualizationCallback(
             text_processor=text_processor,
             history_length=FLAGS.config["window_size"],
-            action_chunk=FLAGS.config["model"]["heads"]["action"]["kwargs"].get(
+            model_pred_horizon=FLAGS.config["model"]["heads"]["action"]["kwargs"].get(
                 "pred_horizon", 1
             ),
             **FLAGS.config.rollout_kwargs.to_dict(),

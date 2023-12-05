@@ -310,7 +310,7 @@ class RolloutVisualizationCallback(Callback):
     visualizer_kwargs_list: Sequence[Mapping[str, Any]]
     text_processor: TextProcessor
     trajs_for_rollouts: int
-    action_chunk: int
+    model_pred_horizon: int
     history_length: int
     modes_to_evaluate: str = ("text_conditioned", "image_conditioned")
 
@@ -320,8 +320,10 @@ class RolloutVisualizationCallback(Callback):
         self.rollout_visualizers = [
             RolloutVisualizer(
                 text_processor=self.text_processor,
-                action_chunk=self.action_chunk,
                 history_length=self.history_length,
+                action_chunk=self.model_pred_horizon
+                if "pred_horizon" not in kwargs
+                else kwargs["pred_horizon"],
                 **kwargs,
             )
             for kwargs in self.visualizer_kwargs_list
