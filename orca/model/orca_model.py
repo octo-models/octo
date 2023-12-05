@@ -33,9 +33,9 @@ class OrcaTransformer(nn.Module):
 
     The transformer is a blockwise-causal transformer, where each timestep only attends to the same or previous timesteps.
 
-    When called, the module requests a set of readouts, and performs a forward pass of the transformer on the following sequence:
+    The model performs a forward pass of the transformer on the following sequence:
 
-        [
+    [
         <task tokens>,
         <observation ts0 tokens>, <readout1 ts0 tokens>, <readout2 ts0 tokens>, ...
         <observation ts1 tokens>, <readout1 ts1 tokens>, <readout2 ts1 tokens>, ...
@@ -43,23 +43,26 @@ class OrcaTransformer(nn.Module):
     ]
 
     The observation tokens attend to the task prefix, and to all observation tokens in the same or previous timesteps.
-    Readouts attend to everything observation tokens do, but are not attended to by observation or task tokens. All
-    tokens within the same group and same timestep (e.g. "observation ts0 tokens") fully attend to each other.
+    Readouts provide a mechanism for "reading out" the information in the transformer. They can attend to the task prefix,
+    and causally to all previous observation tokens, but
+        - Readouts cannot attend to other readouts
+        - Observation and task tokens cannot attend to readouts
 
     By this design, each readout does not influence the computation happening in the task or observation tokens,
-    and each readout is **independent of one another**. This allows us to hot-swap in different
+    and each readout is **independent of one another**. This flexible design allows us to hot-swap in different
     readouts at any time (e.g. we can run with the action readout or the value readout or both at the same time).
 
-
     Args:
-        observations_tokenizers (Sequence[nn.Module]): List of flax modules for tokenizing the observations.
+        observations_tokenizers (Dict[str, nn.Module]): Dictionary of flax modules for tokenizing the observations.
             The output of each tokenizer is concatenated to form the observation tokens.
-        task_tokenizers (Sequence[nn.Module]): List of flax modules for tokenizing the task.
+        task_tokenizers (Dict[str, nn.Module]): Dictionary of flax modules for tokenizing the task.
             The output of each tokenizer is concatenated to form the task token prefix.
-        readouts (Dict[str, int]): Dictionary of {readout_name: n_tokens_for_readout}
-        transformer_kwargs (Dict): Dictionary of kwargs to forward to BlockTransformer.
-        token_embedding_size (int): Dimension of the token embeddings (default: 512)
-        max_horizon (int): The maximum number of timesteps that the transformer can be run with.
+        readouts (Dict[str, int]): Dictionary of {readout_name: n_tokens_for_readout}.
+        transformer_kwargs (Dict): Dictionary of kwargs to forward to the Transformer.
+        token_embedding_size (int): Dimension of the token embeddings
+        max_horizon (int): The maximum number of timesteps that the transformer can be run with. Note that while the
+            transformer can be run with any horizon <= max_horizon, the model will only generate sane outputs for
+            horizon lengths smaller or equal to the pre-training horizon.
     """
 
     observation_tokenizers: Dict[str, nn.Module]
@@ -100,10 +103,13 @@ class OrcaTransformer(nn.Module):
         if readouts is None:
             readouts = list(self.readouts.keys())
 
+        #
         # Check that all inputs are valid
+        #
+
         assert set(readouts).issubset(
             set(self.readouts.keys())
-        ), "readouts must be a subset of those specified in the model config"
+        ), "readouts must be specified in the model config"
 
         batch_size, horizon = jax.tree_util.tree_leaves(observations)[0].shape[:2]
         assert horizon <= self.max_horizon, "horizon must be <= max_horizon"
@@ -111,20 +117,26 @@ class OrcaTransformer(nn.Module):
             jax.tree_map(lambda x: x.shape[1] == horizon, observations)
         ), "observations must have the same horizon"
 
+        #
         # Create inputs for the transformer
+        #
+
         all_prefix_groups = []
         all_timestep_groups = []
 
-        # Tasks attend to all other tasks
+        # Tasks attend to all other tasks, but not to observations or readouts
         task_attention_rules = {"task_*": AttentionRule.CAUSAL}
 
-        # Observations attend to all tasks and previous observations causally
+        # Observations attend to all tasks and previous observations causally, but not to readouts
         observation_attention_rules = {
             "task_*": AttentionRule.CAUSAL,
             "obs_*": AttentionRule.CAUSAL,
         }
 
+        #
         # First, add the task tokens
+        #
+
         for name, tok in self.task_tokenizers.items():
             # Receive inputs from tokenizer and cast to embedding size
             group_name = f"task_{name}"
@@ -151,7 +163,10 @@ class OrcaTransformer(nn.Module):
                 )
             )
 
+        #
         # Next, add the observation tokens
+        #
+
         for name, tok in self.observation_tokenizers.items():
             group_name = f"obs_{name}"
             # Receive inputs from tokenizer and cast to embedding size
@@ -179,11 +194,13 @@ class OrcaTransformer(nn.Module):
                     attention_rules=observation_attention_rules,
                 )
             )
-
+        #
         # Finally, add the readout tokens
+        #
+
         for readout_name in readouts:
             group_name = f"readout_{readout_name}"
-            # Readouts do not correspond to any inputs, so we just create a bunch of zeros
+            # Readouts do not correspond to any inputs, just positional embeddings
             n_tokens_for_readout = self.readouts[readout_name]
             readout_tokens = jnp.zeros(
                 (batch_size, horizon, n_tokens_for_readout, self.token_embedding_size)
@@ -198,7 +215,7 @@ class OrcaTransformer(nn.Module):
                 "task_*": AttentionRule.CAUSAL,
                 "obs_*": AttentionRule.CAUSAL,
                 group_name: AttentionRule.CAUSAL,
-            }  # Attend to tasks, all previous observations, and *only your own readout*
+            }  # Attend to tasks, all previous observations, and *only it's own own readout*
 
             all_timestep_groups.append(
                 TimestepGroup(
