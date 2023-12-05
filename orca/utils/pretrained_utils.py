@@ -7,7 +7,6 @@ import flax
 import jax
 import jax.numpy as jnp
 from ml_collections import ConfigDict
-import optax
 import orbax.checkpoint
 import tensorflow as tf
 
@@ -286,7 +285,7 @@ class PretrainedModel:
             params=params,
             text_processor=text_processor,
             example_batch=example_batch,
-            config=flax.core.freeze(config.to_dict()),
+            config=config.to_dict(),
         )
 
 

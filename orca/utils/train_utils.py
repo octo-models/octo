@@ -50,7 +50,7 @@ def create_train_state(
 
     return TrainState.create(
         apply_fn=model_def.apply,
-        params=params.unfreeze(),
+        params=params,
         tx=tx,
         rng=state_rng,
     )
@@ -348,7 +348,7 @@ def merge_params(target_params, pretrained_params):
         flat_target_params, {k: flat_pretrained_params[k] for k in keys_to_update}
     )
     target_params = flax.traverse_util.unflatten_dict(flat_target_params)
-    return flax.core.freeze(target_params)
+    return target_params
 
 
 def process_text(batch: Batch, text_processor: Optional[TextProcessor]):
