@@ -8,9 +8,10 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
+from orca.model.components.base import TokenGroup
 from orca.model.components.tokenizers import BinTokenizer
 from orca.model.components.transformer import MAPHead
-from orca.utils.typing import Optional, PRNGKey
+from orca.utils.typing import Dict, PRNGKey
 
 
 def masked_mean(x, mask):
@@ -54,39 +55,37 @@ class BasicActionHead(nn.Module):
             else self.normalization_type,
         )
 
-    def __call__(self, embeddings, train=True) -> Any:
+    def __call__(self, transformer_outputs: Dict[str, TokenGroup], train=True) -> Any:
         """
         Args:
-            embeddings: jnp.ndarray w/ shape (batch_size, horizon, n_tokens, embedding_size)
+            transformer_outputs: Dict[str, TokenGroup] the output of an OrcaTransformer
         """
-        if isinstance(embeddings, dict):
-            assert (
-                self.readout_key is not None
-            ), "Must specify readout_key if passing in a dictionary of OrcaTransformer embeddings"
-            embeddings = embeddings[self.readout_key]
-        batch_size, horizon, n_tokens, embedding_size = embeddings.shape
+        assert self.readout_key is not None
+        token_group = transformer_outputs[self.readout_key]
+        assert token_group.tokens.ndim == 4, (
+            f"Expected token_group.tokens to have shape (batch_size, horizon, num_tokens, embedding_size), "
+            f"but got shape {token_group.tokens.shape}"
+        )
         if self.use_map:
-            embeddings = self.map_head(embeddings, train=train)[:, :, 0]
+            embeddings = self.map_head(token_group, train=train)[:, :, 0]
         else:
-            embeddings = embeddings.mean(axis=-2)
+            embeddings = token_group.tokens.mean(axis=-2)
         # Now, embeddings is (batch_size, horizon, embedding_size)
 
-        logits = self.vocab_proj(
-            embeddings
-        )  # (batch_size, horizon, vocab_size * pred_horizon * action_dim)
-        logits = jnp.reshape(
+        # (batch_size, horizon,  pred_horizon * action_dim * vocab_size)
+        logits = self.vocab_proj(embeddings)
+        logits = rearrange(
             logits,
-            (
-                batch_size,
-                horizon,
-                self.pred_horizon,
-                self.action_dim,
-                self.vocab_size,
-            ),
+            "b h (p a d) -> b h p a d",
+            p=self.pred_horizon,
+            a=self.action_dim,
+            d=self.vocab_size,
         )
         return logits
 
-    def loss(self, embeddings, actions, pad_mask, train=True):
+    def loss(
+        self, transformer_outputs: Dict[str, TokenGroup], actions, pad_mask, train=True
+    ):
         """
         Args:
             embeddings: jnp.ndarray w/ shape (batch_size, horizon, num_tokens, embedding_size)
@@ -102,7 +101,7 @@ class BasicActionHead(nn.Module):
         # unfolding the pred_horizon dim, and projecting to the vocab size
 
         # (batch, horizon, pred_horizon, action_dim, token_embedding_size)
-        action_logits = self.__call__(embeddings, train=train)
+        action_logits = self.__call__(transformer_outputs, train=train)
 
         horizon = action_logits.shape[1]
         assert (
@@ -156,7 +155,7 @@ class BasicActionHead(nn.Module):
 
     def predict_action(
         self,
-        embeddings,
+        transformer_outputs: Dict[str, TokenGroup],
         train: bool = True,
         argmax: bool = False,
         sample_shape: tuple = (),
@@ -167,7 +166,7 @@ class BasicActionHead(nn.Module):
         # unfolding the pred_horizon dim, and projecting to the vocab size
         # (batch, tokens_per_action, token_embedding_size)
 
-        action_logits = self.__call__(embeddings, train=train)
+        action_logits = self.__call__(transformer_outputs, train=train)
         action_logits = action_logits[:, -1]
 
         if argmax:
@@ -221,24 +220,24 @@ class TokenPerDimActionHead(BasicActionHead):
             else self.normalization_type,
         )
 
-    def __call__(self, embeddings, train=True) -> Any:
+    def __call__(self, transformer_outputs: Dict[str, TokenGroup], train=True) -> Any:
         """
         Args:
             embeddings: jnp.ndarray w/ shape (batch_size, horizon, n_tokens, embedding_size)
         """
-        if isinstance(embeddings, dict):
-            assert (
-                self.readout_key is not None
-            ), "Must specify readout_key if passing in a dictionary of OrcaTransformer embeddings"
-            embeddings = embeddings[self.readout_key]
-
-        batch_size, horizon, n_tokens, embedding_size = embeddings.shape
+        assert self.readout_key is not None
+        token_group = transformer_outputs[self.readout_key]
+        assert token_group.tokens.ndim == 4, (
+            f"Expected token_group.tokens to have shape (batch_size, horizon, num_tokens, embedding_size), "
+            f"but got shape {token_group.tokens.shape}"
+        )
         if self.use_map:
-            embeddings = self.map_head(embeddings, train=train)
+            embeddings = self.map_head(token_group, train=train)
         else:
-            assert n_tokens == self.pred_horizon * self.action_dim
+            embeddings = token_group.tokens
+            assert embeddings.shape[-2] == self.pred_horizon * self.action_dim
 
-        # embeddings is now (batch_size, horizon, pred_horizon * action_dim, vocab_size)
+        # Now, embeddings is (batch_size, horizon, pred_horizon * action_dim, embedding_size)
         logits = self.vocab_proj(embeddings)
         logits = rearrange(
             logits, "b h (p a) d -> b h p a d", p=self.pred_horizon, a=self.action_dim
@@ -265,20 +264,22 @@ class MSEActionHead(BasicActionHead):
             self.map_head = MAPHead()
         self.mean_proj = nn.Dense(self.pred_horizon * self.action_dim)
 
-    def __call__(self, embeddings, train=True) -> Any:
+    def __call__(self, transformer_outputs: Dict[str, TokenGroup], train=True) -> Any:
         """
         Args:
             embeddings: jnp.ndarray w/ shape (batch_size, horizon, n_tokens, embedding_size)
         """
-        if isinstance(embeddings, dict):
-            assert (
-                self.readout_key is not None
-            ), "Must specify readout_key if passing in a dictionary of OrcaTransformer embeddings"
-            embeddings = embeddings[self.readout_key]
+        assert self.readout_key is not None
+        token_group = transformer_outputs[self.readout_key]
+        assert token_group.tokens.ndim == 4, (
+            f"Expected token_group.tokens to have shape (batch_size, horizon, num_tokens, embedding_size), "
+            f"but got shape {token_group.tokens.shape}"
+        )
         if self.use_map:
-            embeddings = self.map_head(embeddings, train=train)[:, :, 0]
+            embeddings = self.map_head(token_group, train=train)[:, :, 0]
         else:
-            embeddings = embeddings.mean(axis=-2)
+            embeddings = token_group.tokens.mean(axis=-2)
+        # Now, embeddings is (batch_size, horizon, embedding_size)
         mean = self.mean_proj(embeddings)
         mean = rearrange(
             mean, "b h (p a) -> b h p a", p=self.pred_horizon, a=self.action_dim
@@ -286,7 +287,9 @@ class MSEActionHead(BasicActionHead):
         mean = jnp.tanh(mean / self.max_action) * self.max_action
         return mean
 
-    def loss(self, embeddings, actions, pad_mask, train=True):
+    def loss(
+        self, transformer_outputs: Dict[str, TokenGroup], actions, pad_mask, train=True
+    ):
         """
         Trains the mean head with MSE and the logstd head with KL divergence.
 
@@ -300,7 +303,7 @@ class MSEActionHead(BasicActionHead):
             metrics: dict
         """
         # (batch, horizon, pred_horizon, action_dim)
-        mean = self.__call__(embeddings, train=train)
+        mean = self.__call__(transformer_outputs, train=train)
 
         horizon = mean.shape[1]
         assert (
@@ -332,7 +335,7 @@ class MSEActionHead(BasicActionHead):
 
     def predict_action(
         self,
-        embeddings,
+        transformer_outputs: Dict[str, TokenGroup],
         train: bool = True,
         argmax: bool = False,
         sample_shape: tuple = (),
@@ -342,7 +345,7 @@ class MSEActionHead(BasicActionHead):
         # get the logits for the last action by taking the action tokens of the last timestep,
         # unfolding the pred_horizon dim, and projecting to the vocab size
         # (batch, tokens_per_action, token_embedding_size)
-        mean = self.__call__(embeddings, train=train)
+        mean = self.__call__(transformer_outputs, train=train)
         mean = mean[:, -1]
         logstd = jnp.full_like(mean, -10.0)
 

@@ -411,6 +411,7 @@ def main(_):
         return new_state, info
 
     def remove_text(tasks):
+        print(jax.tree_map(lambda x: x.shape, tasks))
         if text_processor is not None:
             new_language = jax.tree_map(
                 lambda x, example: jnp.broadcast_to(example[None], x.shape),
