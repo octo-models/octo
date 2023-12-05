@@ -98,6 +98,14 @@ class ImageTokenizer(nn.Module):
                 extracted_outputs.append(inputs[key])
             return jnp.concatenate(extracted_outputs, axis=-1)
 
+        if len(regex_filter(self.obs_stack_keys, sorted(observations.keys()))) == 0:
+            logging.warning(
+                f"No image inputs matching {self.obs_stack_keys} were found."
+                "Skipping tokenizer entirely."
+            )
+            assert self.proper_pad_mask, "Cannot skip unless using proper pad mask."
+            return None
+
         # stack all spatial observation and task inputs
         enc_inputs = extract_inputs(
             self.obs_stack_keys, observations, check_spatial=True
@@ -107,6 +115,7 @@ class ImageTokenizer(nn.Module):
                 self.task_stack_keys, tasks, check_spatial=True
             )
             task_inputs = task_inputs[:, None].repeat(enc_inputs.shape[1], axis=1)
+            # TODO: allow somehow for task inputs to be not provided...
             enc_inputs = jnp.concatenate([enc_inputs, task_inputs], axis=-1)
         b, t, h, w, c = enc_inputs.shape
         enc_inputs = jnp.reshape(enc_inputs, (b * t, h, w, c))
@@ -173,10 +182,18 @@ class LanguageTokenizer(nn.Module):
         tasks=None,
         train: bool = True,
     ):
-        if self.encoder is not None:
+        if "language_instruction" not in tasks:
+            logging.warning("No language inputs found. Skipping tokenizer entirely.")
+            assert self.proper_pad_mask, "Cannot skip unless using proper pad mask."
+            return None
+
+        if not isinstance(tasks["language_instruction"], jax.Array):
+            assert (
+                self.encoder is not None
+            ), "Received language tokens but no encoder specified."
             tokens = self.hf_model(**tasks["language_instruction"]).last_hidden_state
         else:
-            # add a time dimension to language
+            # add a # tokens dimension to language
             if tasks["language_instruction"].ndim == 2:
                 tokens = tasks["language_instruction"][:, None, :]
             else:
@@ -185,8 +202,10 @@ class LanguageTokenizer(nn.Module):
         if not self.finetune_encoder:
             tokens = jax.lax.stop_gradient(tokens)
 
+        # TODO: incorporate padding info from language tokens here too
         if self.proper_pad_mask:
             print("ENABLE_PAD_MASK")
+
             if "language_instruction" not in tasks["pad_mask_dict"]:
                 return TokenizerOutput(tokens)
 
@@ -253,9 +272,18 @@ class LowdimObsTokenizer(BinTokenizer):
 
     obs_keys: Sequence[str] = tuple()
     discretize: bool = False
+    proper_pad_mask: bool = False
 
     def __call__(self, observations, *unused_args, **unused_kwargs):
         assert self.obs_keys, "Need to specify observation keys to tokenize."
+        if len(regex_filter(self.obs_keys, sorted(observations.keys()))) == 0:
+            logging.warning(
+                f"No observation inputs matching {self.obs_keys} were found."
+                "Skipping tokenizer entirely."
+            )
+            assert self.proper_pad_mask, "Cannot skip unless using proper pad mask."
+            return None
+
         tokenizer_inputs = []
         for o_key in self.obs_keys:
             for key in filter(re.compile(o_key).match, sorted(observations.keys())):

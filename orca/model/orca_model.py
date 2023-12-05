@@ -1,4 +1,6 @@
 # Written by Dibya
+import logging
+
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
@@ -130,6 +132,10 @@ class OrcaTransformer(nn.Module):
         for name, tok in self.task_tokenizers.items():
             # Receive inputs from tokenizer and cast to embedding size
             tokenizer_output = tok(observations, tasks, train=train)
+            if tokenizer_output is None:
+                logging.warning(f"Skipping task tokenizer: {name}")
+                continue
+
             task_tokens = nn.Dense(self.token_embedding_size)(tokenizer_output.tokens)
 
             # task_tokens shape is (batch, n_tokens, token_embedding_size)
@@ -153,6 +159,10 @@ class OrcaTransformer(nn.Module):
         for name, tok in self.observation_tokenizers.items():
             # Receive inputs from tokenizer and cast to embedding size
             tokenizer_output = tok(observations, tasks, train=train)
+            if tokenizer_output is None:
+                logging.warning(f"Skipping observation tokenizer: {name}")
+                continue
+
             obs_tokens = nn.Dense(self.token_embedding_size)(tokenizer_output.tokens)
             # obs_tokens shape is (batch, horizon, n_tokens, token_embedding_size)
 
