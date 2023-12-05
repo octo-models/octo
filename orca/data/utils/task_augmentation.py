@@ -75,11 +75,6 @@ def delete_task_conditioning(
     :param switch_key_groups_probs: A list of tuples, where each tuple contains a list of patterns and their probability.
     :return: A dictionary with keys zeroed out according to the specified probabilities.
     """
-    traj_len = tf.shape(traj["action"])[0]
-    traj["tasks"]["pad_mask_dict"] = {
-        k: tf.ones([traj_len], dtype=tf.bool) for k in traj["tasks"].keys()
-    }
-
     if tf.math.reduce_all(traj["tasks"]["language_instruction"] == ""):
         return traj
 
@@ -116,7 +111,7 @@ def delete_task_conditioning(
             )
             new_tasks["pad_mask_dict"][key] = tf.where(
                 i == delete_group_idx,
-                tf.zeros([traj_len], dtype=tf.bool),
+                tf.zeros_like(tasks["pad_mask_dict"][key]),
                 new_tasks["pad_mask_dict"][key],
             )
 

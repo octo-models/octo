@@ -106,13 +106,7 @@ def split_tokens(ary, n_tokens_per_group, axis):
 
 class BlockTransformer(nn.Module):
     # Forwarded to Transformer
-    num_layers: int = 4
-    mlp_dim: int = 1024
-    num_attention_heads: int = 8
-    dropout_rate: float = 0.1
-    attention_dropout_rate: float = 0.1
-    add_position_embedding: bool = False
-
+    transformer_kwargs: Dict
     # Enforce that timestep causal structure is not broken (future timesteps can't attend to past timesteps)
     enforce_causal: bool = True
 
@@ -157,53 +151,13 @@ class BlockTransformer(nn.Module):
         input_tokens = self.assemble_input_tokens(prefix_groups, timestep_groups)
 
         # Run transformer
-        transformer = Transformer(
-            num_layers=self.num_layers,
-            mlp_dim=self.mlp_dim,
-            num_heads=self.num_attention_heads,
-            dropout_rate=self.dropout_rate,
-            attention_dropout_rate=self.attention_dropout_rate,
-            add_position_embedding=self.add_position_embedding,
-        )
+        transformer = Transformer(**self.transformer_kwargs)
         output = transformer(input_tokens, attention_mask, train=train)
 
         # Split output into prefix and timestep groups
-
-        tokens_per_prefix_group = [group.tokens.shape[1] for group in prefix_groups]
-        n_prefix_tokens = sum(tokens_per_prefix_group)
-
-        prefix_embeddings, timestep_embeddings = jnp.split(
-            output, [n_prefix_tokens], axis=1
+        all_prefix_outputs, all_timestep_outputs = self.split_output_tokens(
+            output, prefix_groups, timestep_groups
         )
-
-        # Process prefix group outputs
-        if len(prefix_groups) > 0:
-            prefix_embeddings_split = split_tokens(
-                prefix_embeddings, tokens_per_prefix_group, axis=1
-            )
-            all_prefix_outputs = [
-                replace(group, tokens=embeddings)
-                for group, embeddings in zip(prefix_groups, prefix_embeddings_split)
-            ]
-        else:
-            all_prefix_outputs = []
-
-        # Process timestep group outputs
-        timestep_embeddings = einops.rearrange(
-            timestep_embeddings,
-            "batch (horizon n_tokens) d -> batch horizon n_tokens d",
-            horizon=horizon,
-        )
-
-        tokens_per_timestep_group = [group.tokens.shape[2] for group in timestep_groups]
-        timestep_embeddings_split = split_tokens(
-            timestep_embeddings, tokens_per_timestep_group, axis=2
-        )
-
-        all_timestep_outputs = [
-            replace(group, tokens=embeddings)
-            for group, embeddings in zip(timestep_groups, timestep_embeddings_split)
-        ]
         return all_prefix_outputs, all_timestep_outputs
 
     def assemble_input_tokens(
@@ -242,6 +196,50 @@ class BlockTransformer(nn.Module):
         )
         tokens = jnp.concatenate([all_prefix_tokens, all_timestep_tokens], axis=1)
         return tokens
+
+    def split_output_tokens(
+        self,
+        output_tokens: jnp.ndarray,
+        prefix_groups: Sequence[PrefixGroup],
+        timestep_groups: Sequence[TimestepGroup],
+    ):
+        horizon = timestep_groups[0].tokens.shape[1]
+        tokens_per_prefix_group = [group.tokens.shape[1] for group in prefix_groups]
+        n_prefix_tokens = sum(tokens_per_prefix_group)
+
+        prefix_embeddings, timestep_embeddings = jnp.split(
+            output_tokens, [n_prefix_tokens], axis=1
+        )
+
+        # Process prefix group outputs
+        if len(prefix_groups) > 0:
+            prefix_embeddings_split = split_tokens(
+                prefix_embeddings, tokens_per_prefix_group, axis=1
+            )
+            all_prefix_outputs = [
+                replace(group, tokens=embeddings)
+                for group, embeddings in zip(prefix_groups, prefix_embeddings_split)
+            ]
+        else:
+            all_prefix_outputs = []
+
+        # Process timestep group outputs
+        timestep_embeddings = einops.rearrange(
+            timestep_embeddings,
+            "batch (horizon n_tokens) d -> batch horizon n_tokens d",
+            horizon=horizon,
+        )
+
+        tokens_per_timestep_group = [group.tokens.shape[2] for group in timestep_groups]
+        timestep_embeddings_split = split_tokens(
+            timestep_embeddings, tokens_per_timestep_group, axis=2
+        )
+
+        all_timestep_outputs = [
+            replace(group, tokens=embeddings)
+            for group, embeddings in zip(timestep_groups, timestep_embeddings_split)
+        ]
+        return all_prefix_outputs, all_timestep_outputs
 
     def generate_attention_mask(
         self,
@@ -303,7 +301,6 @@ class BlockTransformer(nn.Module):
 
         for i in range(total_tokens):  # Token attending
             for j in range(total_tokens):  # Token being attended to
-                print(i, j)
                 metadata_i = get_token_metadata(i)
                 metadata_j = get_token_metadata(j)
                 mask = int(metadata_i.should_attend_to(metadata_j))
@@ -346,7 +343,7 @@ class BlockTransformer(nn.Module):
             pad_mask[:, None, None, :],
             (
                 batch_size,
-                self.num_attention_heads,
+                1,
                 pad_mask.shape[1],
                 pad_mask.shape[1],
             ),

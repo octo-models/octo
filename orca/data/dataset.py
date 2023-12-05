@@ -86,23 +86,32 @@ def _subsample(traj, subsample_length):
     return traj
 
 
+def _add_pad_masks(traj):
+    traj_len = tf.shape(traj["action"])[0]
+    pad_masks = {}
+    for key in traj["observation"]:
+        if traj["observation"][key].dtype == tf.string:
+            pad_masks[key] = tf.strings.length(traj["observation"][key]) != 0
+        else:
+            pad_masks[key] = tf.ones([traj_len], dtype=tf.bool)
+    traj["observation"]["pad_mask_dict"] = pad_masks
+    return traj
+
+
 def _decode_images(obs: dict) -> dict:
     """Decodes images and depth images, marking empty strings as padding."""
-    pad_mask_dict = {}  # indicates which keys in the dict are padding
     for key in obs:
         if "image" in key:
             if obs[key].dtype == tf.string:
                 if tf.strings.length(obs[key]) == 0:
                     # this is a padding image
                     obs[key] = tf.zeros((1, 1, 3), dtype=tf.uint8)
-                    pad_mask_dict[key] = False
                 else:
                     obs[key] = tf.io.decode_image(
                         obs[key], expand_animations=False, dtype=tf.uint8
                     )
-                    pad_mask_dict[key] = True
             elif obs[key].dtype == tf.uint8:
-                pad_mask_dict[key] = True
+                pass
             else:
                 raise ValueError(
                     f"Unsupported image dtype: found {key} with dtype {obs[key].dtype}"
@@ -112,20 +121,18 @@ def _decode_images(obs: dict) -> dict:
                 if tf.strings.length(obs[key]) == 0:
                     # this is a padding image
                     obs[key] = tf.zeros((1, 1), dtype=tf.float32)
-                    pad_mask_dict[key] = False
                 else:
                     obs[key] = tf.io.decode_image(
                         obs[key], expand_animations=False, dtype=tf.float32
                     )[..., 0]
-                    pad_mask_dict[key] = True
             elif obs[key].dtype == tf.float32:
-                pad_mask_dict[key] = True
+                pass
             else:
                 raise ValueError(
                     f"Unsupported depth dtype: found {key} with dtype {obs[key].dtype}"
                 )
 
-    obs["pad_mask_dict"] = pad_mask_dict
+    # obs["pad_mask_dict"] = pad_mask_dict
     return obs
 
 
@@ -204,6 +211,7 @@ def apply_trajectory_transforms(
                 tf.math.abs(x["observation"]["proprio"]) <= max_proprio
             )
         )
+    dataset = dataset.map(_add_pad_masks, num_parallel_calls)
 
     # adds the "tasks" key
     if goal_relabeling_strategy is not None:
@@ -225,6 +233,14 @@ def apply_trajectory_transforms(
         dataset = dataset.map(
             partial(_subsample, subsample_length=subsample_length), num_parallel_calls
         )
+
+    def add_pad_mask_dict(traj):
+        traj["tasks"]["pad_mask_dict"]["language_instruction"] = (
+            tf.strings.length(traj["tasks"]["language_instruction"]) != 0
+        )
+        return traj
+
+    dataset = dataset.map(add_pad_mask_dict, num_parallel_calls)
 
     if train and task_augmentation_strategy is not None:
         dataset = dataset.map(
