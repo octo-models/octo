@@ -122,12 +122,13 @@ def main(_):
     else:
         # resume previous run
         wandb_run = wandb.Api().run(FLAGS.config.wandb_resume_id)
-        wandb.init(
-            project=wandb_run.project,
-            id=wandb_run.id,
-            entity=wandb_run.entity,
-            resume="must",
-        )
+        if jax.process_index() == 0:
+            wandb.init(
+                project=wandb_run.project,
+                id=wandb_run.id,
+                entity=wandb_run.entity,
+                resume="must",
+            )
         save_dir = wandb_run.config["save_dir"]
         save_callback = SaveCallback(save_dir)
         logging.info("Resuming run %s", FLAGS.config.wandb_resume_id)
