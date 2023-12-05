@@ -144,8 +144,9 @@ class BlockTransformer(nn.Module):
         assert all([group.tokens.shape[-1] == token_dim for group in prefix_groups])
         assert all([group.tokens.shape[-1] == token_dim for group in timestep_groups])
 
-        # Creates correct attention mask for transformer using group attention rules
+        # Creates correct attention mask for transformer using group attention rules and masks
         attention_mask = self.generate_attention_mask(prefix_groups, timestep_groups)
+        self.sow("intermediates", "attention_mask", attention_mask)
 
         # Assemble input tokens (batch, total_tokens, token_embedding_size)
         input_tokens = self.assemble_input_tokens(prefix_groups, timestep_groups)

@@ -184,11 +184,14 @@ class LanguageTokenizer(nn.Module):
         if not self.finetune_encoder:
             tokens = jax.lax.stop_gradient(tokens)
 
-        print(jax.tree_map(jnp.shape, tasks))
-        pad_mask = jnp.broadcast_to(
-            tasks["pad_mask_dict"]["language_instruction"][:, None], tokens.shape[:-1]
-        )
         if ENABLE_PAD_MASK:
+            if "language_instruction" not in tasks["pad_mask_dict"]:
+                return TokenizerOutput(tokens)
+
+            pad_mask = jnp.broadcast_to(
+                tasks["pad_mask_dict"]["language_instruction"][:, None],
+                tokens.shape[:-1],
+            )
             return TokenizerOutput(tokens, mask=pad_mask)
 
         return TokenizerOutput(tokens)
