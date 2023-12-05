@@ -56,11 +56,11 @@ def get_config(
             dataset_kwargs=get_dataset_config(modality, window_size),
             optimizer=dict(
                 learning_rate=dict(
+                    name="rsqrt",
                     init_value=0.0,
                     peak_value=3e-4,
                     warmup_steps=2000,
-                    decay_steps=num_steps,
-                    end_value=0.0,
+                    timescale=10000,
                 ),
                 weight_decay=0.1,
                 clip_gradient=1.0,

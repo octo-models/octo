@@ -75,6 +75,7 @@ def get_config(
         window_size=window_size,
         optimizer=dict(
             learning_rate=dict(
+                name="cosine",
                 init_value=0.0,
                 peak_value=3e-4,
                 warmup_steps=2000,
