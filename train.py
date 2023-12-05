@@ -15,12 +15,9 @@ import flax
 from flax.traverse_util import flatten_dict
 import jax
 from jax.experimental import multihost_utils
-import jax.numpy as jnp
 from jax.sharding import Mesh, NamedSharding, PartitionSpec
 from ml_collections import config_flags
-import numpy as np
 import optax
-import orbax.checkpoint
 import tqdm
 import wandb
 
@@ -32,6 +29,7 @@ from orca.model import create_model_def
 from orca.model.components.hf_weight_loaders import weights_loaders
 from orca.utils import jax_utils
 from orca.utils.train_callbacks import (
+    RolloutVisualizationCallback,
     SaveCallback,
     ValidationCallback,
     VisualizationCallback,
@@ -359,6 +357,17 @@ def main(_):
         dataset_kwargs=FLAGS.config.dataset_kwargs,
         **FLAGS.config.viz_kwargs.to_dict(),
     )
+    if "rollout_kwargs" in FLAGS.config:
+        rollout_callback = RolloutVisualizationCallback(
+            text_processor=text_processor,
+            history_length=FLAGS.config["window_size"],
+            action_chunk=FLAGS.config["model"]["heads"]["action"]["kwargs"].get(
+                "pred_horizon", 1
+            ),
+            **FLAGS.config.rollout_kwargs.to_dict(),
+        )
+    else:
+        rollout_callback = None
 
     def wandb_log(info, step):
         if jax.process_index() == 0:
@@ -385,14 +394,19 @@ def main(_):
         if (i + 1) % FLAGS.config.eval_interval == 0:
             logging.info("Evaluating...")
             with timer("eval"):
-                wandb_metrics = val_callback(train_state, i + 1)
-                wandb_log(wandb_metrics, step=i + 1)
+                val_metrics = val_callback(train_state, i + 1)
+                wandb_log(val_metrics, step=i + 1)
 
         if (i + 1) % FLAGS.config.viz_interval == 0:
             logging.info("Visualizing...")
             with timer("visualize"):
-                wandb_metrics = viz_callback(train_state, i + 1)
-                wandb_log(wandb_metrics, step=i + 1)
+                viz_metrics = viz_callback(train_state, i + 1)
+                wandb_log(viz_metrics, step=i + 1)
+
+            if rollout_callback is not None:
+                with timer("rollout"):
+                    rollout_metrics = rollout_callback(train_state, i + 1)
+                    wandb_log(rollout_metrics, step=i + 1)
 
         timer.tock("total")
         if (i + 1) % FLAGS.config.log_interval == 0:

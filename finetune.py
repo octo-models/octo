@@ -7,10 +7,8 @@ from absl import app, flags, logging
 import flax
 from flax.traverse_util import flatten_dict
 import jax
-import jax.numpy as jnp
 from jax.sharding import Mesh, NamedSharding, PartitionSpec
 from ml_collections import config_flags, ConfigDict
-import numpy as np
 import optax
 import tensorflow as tf
 import tqdm
@@ -21,6 +19,7 @@ from orca.data.utils.text_processing import text_processors
 from orca.utils.jax_utils import initialize_compilation_cache
 from orca.utils.pretrained_utils import PretrainedModel
 from orca.utils.train_callbacks import (
+    RolloutVisualizationCallback,
     SaveCallback,
     ValidationCallback,
     VisualizationCallback,
@@ -307,7 +306,7 @@ def main(_):
 
     #########
     #
-    # Train loop
+    # Build validation & visualization callbacks
     #
     #########
 
@@ -339,6 +338,30 @@ def main(_):
         modes_to_evaluate=modes_to_evaluate,
         **FLAGS.config.viz_kwargs,
     )
+
+    #########
+    #
+    # Optionally build visualizers for sim env evals
+    #
+    #########
+
+    if "rollout_kwargs" in FLAGS.config:
+        rollout_callback = RolloutVisualizationCallback(
+            text_processor=text_processor,
+            history_length=FLAGS.config["window_size"],
+            action_chunk=config["model"]["heads"]["action"]["kwargs"].get(
+                "pred_horizon", 1
+            ),
+            **FLAGS.config.rollout_kwargs.to_dict(),
+        )
+    else:
+        rollout_callback = None
+
+    #########
+    #
+    # Train loop
+    #
+    #########
 
     def wandb_log(info, step):
         wandb.log(flatten_dict(info, sep="/"), step=step)
@@ -375,6 +398,11 @@ def main(_):
             with timer("visualize"):
                 viz_metrics = viz_callback(train_state, i + 1)
                 wandb_log(viz_metrics, step=i)
+
+            if rollout_callback is not None:
+                with timer("rollout"):
+                    rollout_metrics = rollout_callback(train_state, i + 1)
+                    wandb_log(rollout_metrics, step=i)
 
         if (i + 1) % FLAGS.config.save_interval == 0 and save_dir is not None:
             logging.info("Saving checkpoint...")
