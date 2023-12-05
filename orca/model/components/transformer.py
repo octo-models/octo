@@ -175,7 +175,7 @@ class Transformer(nn.Module):
 
     num_layers: int
     mlp_dim: int
-    num_heads: int
+    num_attention_heads: int
     dropout_rate: float = 0.1
     attention_dropout_rate: float = 0.1
     add_position_embedding: bool = False
@@ -207,7 +207,7 @@ class Transformer(nn.Module):
                 dropout_rate=self.dropout_rate,
                 attention_dropout_rate=self.attention_dropout_rate,
                 name=f"encoderblock_{lyr}",
-                num_heads=self.num_heads,
+                num_heads=self.num_attention_heads,
             )(x, attention_mask, deterministic=not train)
         encoded = nn.LayerNorm(name="encoder_norm")(x)
 
