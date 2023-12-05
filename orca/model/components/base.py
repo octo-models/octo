@@ -2,11 +2,18 @@ import flax
 import jax
 import jax.numpy as jnp
 
-from orca.utils.typing import Optional, Sequence
+from orca.utils.typing import Sequence
 
 
 @flax.struct.dataclass
 class TokenGroup:
+    """A group of tokens that have semantic meaning together (e.g. the tokens for a single observation)
+
+    Attributes:
+        tokens: jax.Array of shape (..., n_tokens, token_dim)
+        mask: jax.Array of shape (..., n_tokens) indicating which tokens are valid (1) vs padding (0)
+    """
+
     tokens: jax.Array
     mask: jax.Array
 
@@ -22,9 +29,3 @@ class TokenGroup:
         data = jnp.concatenate([t.tokens for t in group_list], axis=axis)
         mask = jnp.concatenate([t.mask for t in group_list], axis=axis)
         return cls(data, mask)
-
-    @classmethod
-    def split(cls, group: "TokenGroup", indices_or_sections, axis=-2):
-        data_list = jnp.split(group.tokens, indices_or_sections, axis=axis)
-        mask_list = jnp.split(group.mask, indices_or_sections, axis=axis)
-        return [cls(data, mask) for data, mask in zip(data_list, mask_list)]
