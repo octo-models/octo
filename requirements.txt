@@ -1,24 +1,25 @@
 gym >= 0.26
-numpy==1.24.3
-jax==0.4.13
-distrax==0.1.2
-flax==0.7.0
+numpy == 1.24.3
+ml_dtypes == 0.2.0
+chex == 0.1.85
+optax == 0.1.5
+tensorflow_probability == 0.23.0
+tensorflow == 2.15.0
+jax == 0.4.20
+distrax == 0.1.5
+flax == 0.7.5
 ml_collections >= 0.1.0
 tqdm >= 4.60.0
-chex==0.1.6
-optax==0.1.5
 absl-py >= 0.12.0
 scipy >= 1.6.0
 wandb >= 0.12.14
-tensorflow==2.15.0
 einops >= 0.6.1
 imageio >= 2.31.1
 moviepy >= 1.0.3
 pre-commit == 3.3.3
-transformers >= 4.31.0
+transformers >= 4.34.1
 tensorflow_hub >= 0.14.0
 tensorflow_text >= 2.13.0
-tensorflow_probability == 0.23.0
 tensorflow_datasets == 4.9.2
 tensorflow_graphics == 2021.12.3
 dlimp @ git+https://github.com/kvablack/dlimp@9e29390ccb1404f9a6079207c8bdac53c9a7d4ef
