@@ -408,32 +408,28 @@ def main(_):
     ):
         timer.tick("total")
 
-        if not FLAGS.config.debug_sim:
-            with timer("dataset"):
-                batch = next(train_data_iter)
+        with timer("dataset"):
+            batch = next(train_data_iter)
 
-            with timer("train"):
-                train_state, update_info = train_step(train_state, batch)
+        with timer("train"):
+            train_state, update_info = train_step(train_state, batch)
 
         timer.tock("total")
 
-        if not FLAGS.config.debug_sim and (i + 1) % FLAGS.config.log_interval == 0:
+        if (i + 1) % FLAGS.config.log_interval == 0:
             update_info = jax.device_get(update_info)
             wandb_log(
                 {"training": update_info, "timer": timer.get_average_times()}, step=i
             )
 
-        if FLAGS.config.debug_sim or (i + 1) % FLAGS.config.eval_interval == 0:
+        if (i + 1) % FLAGS.config.eval_interval == 0:
             logging.info("Evaluating...")
-            if not FLAGS.config.debug_sim:
-                with timer("val"):
-                    metrics = []
-                    for _, batch in zip(
-                        range(FLAGS.config.num_val_batches), val_data_iter
-                    ):
-                        metrics.append(eval_step(train_state, batch))
-                    metrics = jax.tree_map(lambda *xs: np.mean(xs), *metrics)
-                    wandb_log({"validation": metrics}, step=i)
+            with timer("val"):
+                metrics = []
+                for _, batch in zip(range(FLAGS.config.num_val_batches), val_data_iter):
+                    metrics.append(eval_step(train_state, batch))
+                metrics = jax.tree_map(lambda *xs: np.mean(xs), *metrics)
+                wandb_log({"validation": metrics}, step=i)
 
             with timer("visualize"):
                 policy_fn = batched_apply(
@@ -443,24 +439,23 @@ def main(_):
                     ),
                     FLAGS.config.batch_size,
                 )
-                if not FLAGS.config.debug_sim:
-                    raw_infos = visualizer.raw_evaluations(policy_fn, max_trajs=100)
-                    metrics = visualizer.metrics_for_wandb(raw_infos)
-                    images = visualizer.visualize_for_wandb(policy_fn, max_trajs=8)
-                    wandb_log(
-                        {
-                            "offline_metrics": metrics,
-                            "visualizations": images,
-                        },
-                        step=i,
-                    )
+                raw_infos = visualizer.raw_evaluations(policy_fn, max_trajs=100)
+                metrics = visualizer.metrics_for_wandb(raw_infos)
+                images = visualizer.visualize_for_wandb(policy_fn, max_trajs=8)
+                wandb_log(
+                    {
+                        "offline_metrics": metrics,
+                        "visualizations": images,
+                    },
+                    step=i,
+                )
 
             if rollout_visualizers:
                 with timer("rollout"):
                     for rollout_visualizer in rollout_visualizers:
                         logging.info("Running rollouts...")
                         rollout_infos = rollout_visualizer.run_rollouts(
-                            policy_fn, n_rollouts=2 if FLAGS.config.debug_sim else 10
+                            policy_fn, n_rollouts=10
                         )
                         wandb_log(
                             {
@@ -470,7 +465,7 @@ def main(_):
                             step=i,
                         )
 
-        if False:  # (i + 1) % FLAGS.config.save_interval == 0 and save_dir is not None:
+        if (i + 1) % FLAGS.config.save_interval == 0 and save_dir is not None:
             logging.info("Saving checkpoint...")
 
             params_checkpointer.save(
