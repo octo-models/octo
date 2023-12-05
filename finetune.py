@@ -369,16 +369,16 @@ def main(_):
             logging.info("Evaluating...")
 
             with timer("val"):
-                val_metrics = val_callback.callback(train_state, i + 1)
+                val_metrics = val_callback(train_state, i + 1)
                 wandb_log(val_metrics, step=i)
 
             with timer("visualize"):
-                viz_metrics = viz_callback.callback(train_state, i + 1)
+                viz_metrics = viz_callback(train_state, i + 1)
                 wandb_log(viz_metrics, step=i)
 
         if (i + 1) % FLAGS.config.save_interval == 0 and save_dir is not None:
             logging.info("Saving checkpoint...")
-            save_callback.callback(train_state, i + 1)
+            save_callback(train_state, i + 1)
 
 
 if __name__ == "__main__":
