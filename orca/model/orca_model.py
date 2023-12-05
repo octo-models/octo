@@ -129,8 +129,8 @@ class OrcaTransformer(nn.Module):
         # First, add the task tokens
         for name, tok in self.task_tokenizers.items():
             # Receive inputs from tokenizer and cast to embedding size
-            task_tokens = tok(observations, tasks, train=train)
-            task_tokens = nn.Dense(self.token_embedding_size)(task_tokens)
+            tokenizer_output = tok(observations, tasks, train=train)
+            task_tokens = nn.Dense(self.token_embedding_size)(tokenizer_output.tokens)
 
             # task_tokens shape is (batch, n_tokens, token_embedding_size)
 
@@ -141,14 +141,19 @@ class OrcaTransformer(nn.Module):
             task_tokens += task_pos_embedding
 
             all_prefix_groups.append(
-                PrefixGroup(f"task_{name}", task_tokens, task_attention_rules)
+                PrefixGroup(
+                    f"task_{name}",
+                    task_tokens,
+                    tokenizer_output.mask,
+                    task_attention_rules,
+                )
             )
 
         # Next, add the observation tokens
         for name, tok in self.observation_tokenizers.items():
             # Receive inputs from tokenizer and cast to embedding size
-            obs_tokens = tok(observations, tasks, train=train)
-            obs_tokens = nn.Dense(self.token_embedding_size)(obs_tokens)
+            tokenizer_output = tok(observations, tasks, train=train)
+            obs_tokens = nn.Dense(self.token_embedding_size)(tokenizer_output.tokens)
             # obs_tokens shape is (batch, horizon, n_tokens, token_embedding_size)
 
             # Add positional embedding
@@ -156,9 +161,12 @@ class OrcaTransformer(nn.Module):
                 f"obs_{name}", obs_tokens.shape[2], prefix=False
             )
             obs_tokens += obs_pos_embedding[:, :horizon, :, :]
+            obs_pad_mask = jnp.logical_and(pad_mask[:, :, None], tokenizer_output.mask)
 
             all_timestep_groups.append(
-                TimestepGroup(f"obs_{name}", obs_tokens, observation_attention_rules)
+                TimestepGroup(
+                    f"obs_{name}", obs_tokens, obs_pad_mask, observation_attention_rules
+                )
             )
 
         # Finally, add the readout tokens
@@ -174,6 +182,7 @@ class OrcaTransformer(nn.Module):
                 f"readout_{readout_name}", n_tokens_for_readout, prefix=False
             )
             readout_tokens += readout_pos_embedding[:, :horizon, :, :]
+            readout_mask = jnp.ones((batch_size, horizon, n_tokens_for_readout))
 
             attention_rules = {
                 **{
@@ -187,6 +196,7 @@ class OrcaTransformer(nn.Module):
                 TimestepGroup(
                     f"readout_{readout_name}",
                     readout_tokens,
+                    readout_mask,
                     attention_rules,
                 )
             )
@@ -199,7 +209,6 @@ class OrcaTransformer(nn.Module):
         prefix_outputs, timestep_outputs = BlockTransformer(**self.transformer_kwargs)(
             all_prefix_groups,
             all_timestep_groups,
-            pad_mask,
             train=train,
             verbose=verbose,
         )

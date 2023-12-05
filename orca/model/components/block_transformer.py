@@ -1,6 +1,7 @@
 # Written by Dibya
 from dataclasses import asdict, dataclass, replace
 from enum import Enum
+from fnmatch import fnmatch
 import logging
 
 import einops
@@ -32,12 +33,13 @@ class PrefixGroup:
 
     name: str
     tokens: jax.Array  # with shape (batch, n_tokens, token_embedding_size)
-    mask: jax.Array # with shape (batch, n_tokens)
+    mask: jax.Array  # with shape (batch, n_tokens)
     attention_rules: Dict[str, AttentionRule]
 
     def __post_init__(self):
         assert self.tokens.ndim == 3, "PrefixGroup tokens must be (batch, n_tokens, d)"
-        assert self.mask.ndim == 2, "PrefixGroup mask must be (batch, n_tokens)"            
+        assert self.mask.ndim == 2, "PrefixGroup mask must be (batch, n_tokens)"
+
 
 @dataclass
 class TimestepGroup:
@@ -45,14 +47,17 @@ class TimestepGroup:
 
     name: str
     tokens: jax.Array  # with shape (batch, horizon, n_tokens, token_embedding_size)
-    mask: jax.Array # with shape (batch, horizon, n_tokens)
+    mask: jax.Array  # with shape (batch, horizon, n_tokens)
     attention_rules: Dict[str, AttentionRule]
 
     def __post_init__(self):
         assert (
             self.tokens.ndim == 4
         ), "TimestepGroup tokens must be (batch, horizon, n_tokens, d))"
-        assert self.mask.ndim == 3, "TimestepGroup mask must be (batch, horizon, n_tokens)"
+        assert (
+            self.mask.ndim == 3
+        ), "TimestepGroup mask must be (batch, horizon, n_tokens)"
+
 
 @dataclass
 class TokenMetadata:
@@ -67,17 +72,18 @@ class TokenMetadata:
 
     @classmethod
     def create(cls, group: Union[PrefixGroup, TimestepGroup], timestep: int):
-        group_dict = asdict(group)
-        group_dict.pop("tokens")
         return cls(
             timestep=timestep,
-            **group_dict,
+            name=group.name,
+            attention_rules=group.attention_rules,
         )
 
     def should_attend_to(self, other_metadata: "TokenMetadata") -> bool:
-        attention_rule = self.attention_rules.get(
-            other_metadata.name, AttentionRule.NEVER
-        )
+        attention_rule = AttentionRule.NEVER
+        for pattern, rule in self.attention_rules.items():
+            if fnmatch(other_metadata.name, pattern):
+                attention_rule = rule
+                break
 
         if attention_rule == AttentionRule.CAUSAL:
             return other_metadata.timestep <= self.timestep
@@ -122,7 +128,7 @@ class BlockTransformer(nn.Module):
         Args:
             prefix_groups: A list of PrefixGroup objects.
                 Each group has tokens with shape (batch, n_tokens, token_embedding_size)
-                Each group also indicates 
+                Each group also indicates
                 Each group also dictates which other groups it will attend to.
             timestep_groups: A list of TimestepGroup objects.
                 Each group has tokens with shape (batch, horizon, n_tokens, token_embedding_size)
@@ -145,9 +151,7 @@ class BlockTransformer(nn.Module):
         assert all([group.tokens.shape[-1] == token_dim for group in timestep_groups])
 
         # Creates correct attention mask for transformer using group attention rules
-        attention_mask = self.generate_attention_mask(
-            prefix_groups, timestep_groups
-        )
+        attention_mask = self.generate_attention_mask(prefix_groups, timestep_groups)
 
         # Assemble input tokens (batch, total_tokens, token_embedding_size)
         input_tokens = self.assemble_input_tokens(prefix_groups, timestep_groups)
@@ -299,6 +303,7 @@ class BlockTransformer(nn.Module):
 
         for i in range(total_tokens):  # Token attending
             for j in range(total_tokens):  # Token being attended to
+                print(i, j)
                 metadata_i = get_token_metadata(i)
                 metadata_j = get_token_metadata(j)
                 mask = int(metadata_i.should_attend_to(metadata_j))
@@ -321,9 +326,13 @@ class BlockTransformer(nn.Module):
         and then prepend a mask for the task prefix to get shape (batch, total_tokens).
         We broadcast to (batch, num_heads, total_tokens, total_tokens).
         """
-        prefix_pad_mask = jnp.concatenate(
-            [group.mask for group in prefix_groups], axis=1
-        )
+        batch_size, horizon = timestep_groups[0].tokens.shape[:2]
+        if len(prefix_groups) > 0:
+            prefix_pad_mask = jnp.concatenate(
+                [group.mask for group in prefix_groups], axis=1
+            )
+        else:
+            prefix_pad_mask = jnp.zeros((batch_size, 0), dtype=jnp.bool_)
         timestep_pad_mask = jnp.concatenate(
             [group.mask for group in timestep_groups], axis=2
         )
@@ -334,7 +343,13 @@ class BlockTransformer(nn.Module):
         pad_mask = jnp.concatenate([prefix_pad_mask, timestep_pad_mask], axis=1)
         # pad_mask has shape (batch, total_tokens)
         pad_mask = jnp.broadcast_to(
-            pad_mask[:, None, None, :], (pad_mask.shape[0], self.num_attention_heads, pad_mask.shape[1], pad_mask.shape[1])
+            pad_mask[:, None, None, :],
+            (
+                batch_size,
+                self.num_attention_heads,
+                pad_mask.shape[1],
+                pad_mask.shape[1],
+            ),
         )
         return pad_mask
 
