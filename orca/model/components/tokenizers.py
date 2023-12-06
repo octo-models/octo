@@ -18,7 +18,9 @@ import os
 
 
 def generate_proper_pad_mask(
-    tokens: jax.Array, pad_mask_dict: Dict[str, jax.Array], keys: Sequence[str]
+    tokens: jax.Array,
+    pad_mask_dict: Optional[Dict[str, jax.Array]],
+    keys: Sequence[str],
 ) -> jax.Array:
     if pad_mask_dict is None:
         logging.warning("No pad_mask_dict found. Nothing will be masked.")
@@ -98,16 +100,17 @@ class ImageTokenizer(nn.Module):
         tasks=None,
         train: bool = True,
     ):
-        def extract_inputs(regex_keys, inputs, check_spatial=False):
+        def extract_inputs(keys, inputs, check_spatial=False):
             extracted_outputs = []
-            for key in regex_filter(regex_keys, sorted(inputs.keys())):
+            for key in keys:
                 if check_spatial:
                     assert len(inputs[key].shape) >= 4
                 extracted_outputs.append(inputs[key])
             return jnp.concatenate(extracted_outputs, axis=-1)
 
-        if len(regex_filter(self.obs_stack_keys, sorted(observations.keys()))) == 0:
-            logging.warning(
+        obs_stack_keys = regex_filter(self.obs_stack_keys, sorted(observations.keys()))
+        if len(obs_stack_keys) == 0:
+            logging.info(
                 f"No image inputs matching {self.obs_stack_keys} were found."
                 "Skipping tokenizer entirely."
             )
@@ -115,13 +118,10 @@ class ImageTokenizer(nn.Module):
             return None
 
         # stack all spatial observation and task inputs
-        enc_inputs = extract_inputs(
-            self.obs_stack_keys, observations, check_spatial=True
-        )
+        enc_inputs = extract_inputs(obs_stack_keys, observations, check_spatial=True)
         if tasks and self.task_stack_keys:
-            task_inputs = extract_inputs(
-                self.task_stack_keys, tasks, check_spatial=True
-            )
+            task_stack_keys = regex_filter(self.task_stack_keys, sorted(tasks.keys()))
+            task_inputs = extract_inputs(task_stack_keys, tasks, check_spatial=True)
             task_inputs = task_inputs[:, None].repeat(enc_inputs.shape[1], axis=1)
             # TODO: allow somehow for task inputs to be not provided...
             enc_inputs = jnp.concatenate([enc_inputs, task_inputs], axis=-1)
@@ -152,7 +152,7 @@ class ImageTokenizer(nn.Module):
             pad_mask = generate_proper_pad_mask(
                 image_tokens,
                 observations.get("pad_mask_dict", None),
-                regex_filter(self.obs_stack_keys, sorted(observations.keys())),
+                obs_stack_keys,
             )
         else:
             pad_mask = jnp.ones(image_tokens.shape[:-1])

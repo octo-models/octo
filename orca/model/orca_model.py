@@ -138,8 +138,8 @@ class OrcaTransformer(nn.Module):
         #
 
         for name, tok in self.task_tokenizers.items():
-            # Receive inputs from tokenizer and cast to embedding size
             group_name = f"task_{name}"
+            # Receive inputs from tokenizer and cast to embedding size
             tokenizer_output: TokenGroup = tok(observations, tasks, train=train)
             if tokenizer_output is None:
                 logging.warning(f"Skipping task tokenizer: {group_name}")
@@ -148,7 +148,6 @@ class OrcaTransformer(nn.Module):
             task_tokens = nn.Dense(
                 self.token_embedding_size, name=f"{group_name}_projection"
             )(tokenizer_output.tokens)
-
             # task_tokens shape is (batch, n_tokens, token_embedding_size)
 
             # Add positional embedding
@@ -172,11 +171,11 @@ class OrcaTransformer(nn.Module):
             # Receive inputs from tokenizer and cast to embedding size
             tokenizer_output: TokenGroup = tok(observations, tasks, train=train)
             if tokenizer_output is None:
-                logging.warning(f"Skipping observation tokenizer: {name}")
+                logging.warning(f"Skipping observation tokenizer: {group_name}")
                 continue
 
             obs_tokens = nn.Dense(
-                self.token_embedding_size, name=f"obs_{name}_projection"
+                self.token_embedding_size, name=f"{group_name}_projection"
             )(tokenizer_output.tokens)
             # obs_tokens shape is (batch, horizon, n_tokens, token_embedding_size)
 

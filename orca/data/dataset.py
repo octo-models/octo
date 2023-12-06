@@ -86,7 +86,11 @@ def _subsample(traj, subsample_length):
     return traj
 
 
-def _add_pad_masks(traj):
+def _add_pad_mask_dict(traj):
+    """Adds a dictionary indicating which elements of the observation are padding.
+
+    traj["observation"]["pad_mask_dict"] = {k: traj["observation"][k] is not padding}
+    """
     traj_len = tf.shape(traj["action"])[0]
     pad_masks = {}
     for key in traj["observation"]:
@@ -99,7 +103,7 @@ def _add_pad_masks(traj):
 
 
 def _decode_images(obs: dict) -> dict:
-    """Decodes images and depth images, marking empty strings as padding."""
+    """Decodes images and depth images."""
     for key in obs:
         if "image" in key:
             if obs[key].dtype == tf.string:
@@ -131,8 +135,6 @@ def _decode_images(obs: dict) -> dict:
                 raise ValueError(
                     f"Unsupported depth dtype: found {key} with dtype {obs[key].dtype}"
                 )
-
-    # obs["pad_mask_dict"] = pad_mask_dict
     return obs
 
 
@@ -211,7 +213,7 @@ def apply_trajectory_transforms(
                 tf.math.abs(x["observation"]["proprio"]) <= max_proprio
             )
         )
-    dataset = dataset.map(_add_pad_masks, num_parallel_calls)
+    dataset = dataset.map(_add_pad_mask_dict, num_parallel_calls)
 
     # adds the "tasks" key
     if goal_relabeling_strategy is not None:
