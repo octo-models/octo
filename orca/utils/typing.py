@@ -1,17 +1,11 @@
-from typing import Any, Callable, Dict, Optional, Sequence, Tuple, Union
+from typing import Any, Mapping, Sequence, Union
 
-import flax
-import jax.numpy as jnp
-import numpy as np
-import tensorflow as tf
+import jax
 
-PRNGKey = Any
-Params = flax.core.FrozenDict[str, Any]
+PRNGKey = jax.random.KeyArray
+PyTree = Union[jax.typing.ArrayLike, Mapping[str, "PyTree"]]
+Config = Union[Any, Mapping[str, "Config"]]
+Params = Mapping[str, PyTree]
+Data = Mapping[str, PyTree]
 Shape = Sequence[int]
-Dtype = Any  # this could be a real type?
-InfoDict = Dict[str, float]
-Array = Union[np.ndarray, jnp.ndarray, tf.Tensor]
-Data = Union[Array, Dict[str, "Data"]]
-Batch = Dict[str, Data]
-# A method to be passed into TrainState.__call__
-ModuleMethod = Union[str, Callable, None]
+Dtype = jax.typing.DTypeLike

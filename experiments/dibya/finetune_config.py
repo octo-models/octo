@@ -15,12 +15,9 @@ def get_config(
 
     # Fill this in for your own dataset!
 
-    # If starting with an ORCA-wrist model, there should be two image keys
-    # first image key should be the third-person view
-    # and second image key should be the wrist view
-
-    # If starting with an ORCA model, there should be one image key
-    # and it should be the third-person view
+    # There should be two image keys
+    # first image key should be the third-person view (None if not used)
+    # and second image key should be the wrist view (None if not used)
 
     FINETUNING_KWARGS = {
         "name": "bridge_dataset",
@@ -59,7 +56,6 @@ def get_config(
         pretrained_step=placeholder(int),
         batch_size=256,
         shuffle_buffer_size=10000,
-        num_val_batches=8,
         num_steps=max_steps,
         log_interval=100,
         eval_interval=5000,
@@ -84,6 +80,16 @@ def get_config(
             weight_decay=0.01,
             clip_gradient=placeholder(float),
             frozen_keys=frozen_keys,
+        ),
+        val_kwargs=dict(
+            val_shuffle_buffer_size=1000,
+            num_val_batches=16,
+        ),
+        viz_kwargs=dict(
+            eval_batch_size=128,
+            trajs_for_metrics=100,
+            trajs_for_viz=8,
+            samples_per_state=8,
         ),
     )
 

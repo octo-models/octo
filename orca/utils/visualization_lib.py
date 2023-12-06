@@ -4,20 +4,32 @@ import matplotlib
 
 matplotlib.use("Agg")
 from dataclasses import dataclass
+from functools import reduce
+import json
+from typing import Any, Callable, Dict, Optional, Tuple, Union
 
 import dlimp as dl
 import flax
+import gym
 import jax
 import jax.numpy as jnp
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 import matplotlib.gridspec as gridspec
 import matplotlib.pyplot as plt
 import numpy as np
+from PIL import Image
 import plotly.graph_objects as go
+import tensorflow as tf
 import tqdm
 import wandb
 
 from orca.data.utils.data_utils import ActionEncoding
+from orca.utils.gym_wrappers import (
+    HistoryWrapper,
+    RHCWrapper,
+    TemporalEnsembleWrapper,
+    UnnormalizeActionProprio,
+)
 
 BASE_METRIC_KEYS = {
     "mse": ("mse", tuple()),  # What is the MSE
@@ -94,7 +106,8 @@ def run_policy_on_trajectory(policy_fn, traj, *, text_processor=None):
     horizon = jax.tree_util.tree_leaves(traj["observation"])[0].shape[1]
     return {
         "n": np.array(len_traj),
-        "pred_actions": actions,
+        "pred_actions_chunk": actions,
+        "pred_actions": actions[:, :, 0],  # only use first predicted action
         "actions": traj["action"][:, horizon - 1, :],
         "proprio": traj["observation"]["proprio"][:, horizon - 1],
     }
@@ -189,8 +202,13 @@ class Visualizer:
                 plotly_fig = plot_trajectory_actions(**info)
                 visualizations[f"traj_{n}"] = plotly_fig
 
-            mpl_fig = plot_trajectory_overview_mpl(traj, **info)
-            visualizations[f"traj_{n}_mpl"] = mpl_fig
+            # plot qualitative action trajectory per dimension w/ and w/o action chunk
+            visualizations[f"traj_{n}_mpl"] = plot_trajectory_overview_mpl(
+                traj, act=info["unnorm_pred_actions_chunk"][:, :, :1], **info
+            )
+            visualizations[f"traj_{n}_mpl_chunk"] = plot_trajectory_overview_mpl(
+                traj, act=info["unnorm_pred_actions_chunk"], **info
+            )
             if add_images or not self.visualized_trajs:
                 for key in filter(lambda key: "image" in key, traj["observation"]):
                     images = traj["observation"][key][:, 0]
@@ -241,6 +259,133 @@ class Visualizer:
         return itertools.islice(self._cached_iterators[n], n)
 
 
+@dataclass
+class RolloutVisualizer:
+    """
+    Runs policy rollouts on a given simulated environment.
+
+    Args:
+        env_name (str): Gym.make environment creation string
+        history_length (int): Number of history steps policy gets conditioned on (window_size).
+        action_chunk (int): Number of future steps.
+        max_episode_length (int): Max number of steps per rollout episode.
+        vis_fps (int): FPS of logged rollout video
+        video_subsample_rate (int): Subsampling rate for video logging (to reduce video size for high-frequency control)
+        norm_statistics (Union[str, dict], optional): Stats for de-normalizing policy actions & proprio.
+        use_temporal_averaging (bool): If true, uses temporal averaging of action chunks during rollout.
+    """
+
+    env_name: str
+    history_length: int
+    action_chunk: int
+    max_episode_length: int
+    vis_fps: int = 10
+    video_subsample_rate: int = 1
+    norm_statistics: Optional[Union[str, Dict[str, Any]]] = None
+    text_processor: object = None
+    use_temp_averaging: bool = False
+
+    def __post_init__(self):
+        self._env = gym.make(self.env_name)
+        self._env = HistoryWrapper(self._env, self.history_length)
+        if self.use_temp_averaging:
+            self._env = RHCWrapper(self._env, 1)
+            self._env = TemporalEnsembleWrapper(self._env, self.action_chunk)
+        else:
+            self._env = RHCWrapper(self._env, self.action_chunk)
+        if self.norm_statistics:
+            if isinstance(self.norm_statistics, str):
+                with tf.io.gfile.GFile(self.norm_statistics, "r") as f:
+                    norm_stats = json.load(f)
+            norm_stats = jax.tree_map(
+                lambda x: np.array(x),
+                norm_stats,
+                is_leaf=lambda x: not isinstance(x, dict),
+            )
+            self._env = UnnormalizeActionProprio(
+                self._env, norm_stats, normalization_type="normal"
+            )
+
+    def run_rollouts(self, policy_fn, n_rollouts=10, n_vis_rollouts=3):
+        def extract_images(obs):
+            # obs has [window_size, ...] shape, only use first time step
+            return jnp.concatenate([obs[k][0] for k in obs if "image_" in k], axis=-2)
+
+        def listdict2dictlist(LD):
+            return {k: [dic[k] for dic in LD] for k in LD[0]}
+
+        rollout_info = {
+            "episode_returns": [],
+            "episode_metrics": [],
+        }
+        for rollout_idx in tqdm.tqdm(range(n_rollouts)):
+            obs, info = self._env.reset()
+            task = self._env.get_task()
+            if jax.tree_util.tree_leaves(task)[0].shape[0] != 1:
+                task = jax.tree_map(lambda x: x[None], task)
+            if "language_instruction" in task:
+                if self.text_processor:
+                    task["language_instruction"] = self.text_processor.encode(
+                        [s.decode("utf-8") for s in task["language_instruction"]]
+                    )
+                else:
+                    task.pop("language_instruction")
+            images = [extract_images(obs)]
+            episode_return = 0.0
+            metrics = []
+            while len(images) < self.max_episode_length:
+                # policy outputs are shape [batch, n_samples, pred_horizon, act_dim]
+                # we remove batch dimension & use first sampled action, ignoring other samples
+                actions = policy_fn(jax.tree_map(lambda x: x[None], obs), task)[0, 0]
+                obs, reward, done, trunc, info = self._env.step(actions)
+                images.extend([extract_images(o) for o in info["observations"]])
+                episode_return += reward
+                if "metrics" in info:
+                    metrics.extend(info["metrics"])
+                if done or trunc:
+                    break
+
+            rollout_info["episode_returns"].append(episode_return)
+            if metrics:
+                # concatenate all chunks into one dict of lists, then average across episode
+                metrics = listdict2dictlist(metrics)
+                rollout_info["episode_metrics"].append(
+                    jax.tree_map(lambda x: np.mean(x), metrics)
+                )
+            if hasattr(self._env, "get_episode_metrics"):
+                if metrics:
+                    rollout_info["episode_metrics"][-1].update(
+                        self._env.get_episode_metrics()
+                    )
+                else:
+                    rollout_info["episode_metrics"].append(
+                        self._env.get_episode_metrics()
+                    )
+            if rollout_idx < n_vis_rollouts:
+                # save rollout video
+                assert (
+                    images[0].dtype == np.uint8
+                ), f"Expect uint8, got {images[0].dtype}"
+                assert (
+                    images[0].shape[-1] == 3
+                ), f"Expect [height, width, channels] format, got {images[0].shape}"
+                rollout_info[f"rollout_{rollout_idx}_vid"] = wandb.Video(
+                    np.array(images).transpose(0, 3, 1, 2)[
+                        :: self.video_subsample_rate
+                    ],
+                    fps=self.vis_fps,
+                )
+        rollout_info["avg_return"] = np.mean(rollout_info["episode_returns"])
+        rollout_info["episode_returns"] = wandb.Histogram(
+            rollout_info["episode_returns"]
+        )
+        metrics = listdict2dictlist(rollout_info.pop("episode_metrics"))
+        for metric in metrics:
+            rollout_info[metric] = wandb.Histogram(metrics[metric])
+            rollout_info[f"avg_{metric}"] = np.mean(metrics[metric])
+        return rollout_info
+
+
 def unnormalize(arr, mean, std, **kwargs):
     return arr * np.array(std) + np.array(mean)
 
@@ -257,6 +402,9 @@ def add_unnormalized_info(
         {
             "unnorm_pred_actions": unnormalize(
                 info["pred_actions"], **normalization_stats["action"]
+            ),
+            "unnorm_pred_actions_chunk": unnormalize(
+                info["pred_actions_chunk"], **normalization_stats["action"]
             ),
             "unnorm_actions": unnormalize(
                 info["actions"], **normalization_stats["action"]
@@ -391,7 +539,7 @@ class WandBFigure:
 
 def plot_trajectory_overview_mpl(
     traj,
-    unnorm_pred_actions,
+    act,
     unnorm_actions,
     unnorm_proprio,
     **info,
@@ -407,18 +555,23 @@ def plot_trajectory_overview_mpl(
         for i in range(n_act_dims):
             ax = fig.add_subplot(gs[(i + 1) // grid_size, (i + 1) % grid_size])
             ax.plot(unnorm_actions[:, i], label="action")
-            unnorm_pred_actions_i = unnorm_pred_actions[:, :, i]
-            x = np.tile(
-                np.arange(len(unnorm_pred_actions_i))[:, None],
-                (1, unnorm_pred_actions_i.shape[1]),
-            )
-            ax.scatter(
-                x.flat[:],
-                unnorm_pred_actions_i.flat[:],
-                color="tab:red",
-                s=4,
-                alpha=0.5,
-            )
+            # plot predicted action chunks, act.shape = [time, n_samples, chunk, act_dim]
+            chunk_length = act.shape[2]
+            for t in range(act.shape[0]):
+                step_idx, chunk_idx = divmod(t, chunk_length)
+                unnorm_pred_actions_i = act[
+                    int(step_idx * chunk_length), :, chunk_idx, i
+                ]
+                x = np.full((unnorm_pred_actions_i.shape[0],), t)
+                ax.scatter(
+                    x.flat[:],
+                    unnorm_pred_actions_i.flat[:],
+                    color="tab:red",
+                    s=4,
+                    alpha=0.5,
+                )
+                if chunk_idx == 0 and (act.shape[0] // chunk_length) <= 20:
+                    ax.axvline(t, color="red", linestyle="--", alpha=0.2)
             ax.set_ylabel(f"dim {i}")
         fig.suptitle(traj["tasks"]["language_instruction"][0].decode("utf-8"))
     return wandb.Image(wandb_figure.image)

@@ -1,8 +1,8 @@
 # Written by Dibya
 from enum import Enum
 from fnmatch import fnmatch
-from functools import cache
 import logging
+from typing import Mapping
 
 import einops
 import flax
@@ -40,7 +40,7 @@ class PrefixGroup(TokenGroup):
     """
 
     name: str
-    attention_rules: Dict[str, AttentionRule]
+    attention_rules: Mapping[str, AttentionRule]
 
     def __post_init__(self):
         assert (
@@ -57,7 +57,7 @@ class TimestepGroup(TokenGroup):
     """
 
     name: str = flax.struct.field(pytree_node=False)
-    attention_rules: Dict[str, AttentionRule] = flax.struct.field(pytree_node=False)
+    attention_rules: Mapping[str, AttentionRule] = flax.struct.field(pytree_node=False)
 
     def __post_init__(self):
         assert (
@@ -85,7 +85,7 @@ class TokenMetadata:
 
     name: str
     timestep: int  # -1 for prefix tokens
-    attention_rules: Dict[str, AttentionRule]
+    attention_rules: Mapping[str, AttentionRule]
 
     @classmethod
     def create(cls, group: Union[PrefixGroup, TimestepGroup], timestep: int):

@@ -1,12 +1,11 @@
 # adapted from https://github.com/google-research/robotics_transformer/blob/master/transformer_network.py
-from typing import Any
+from typing import Optional
 
 import distrax
 from einops import rearrange
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
-import numpy as np
 
 from orca.model.components.base import TokenGroup
 from orca.model.components.tokenizers import BinTokenizer
@@ -36,7 +35,7 @@ class BasicActionHead(nn.Module):
     action_dim: int = 7
     vocab_size: int = 256
     normalization_type: str = "bounds"
-    readout_key: str = None
+    readout_key: Optional[str] = None
     use_map: bool = False
 
     def setup(self):
@@ -55,7 +54,9 @@ class BasicActionHead(nn.Module):
             else self.normalization_type,
         )
 
-    def __call__(self, transformer_outputs: Dict[str, TokenGroup], train=True) -> Any:
+    def __call__(
+        self, transformer_outputs: Dict[str, TokenGroup], train=True
+    ) -> jax.Array:
         """
         Args:
             transformer_outputs: Dict[str, TokenGroup] the output of an OrcaTransformer
@@ -159,9 +160,9 @@ class BasicActionHead(nn.Module):
         train: bool = True,
         argmax: bool = False,
         sample_shape: tuple = (),
-        rng: PRNGKey = None,
+        rng: Optional[PRNGKey] = None,
         temperature: float = 1.0,
-    ):
+    ) -> jax.Array:
         # get the logits for the last action by taking the action tokens of the last timestep,
         # unfolding the pred_horizon dim, and projecting to the vocab size
         # (batch, tokens_per_action, token_embedding_size)
@@ -220,7 +221,9 @@ class TokenPerDimActionHead(BasicActionHead):
             else self.normalization_type,
         )
 
-    def __call__(self, transformer_outputs: Dict[str, TokenGroup], train=True) -> Any:
+    def __call__(
+        self, transformer_outputs: Dict[str, TokenGroup], train=True
+    ) -> jax.Array:
         """
         Args:
             embeddings: jnp.ndarray w/ shape (batch_size, horizon, n_tokens, embedding_size)
@@ -264,7 +267,9 @@ class MSEActionHead(BasicActionHead):
             self.map_head = MAPHead()
         self.mean_proj = nn.Dense(self.pred_horizon * self.action_dim)
 
-    def __call__(self, transformer_outputs: Dict[str, TokenGroup], train=True) -> Any:
+    def __call__(
+        self, transformer_outputs: Dict[str, TokenGroup], train=True
+    ) -> jax.Array:
         """
         Args:
             embeddings: jnp.ndarray w/ shape (batch_size, horizon, n_tokens, embedding_size)
@@ -339,9 +344,9 @@ class MSEActionHead(BasicActionHead):
         train: bool = True,
         argmax: bool = False,
         sample_shape: tuple = (),
-        rng: PRNGKey = None,
+        rng: Optional[PRNGKey] = None,
         temperature: float = 1.0,
-    ):
+    ) -> jax.Array:
         # get the logits for the last action by taking the action tokens of the last timestep,
         # unfolding the pred_horizon dim, and projecting to the vocab size
         # (batch, tokens_per_action, token_embedding_size)
