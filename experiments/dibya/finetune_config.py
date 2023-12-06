@@ -116,10 +116,6 @@ def get_config(
         window_size=window_size,
         additional_action_window_size=0,
         goal_relabeling_strategy=goal_relabeling_strategy,
-        task_augmentation_strategy="delete_task_conditioning",
-        task_augmentation_kwargs=dict(
-            delete_key_groups_probs=delete_key_groups_probs,
-        ),
         # If the default data loading speed is too slow, try these:
         # num_parallel_calls=16,  # for less CPU-intensive ops
     )
@@ -138,6 +134,10 @@ def get_config(
                 "random_saturation",
                 "random_hue",
             ],
+        ),
+        task_augment_strategy="delete_task_conditioning",
+        task_augment_kwargs=dict(
+            delete_key_groups_probs=delete_key_groups_probs,
         ),
     )
     # If the default data loading speed is too slow, try these:
