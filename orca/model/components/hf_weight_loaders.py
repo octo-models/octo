@@ -1,12 +1,16 @@
 import functools as ft
 import os.path as osp
 import pickle as pkl
+from typing import Callable
 
 import jax.numpy as jnp
 from transformers import AutoConfig, FlaxAutoModel, FlaxT5EncoderModel
 
 import orca
 from orca.model.components.clip import clip_weights_loader
+from orca.utils.typing import Params
+
+WeightLoader = Callable[[Params], Params]
 
 
 def hf_weights_loader(params, hf_model):

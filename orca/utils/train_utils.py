@@ -3,8 +3,10 @@ from contextlib import contextmanager
 from fnmatch import fnmatch
 import logging
 import time
+from typing import Any, Callable, Mapping, Optional, Sequence, Union
 
 import flax
+import flax.linen as nn
 from flax.training import train_state
 import jax
 from jax.experimental import multihost_utils
@@ -13,8 +15,10 @@ from ml_collections import ConfigDict
 import numpy as np
 import optax
 
+from orca.data.utils.text_processing import TextProcessor
+from orca.model.components.hf_weight_loaders import WeightLoader
 from orca.utils import jax_utils
-from orca.utils.typing import PRNGKey
+from orca.utils.typing import Config, Data, Params, PRNGKey
 
 
 class TrainState(train_state.TrainState):
@@ -22,14 +26,14 @@ class TrainState(train_state.TrainState):
 
 
 def create_train_state(
-    rng,
-    model_def,
-    tx,
-    init_args=(),
-    init_kwargs=dict(),
-    pretrained_loaders=tuple(),
-    init_method=None,
-):
+    rng: PRNGKey,
+    model_def: nn.Module,
+    tx: optax.GradientTransformation,
+    init_args: Sequence[Any] = (),
+    init_kwargs: Mapping[str, Any] = dict(),
+    pretrained_loaders: Sequence[WeightLoader] = tuple(),
+    init_method: Optional[Union[str, Callable]] = None,
+) -> TrainState:
     """Utility to create a TrainState."""
     init_rng, state_rng = jax.random.split(rng)
 
@@ -185,7 +189,9 @@ def filter_eval_datasets(dataset_kwargs_list, sample_weights, eval_datasets=None
         )
 
 
-def create_optimizer(params_or_params_shape, optimizer_kwargs: dict):
+def create_optimizer(
+    params_or_params_shape: Params, optimizer_kwargs: dict
+) -> optax.GradientTransformation:
     """Creates optimizer for ORCA.
 
     Optimizer_kwargs are the kwargs for optax.adamw; if the learning rate is a dict,
@@ -279,7 +285,7 @@ def create_optimizer(params_or_params_shape, optimizer_kwargs: dict):
     return tx, lr_callable, param_norm_callable
 
 
-def check_config_diff(new_conf, old_conf, silent=False):
+def check_config_diff(new_conf: Config, old_conf: Config, silent: bool = False):
     """Checks for differences between new config and old config dicts."""
     new_conf_flat = flax.traverse_util.flatten_dict(
         new_conf.to_dict() if isinstance(new_conf, ConfigDict) else new_conf
@@ -313,7 +319,7 @@ def check_config_diff(new_conf, old_conf, silent=False):
     return mismatched_keys or (set(new_conf_flat.keys()) != set(old_conf_flat.keys()))
 
 
-def merge_params(target_params, pretrained_params):
+def merge_params(target_params: Params, pretrained_params: Params) -> Params:
     """Copies pre-trained params into target_params for every param that has corresponding key + shape."""
     flat_target_params = flax.traverse_util.flatten_dict(target_params)
     flat_pretrained_params = flax.traverse_util.flatten_dict(pretrained_params)
@@ -349,3 +355,19 @@ def merge_params(target_params, pretrained_params):
     )
     target_params = flax.traverse_util.unflatten_dict(flat_target_params)
     return target_params
+
+
+def process_text(batch: Data, text_processor: Optional[TextProcessor]) -> Data:
+    """Encodes the language instruction inside the tasks for a batch.
+
+    If the text processor is None, removes language entirely from the tasks.
+    Expects batch to be a nested dictionary, where
+        batch["tasks"]["language_instruction"] is a sequence of byte strings
+    """
+    if text_processor is None:
+        batch["tasks"].pop("language_instruction")
+    else:
+        batch["tasks"]["language_instruction"] = text_processor.encode(
+            [s.decode("utf-8") for s in batch["tasks"]["language_instruction"]]
+        )
+    return batch

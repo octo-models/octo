@@ -1,5 +1,6 @@
 # Written by Dibya
 import logging
+from typing import Dict, Optional
 
 import flax.linen as nn
 import jax
@@ -12,7 +13,7 @@ from orca.model.components.block_transformer import (
     PrefixGroup,
     TimestepGroup,
 )
-from orca.utils.typing import Data, Dict, Optional, Sequence
+from orca.utils.typing import Data, Sequence
 
 
 class OrcaTransformer(nn.Module):
