@@ -6,7 +6,7 @@ import jax
 import jax.numpy as jnp
 
 from orca.model.components.base import TokenGroup
-from orca.utils.typing import Array, Dtype, PRNGKey, Shape, Union
+from orca.utils.typing import Dtype, PRNGKey, Shape, Union
 
 
 class AddPositionEmbs(nn.Module):
