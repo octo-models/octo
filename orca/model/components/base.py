@@ -27,5 +27,5 @@ class TokenGroup:
     @classmethod
     def concatenate(cls, group_list: Sequence["TokenGroup"], axis=-2):
         data = jnp.concatenate([t.tokens for t in group_list], axis=axis)
-        mask = jnp.concatenate([t.mask for t in group_list], axis=axis)
+        mask = jnp.concatenate([t.mask for t in group_list], axis=axis + 1)
         return cls(data, mask)

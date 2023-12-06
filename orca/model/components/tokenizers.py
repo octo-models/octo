@@ -149,7 +149,6 @@ class ImageTokenizer(nn.Module):
             )
 
         if self.proper_pad_mask:
-            print("ENABLE_PAD_MASK!!!")
             pad_mask = generate_proper_pad_mask(
                 image_tokens,
                 observations.get("pad_mask_dict", None),
@@ -212,8 +211,6 @@ class LanguageTokenizer(nn.Module):
 
         # TODO: incorporate padding info from language tokens here too
         if self.proper_pad_mask:
-            print("ENABLE_PAD_MASK!!!")
-
             pad_mask = generate_proper_pad_mask(
                 tokens,
                 tasks.get("pad_mask_dict", None),
