@@ -177,8 +177,9 @@ class BlockTransformer(nn.Module):
         self.sow("intermediates", "attention_mask", attention_mask)
 
         # Run transformer
-        transformer = Transformer(**self.transformer_kwargs)
-        output = transformer(input_tokens, attention_mask, train=train)
+        output = Transformer(**self.transformer_kwargs)(
+            input_tokens, attention_mask, train=train
+        )
 
         # Split output into prefix and timestep groups
         all_prefix_outputs, all_timestep_outputs = self.split_output_tokens(
@@ -225,7 +226,7 @@ class BlockTransformer(nn.Module):
 
     def split_output_tokens(
         self,
-        output_tokens: jnp.ndarray,
+        output_tokens: jax.Array,
         prefix_groups: Sequence[PrefixGroup],
         timestep_groups: Sequence[TimestepGroup],
     ):

@@ -14,11 +14,13 @@ class TokenGroup:
         mask: jax.Array of shape (..., n_tokens) indicating which tokens are valid (1) vs padding (0)
     """
 
-    tokens: jax.Array
-    mask: jax.Array
+    tokens: jax.typing.ArrayLike
+    mask: jax.typing.ArrayLike
 
     @classmethod
-    def create(cls, tokens: jax.Array, mask: jax.Array = None, **kwargs):
+    def create(
+        cls, tokens: jax.typing.ArrayLike, mask: jax.typing.ArrayLike = None, **kwargs
+    ):
         if mask is None:
             mask = jnp.ones(tokens.shape[:-1])
         assert mask.ndim == tokens.ndim - 1
