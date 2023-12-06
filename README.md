@@ -74,9 +74,35 @@ python train.py --config config.py:vit_s --name=orca --config.dataset_kwargs.oxe
 | Visualization | [visualization_lib.py](orca/utils/visualization_lib.py) | Utilities for offline qualitative & quantitative eval.                    |
 | Sim Evaluation | [sim_eval.sh](orca/scripts/sim_eval.sh) | Script to run model evaluation.                    |
 
-## Run Evaluation in Simulation
+## Evaluation
 
-To run evaluation on a trained model, you can use the following command:
+To evaluate policies on a robot, first wrap your robot controller in a Gym environment. As an example, see
+[widowx_wrapper.py](experiments/homer/bridge/widowx_wrapper.py) which wraps the robot controller used for the
+WidowX robot in BridgeData.
+
+The `step` and `reset` functions of the Gym environment should return observations with the images, depth images, and/or
+proprioceptive information that the policy expects as input. Specifically, the returned observations should be dictionaries
+of the form:
+```
+obs = {
+    "image_0": ...,
+    "image_1": ...,
+    ...
+    "depth_0": ...,
+    "depth_1": ...,
+    ...
+    "proprio": ...,
+}
+```
+
+Then, write a script that creates your Gym environment, loads the pretrained model, and passes both into the
+`run_eval_loop` function from [orca/utils/run_eval_loop.py](orca/utils/run_eval_loop.py).
+
+As an example, see [experiments/homer/bridge/eval.py](orca/homer/bridge/eval.py).
+
+We also provide a simple sim as an example of how to do evaluation.
+
+To run evaluation in sim, you can use the following command:
 ```bash
 # requires pybullet and kinpy to be installed
 bash scripts/sim_eval.sh
