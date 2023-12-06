@@ -107,8 +107,8 @@ def get_dataset_config(modality="multimodal", window_size=1):
     normalization_type = "normal"
     if modality == "multimodal":
         task_augmentation = dict(
-            task_augmentation_strategy="delete_task_conditioning",
-            task_augmentation_kwargs=dict(
+            task_augment_strategy="delete_task_conditioning",
+            task_augment_kwargs=dict(
                 delete_key_groups_probs=[
                     (["image_*"], 0.5),
                     (["language_instruction"], 0.5),
@@ -137,7 +137,6 @@ def get_dataset_config(modality="multimodal", window_size=1):
             additional_action_window_size=0,
             goal_relabeling_strategy="uniform",
             subsample_length=100,
-            **task_augmentation,
         ),
         "frame_transform_kwargs": dict(
             resize_size=(256, 256),
@@ -155,6 +154,7 @@ def get_dataset_config(modality="multimodal", window_size=1):
                     "random_hue",
                 ],
             ),
+            **task_augmentation,
         ),
         "traj_transform_threads": 48,  # shared between all datasets
         "traj_read_threads": 48,  # shared between all datasets

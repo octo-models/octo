@@ -140,12 +140,42 @@ def _decode_images(obs: dict) -> dict:
 
 def _augment(obs: dict, seed, augment_kwargs) -> dict:
     """Augments images, skipping padding images."""
-    for key in obs:
-        if "image" in key:
+    num_image_keys = sum(["image" in key for key in obs])
+
+    if not isinstance(augment_kwargs, Sequence):
+        augment_kwargs = [copy.deepcopy(augment_kwargs)] * num_image_keys
+
+    for i in range(num_image_keys):
+        if augment_kwargs[i] is not None:
+            key = f"image_{i}"
             if obs["pad_mask_dict"][key]:
                 obs[key] = dl.transforms.augment_image(
-                    obs[key], **augment_kwargs, seed=seed
+                    obs[key], **augment_kwargs[i], seed=seed + i
                 )
+    return obs
+
+
+def _resize(obs: dict, resize_size, depth_resize_size) -> dict:
+    """Resizes images and depth images."""
+    num_image_keys = sum(["image" in key for key in obs])
+    num_depth_keys = sum(["depth" in key for key in obs])
+
+    if resize_size is None or isinstance(resize_size[0], int):
+        resize_size = [resize_size] * num_image_keys
+    if depth_resize_size is None or isinstance(depth_resize_size[0], int):
+        depth_resize_size = [depth_resize_size] * num_depth_keys
+
+    for i in range(num_image_keys):
+        if resize_size[i] is not None:
+            key = f"image_{i}"
+            obs[key] = dl.transforms.resize_image(obs[key], size=resize_size[i])
+
+    for i in range(num_depth_keys):
+        if depth_resize_size[i] is not None:
+            key = f"depth_{i}"
+            obs[key] = dl.transforms.resize_depth_image(
+                obs[key], size=depth_resize_size[i]
+            )
     return obs
 
 
@@ -155,8 +185,6 @@ def apply_trajectory_transforms(
     train: bool,
     goal_relabeling_strategy: Optional[str] = None,
     goal_relabeling_kwargs: dict = {},
-    task_augmentation_strategy: Optional[str] = None,
-    task_augmentation_kwargs: dict = {},
     window_size: int = 1,
     additional_action_window_size: int = 0,
     action_encoding: ActionEncoding = ActionEncoding.EEF_POS,
@@ -181,9 +209,6 @@ def apply_trajectory_transforms(
         goal_relabeling_strategy (str, optional): The goal relabeling strategy to use, or None for
             no goal relabeling. See `bc_goal_relabeling.py`.
         goal_relabeling_kwargs (dict, optional): Additional keyword arguments to pass to the goal relabeling function.
-        task_augmentation_strategy (Optional[str], optional): The task augmentation strategy to use, or None for no task
-            augmentation. See `task_augmentation.py`.
-        task_augmentation_kwargs (dict, optional): Additional keyword arguments to pass to the task augmentation function.
         window_size (int, optional): The length of the snippets that trajectories are chunked into.
         additional_action_window_size (int, optional): The number of additional actions beyond window_size to include
             in the chunked actions.
@@ -239,15 +264,6 @@ def apply_trajectory_transforms(
             partial(_subsample, subsample_length=subsample_length), num_parallel_calls
         )
 
-    if train and task_augmentation_strategy is not None:
-        dataset = dataset.map(
-            partial(
-                getattr(task_augmentation, task_augmentation_strategy),
-                **task_augmentation_kwargs,
-            ),
-            num_parallel_calls,
-        )
-
     dataset = dataset.map(
         partial(
             _chunk_act_obs,
@@ -263,8 +279,15 @@ def apply_trajectory_transforms(
 
 def get_frame_transforms(
     train: bool,
-    image_augment_kwargs: Optional[dict] = None,
-    resize_size: Optional[Tuple[int, int]] = None,
+    image_augment_kwargs: Union[Optional[dict], Sequence[Optional[dict]]] = None,
+    resize_size: Union[
+        Optional[Tuple[int, int]], Sequence[Optional[Tuple[int, int]]]
+    ] = None,
+    depth_resize_size: Union[
+        Optional[Tuple[int, int]], Sequence[Optional[Tuple[int, int]]]
+    ] = None,
+    task_augment_strategy: Optional[str] = None,
+    task_augment_kwargs: dict = {},
 ) -> List[Callable[[dict], dict]]:
     """
     Returns a list of functions to be applied to each frame. These transforms are usually
@@ -272,9 +295,21 @@ def get_frame_transforms(
 
     Args:
         train (bool): Whether the dataset is for training (affects image augmentation).
-        image_augment_kwargs (dict): Keyword arguments to pass to the image augmentation function. See
-            `dlimp.transforms.augment_image` for documentation.
-        resize_size (Tuple[int, int], optional): If provided, images will be resized to this size.
+        image_augment_kwargs (dict or Sequence[dict]): Keyword arguments to pass to the image
+            augmentation function. See `dlimp.transforms.augment_image` for documentation. If a list
+            of dicts is provided, then the ith entry will be used for "image_i" (order determined by
+            "image_obs_keys"). A value of None or a None list entry will skip image augmentation for
+            the corresponding image(s).
+        resize_size (Tuple[int, int] or Sequence[Tuple[int, int]]): If provided, images will be
+            resized to this size. If a list of tuples is provided, then the ith entry will be used
+            for "image_i" and "depth_i" (order determined by "image_obs_keys" and "depth_obs_keys",
+            respectively). A value of None or a None list entry will skip resizing for the
+            corresponding image(s).
+        depth_resize_size (Tuple[int, int] or Sequence[Tuple[int, int]]): Same as resize_size, but
+            for depth images.
+        task_augmentation_strategy (Optional[str], optional): The task augmentation strategy to use, or None for no task
+            augmentation. See `task_augmentation.py`.
+        task_augmentation_kwargs (dict, optional): Additional keyword arguments to pass to the task augmentation function.
     """
 
     # convenience wrapper that takes a function that operates on a non-chunked "observation" dict
@@ -288,25 +323,29 @@ def get_frame_transforms(
 
     transforms = []
 
-    # decode images (and depth images), marking empty strings as padding
+    if train and task_augment_strategy is not None:
+        # perform task augmentation (e.g., dropping keys)
+        transforms.append(
+            partial(
+                getattr(task_augmentation, task_augment_strategy),
+                **task_augment_kwargs,
+            ),
+        )
+
+    # decode images (and depth images)
     transforms.append(partial(apply_obs_transform, _decode_images))
 
-    # resize images, if requested
-    if resize_size is not None:
-        transforms.append(
+    # resize images (and depth images)
+    transforms.append(
+        partial(
+            apply_obs_transform,
             partial(
-                apply_obs_transform,
-                partial(dl.transforms.resize_images, size=resize_size),
-            )
+                _resize, resize_size=resize_size, depth_resize_size=depth_resize_size
+            ),
         )
-        transforms.append(
-            partial(
-                apply_obs_transform,
-                partial(dl.transforms.resize_depth_images, size=resize_size),
-            )
-        )
+    )
 
-    if train and image_augment_kwargs is not None:
+    if train:
         # augment all images with the same seed, skipping padding images
         def aug(frame):
             seed = tf.random.uniform([2], maxval=tf.dtypes.int32.max, dtype=tf.int32)
@@ -323,9 +362,9 @@ def make_dataset_from_rlds(
     data_dir: str,
     train: bool,
     shuffle: bool = True,
-    image_obs_keys: Union[str, List[str]] = [],
-    depth_obs_keys: Union[str, List[str]] = [],
-    state_obs_keys: Union[str, List[str]] = [],
+    image_obs_keys: Union[str, Sequence[str]] = (),
+    depth_obs_keys: Union[str, Sequence[str]] = (),
+    state_obs_keys: Union[str, Sequence[str]] = (),
     state_encoding: StateEncoding = StateEncoding.NONE,
     action_encoding: ActionEncoding = ActionEncoding.EEF_POS,
     action_proprio_normalization_type: Optional[str] = None,
