@@ -43,11 +43,13 @@ please reach out to [pertsch@berkeley.edu](mailto:pertsch@berkeley.edu) or downl
 
 ### Finetuning ORCA Policies
 
-To finetune foundational ORCA policies, you can follow the example command below. You can modify hyperparameters like dataset, batch size etc. in [experiments/dibya/finetune_config.py](finetune_config.py).
+To finetune foundational ORCA policies, you can follow the example command below. You can modify hyperparameters like dataset, batch size etc. in [finetune_config.py](finetune_config.py).
 
 ```
 python finetune.py --config=your_finetune_config.py:mode=head_only --config.pretrained_path=...
 ```
+We offer three finetuning modes depending on the parts of the model that are kept frozen: ```head_only```, ```head_mlp_only``` and ```full``` to finetune the full model. Besides, one can specify the task type to finetune with ```image_conditioned```, ```language_conditioned``` or ```multimodal``` for both. For example, to finetune the full transformer with multimodal inputs use:
+```--config=your_finetune_config.py:mode=full,multimodal```
 
 ### Base Policy Training
 

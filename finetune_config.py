@@ -1,7 +1,7 @@
+from config import update_config, wrap
 from ml_collections import ConfigDict
 from ml_collections.config_dict import FieldReference, placeholder
 
-from config import update_config, wrap
 from orca.data.utils.data_utils import ActionEncoding, StateEncoding
 
 
