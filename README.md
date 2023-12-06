@@ -51,6 +51,8 @@ python finetune.py --config=your_finetune_config.py:mode=head_only --config.pret
 We offer three finetuning modes depending on the parts of the model that are kept frozen: ```head_only```, ```head_mlp_only``` and ```full``` to finetune the full model. Besides, one can specify the task type to finetune with ```image_conditioned```, ```language_conditioned``` or ```multimodal``` for both. For example, to finetune the full transformer with multimodal inputs use:
 ```--config=your_finetune_config.py:mode=full,multimodal```
 
+In order to finetune the model to new observation or action spaces, one needs to define this in the config file. We provide an example for finetuning for joint control on the Aloha setup here.
+
 ### Base Policy Training
 
 To train foundational ORCA policies, you can follow the example command below. You can modify hyperparameters like
