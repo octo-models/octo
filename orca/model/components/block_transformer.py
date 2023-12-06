@@ -2,7 +2,7 @@
 from enum import Enum
 from fnmatch import fnmatch
 import logging
-from typing import Mapping
+from typing import Any, Dict, Mapping, Sequence, Tuple, Union
 
 import einops
 import flax
@@ -13,7 +13,6 @@ import numpy as np
 
 from orca.model.components.base import TokenGroup
 from orca.model.components.transformer import Transformer
-from orca.utils.typing import Any, Dict, Sequence, Tuple, Union
 
 
 class AttentionRule(Enum):

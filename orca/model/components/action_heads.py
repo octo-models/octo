@@ -1,5 +1,5 @@
 # adapted from https://github.com/google-research/robotics_transformer/blob/master/transformer_network.py
-from typing import Optional
+from typing import Dict, Optional
 
 import distrax
 from einops import rearrange
@@ -10,7 +10,7 @@ import jax.numpy as jnp
 from orca.model.components.base import TokenGroup
 from orca.model.components.tokenizers import BinTokenizer
 from orca.model.components.transformer import MAPHead
-from orca.utils.typing import Dict, PRNGKey
+from orca.utils.typing import PRNGKey
 
 
 def masked_mean(x, mask):
