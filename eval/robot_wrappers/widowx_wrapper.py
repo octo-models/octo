@@ -1,8 +1,9 @@
+import time
+
 import gym
 import numpy as np
-from widowx_envs.widowx_env_service import WidowXClient
-import time
 from pyquaternion import Quaternion
+from widowx_envs.widowx_env_service import WidowXClient
 
 
 def state_to_eep(xyz_coor, zangle: float):
@@ -41,7 +42,6 @@ def convert_obs(obs, im_size):
     # NOTE: assume image_1 is not available
     return {
         "image_0": image_obs,
-        "image_1": np.zeros((im_size, im_size, 3), dtype=np.uint8),
         "proprio": proprio,
     }
 
@@ -49,7 +49,6 @@ def convert_obs(obs, im_size):
 def null_obs(img_size):
     return {
         "image_0": np.zeros((img_size, img_size, 3), dtype=np.uint8),
-        "image_1": np.zeros((img_size, img_size, 3), dtype=np.uint8),
         "proprio": np.zeros((8,), dtype=np.float64),
     }
 
