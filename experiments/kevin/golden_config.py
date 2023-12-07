@@ -1,6 +1,7 @@
+import copy
+
 from config import get_config as get_base_config
 from config import update_config, wrap
-import copy
 
 
 def get_config(config_string=None):
@@ -39,9 +40,13 @@ def get_config(config_string=None):
             "random_hue",
         ],
     )
+
+    del base_config["dataset_kwargs"]["frame_transform_kwargs"]["resize_size"]
+    del base_config["dataset_kwargs"]["frame_transform_kwargs"]["image_augment_kwargs"]
+
     base_config["dataset_kwargs"]["frame_transform_kwargs"]["resize_size"] = [
-        (256, 256),
-        (128, 128),
+        (256, 256),  # workspace (3rd person) camera is at 256x256
+        (128, 128),  # wrist camera is at 128x128
     ]
     base_config["dataset_kwargs"]["frame_transform_kwargs"]["image_augment_kwargs"] = [
         workspace_augment_kwargs,
