@@ -2,7 +2,6 @@ from collections import deque
 
 import gym
 import gym.spaces
-import jax
 import numpy as np
 
 

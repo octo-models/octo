@@ -5,9 +5,9 @@ from functools import partial
 import json
 import os
 import time
-from typing import Callable, Optional
+from typing import Callable
 
-from absl import app, flags, logging
+from absl import flags, logging
 import click
 import cv2
 import flax
@@ -18,13 +18,12 @@ import jax.numpy as jnp
 import numpy as np
 import tensorflow as tf
 
-from orca.sim.widowx_sim_env import WidowXSimEnv
 from orca.utils.eval_utils import (
     download_checkpoint_from_gcs,
     load_jaxrlm_checkpoint,
     supply_rng,
 )
-from orca.utils.gym_wrappers import HistoryWrapper, RHCWrapper, TemporalEnsembleWrapper
+from orca.utils.gym_wrappers import HistoryWrapper, RHCWrapper
 from orca.utils.pretrained_utils import PretrainedModel
 
 np.set_printoptions(suppress=True)

@@ -2,10 +2,6 @@
 import copy
 from typing import Any, Dict, List, Tuple
 
-import numpy as np
-import tensorflow_datasets as tfds
-import tqdm
-
 from orca.data.oxe import oxe_dataset_configs
 
 BRIDGE_MIX = [

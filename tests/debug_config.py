@@ -1,5 +1,3 @@
-from copy import deepcopy
-
 from config import get_config as get_base_config
 from config import update_config
 

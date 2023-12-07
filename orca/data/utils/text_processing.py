@@ -52,7 +52,7 @@ class HFTokenizer(TextProcessor):
 class MuseEmbedding(TextProcessor):
     def __init__(self):
         import tensorflow_hub as hub  # lazy import
-        import tensorflow_text  # required for muse
+        import tensorflow_text  # noqa: F401
 
         self.muse_model = hub.load(MULTI_MODULE)
 
