@@ -126,8 +126,7 @@ def get_dataset_config(modality="multimodal", window_size=1):
             data_mix=placeholder(str),
             # for v4 TPUs: "gs://rail-orca-central2/resize_336_336"
             data_dir=placeholder(str),
-            n_third_person_cameras=1,
-            n_wrist_cameras=0,
+            load_camera_views=("primary", "wrist"),
             load_depth=False,
         ),
         # common_dataset_kwargs override specific kwargs from dataset_kwargs_list
