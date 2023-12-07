@@ -197,6 +197,8 @@ def create_lr_schedule(name: str, **kwargs):
             kwargs: init_value, peak_value, warmup_steps, decay_steps
         rsqrt: inverse square root decay with warmup, from the "Scaling Vision Transformers" paper.
             kwargs: init_value, peak_value, warmup_steps, timescale (optional, default 10000)
+        constant: constant learning rate with warmup.
+            kwargs: init_value, peak_value, warmup_steps
 
     Args:
         name: name of the schedule
@@ -215,6 +217,18 @@ def create_lr_schedule(name: str, **kwargs):
                 ),
                 lambda step: kwargs["peak_value"]
                 / jnp.sqrt((step + timescale) / timescale),
+            ],
+            [kwargs["warmup_steps"]],
+        )
+    elif name == "constant":
+        return optax.join_schedules(
+            [
+                optax.linear_schedule(
+                    init_value=kwargs["init_value"],
+                    end_value=kwargs["peak_value"],
+                    transition_steps=kwargs["warmup_steps"],
+                ),
+                lambda step: kwargs["peak_value"],
             ],
             [kwargs["warmup_steps"]],
         )
