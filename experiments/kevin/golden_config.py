@@ -1,5 +1,3 @@
-import copy
-
 from config import get_config as get_base_config
 from config import update_config, wrap
 
@@ -62,7 +60,6 @@ def get_config(config_string=None):
             oxe_kwargs=dict(
                 data_mix="oxe_magic_soup",
                 data_dir="gs://rail-orca-central2/resize_256_256",
-                n_wrist_cameras=1,
             ),
             batch_size=256,
             shuffle_buffer_size=500000,
