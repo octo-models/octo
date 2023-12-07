@@ -97,6 +97,9 @@ def run_policy_on_trajectory(policy_fn, traj, *, text_processor=None):
         tasks["language_instruction"] = text_processor.encode(
             [s.decode("utf-8") for s in traj["tasks"]["language_instruction"]]
         )
+        tasks["pad_mask_dict"]["language_instruction"] = np.array(
+            [len(s.decode("utf-8")) > 0 for s in traj["tasks"]["language_instruction"]]
+        )
 
     actions = policy_fn(traj["observation"], tasks)
 
