@@ -1,10 +1,12 @@
 # Written by Dibya
+import logging
 from typing import Dict, Optional
 
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
 
+from orca.model.components.base import TokenGroup
 from orca.model.components.block_transformer import (
     AttentionRule,
     BlockTransformer,
@@ -12,8 +14,6 @@ from orca.model.components.block_transformer import (
     TimestepGroup,
 )
 from orca.utils.typing import Data, Sequence
-
-posemb_init = nn.initializers.normal(stddev=0.02)
 
 
 class OrcaTransformer(nn.Module):
@@ -34,9 +34,9 @@ class OrcaTransformer(nn.Module):
 
     The transformer is a blockwise-causal transformer, where each timestep only attends to the same or previous timesteps.
 
-    When called, the module requests a set of readouts, and performs a forward pass of the transformer on the following sequence:
+    The model performs a forward pass of the transformer on the following sequence:
 
-        [
+    [
         <task tokens>,
         <observation ts0 tokens>, <readout1 ts0 tokens>, <readout2 ts0 tokens>, ...
         <observation ts1 tokens>, <readout1 ts1 tokens>, <readout2 ts1 tokens>, ...
@@ -44,23 +44,26 @@ class OrcaTransformer(nn.Module):
     ]
 
     The observation tokens attend to the task prefix, and to all observation tokens in the same or previous timesteps.
-    Readouts attend to everything observation tokens do, but are not attended to by observation or task tokens. All
-    tokens within the same group and same timestep (e.g. "observation ts0 tokens") fully attend to each other.
+    Readouts provide a mechanism for "reading out" the information in the transformer. They can attend to the task prefix,
+    and causally to all previous observation tokens, but
+        - Readouts cannot attend to other readouts
+        - Observation and task tokens cannot attend to readouts
 
     By this design, each readout does not influence the computation happening in the task or observation tokens,
-    and each readout is **independent of one another**. This allows us to hot-swap in different
+    and each readout is **independent of one another**. This flexible design allows us to hot-swap in different
     readouts at any time (e.g. we can run with the action readout or the value readout or both at the same time).
 
-
     Args:
-        observations_tokenizers (Sequence[nn.Module]): List of flax modules for tokenizing the observations.
+        observations_tokenizers (Dict[str, nn.Module]): Dictionary of flax modules for tokenizing the observations.
             The output of each tokenizer is concatenated to form the observation tokens.
-        task_tokenizers (Sequence[nn.Module]): List of flax modules for tokenizing the task.
+        task_tokenizers (Dict[str, nn.Module]): Dictionary of flax modules for tokenizing the task.
             The output of each tokenizer is concatenated to form the task token prefix.
-        readouts (Dict[str, int]): Dictionary of {readout_name: n_tokens_for_readout}
-        transformer_kwargs (Dict): Dictionary of kwargs to forward to BlockTransformer.
-        token_embedding_size (int): Dimension of the token embeddings (default: 512)
-        max_horizon (int): The maximum number of timesteps that the transformer can be run with.
+        readouts (Dict[str, int]): Dictionary of {readout_name: n_tokens_for_readout}.
+        transformer_kwargs (Dict): Dictionary of kwargs to forward to the Transformer.
+        token_embedding_size (int): Dimension of the token embeddings
+        max_horizon (int): The maximum number of timesteps that the transformer can be run with. Note that while the
+            transformer can be run with any horizon <= max_horizon, the model will only generate sane outputs for
+            horizon lengths smaller or equal to the pre-training horizon.
     """
 
     observation_tokenizers: Dict[str, nn.Module]
@@ -79,7 +82,7 @@ class OrcaTransformer(nn.Module):
         readouts: Optional[Sequence[str]] = None,
         train: bool = False,
         verbose: bool = False,
-    ):
+    ) -> Dict[str, TokenGroup]:
         """
         Args:
             observations: A dictionary containing observation data for a batch of trajectory windows.
@@ -92,20 +95,22 @@ class OrcaTransformer(nn.Module):
             verbose: If True, prints out the transformer structure.
 
         Returns:
-            embedding_dict: A dictionary {
-                    **{readout_name: embedding of shape (batch, horizon, n_tokens_for_readout, token_embedding_size) for k in readouts},
-                    also includes the outputs corresponding to the task and observation tokens (although this probably isn't as useful)
-                }
+            transformer_outputs: A dictionary {token_group_name: token_group},
+                which contain the transformer embeddings for all observation tokens, task tokens, and readout tokens.
+                The special keys "task" and "obs" contain the concatenated embeddings for all task tokens and observation tokens, respectively.
 
         Note: Horizon can be anything <= max_horizon.
         """
         if readouts is None:
             readouts = list(self.readouts.keys())
 
+        #
         # Check that all inputs are valid
+        #
+
         assert set(readouts).issubset(
             set(self.readouts.keys())
-        ), "readouts must be a subset of those specified in the model config"
+        ), "readouts must be specified in the model config"
 
         batch_size, horizon = jax.tree_util.tree_leaves(observations)[0].shape[:2]
         assert horizon <= self.max_horizon, "horizon must be <= max_horizon"
@@ -113,83 +118,111 @@ class OrcaTransformer(nn.Module):
             jax.tree_map(lambda x: x.shape[1] == horizon, observations)
         ), "observations must have the same horizon"
 
+        #
         # Create inputs for the transformer
+        #
+
         all_prefix_groups = []
         all_timestep_groups = []
 
-        all_task_names = [f"task_{name}" for name in self.task_tokenizers]
-        all_obs_names = [f"obs_{name}" for name in self.observation_tokenizers]
+        # Tasks attend to all other tasks, but not to observations or readouts
+        task_attention_rules = {"task_*": AttentionRule.CAUSAL}
 
-        task_attention_rules = {
-            task_name: AttentionRule.CAUSAL for task_name in all_task_names
-        }  # Tasks attend to all other tasks
-
+        # Observations attend to all tasks and previous observations causally, but not to readouts
         observation_attention_rules = {
-            name: AttentionRule.CAUSAL for name in all_task_names + all_obs_names
-        }  # Observations attend to all tasks and previous observations causally
+            "task_*": AttentionRule.CAUSAL,
+            "obs_*": AttentionRule.CAUSAL,
+        }
 
+        #
         # First, add the task tokens
-        for name, tok in self.task_tokenizers.items():
-            # Receive inputs from tokenizer and cast to embedding size
-            task_tokens = tok(observations, tasks, train=train)
-            task_tokens = nn.Dense(self.token_embedding_size)(task_tokens)
+        #
 
+        for name, tok in self.task_tokenizers.items():
+            group_name = f"task_{name}"
+            # Receive inputs from tokenizer and cast to embedding size
+            tokenizer_output: TokenGroup = tok(observations, tasks, train=train)
+            if tokenizer_output is None:
+                logging.warning(f"Skipping task tokenizer: {group_name}")
+                continue
+
+            task_tokens = nn.Dense(
+                self.token_embedding_size, name=f"{group_name}_projection"
+            )(tokenizer_output.tokens)
             # task_tokens shape is (batch, n_tokens, token_embedding_size)
 
             # Add positional embedding
-            task_pos_embedding = self._create_positional_embedding(
-                f"task_{name}", task_tokens.shape[1], prefix=True
-            )
-            task_tokens += task_pos_embedding
+            task_tokens += self._create_positional_embedding(group_name, task_tokens)
 
             all_prefix_groups.append(
-                PrefixGroup(f"task_{name}", task_tokens, task_attention_rules)
+                PrefixGroup(
+                    tokens=task_tokens,
+                    mask=tokenizer_output.mask,
+                    name=group_name,
+                    attention_rules=task_attention_rules,
+                )
             )
 
+        #
         # Next, add the observation tokens
+        #
+
         for name, tok in self.observation_tokenizers.items():
+            group_name = f"obs_{name}"
             # Receive inputs from tokenizer and cast to embedding size
-            obs_tokens = tok(observations, tasks, train=train)
-            obs_tokens = nn.Dense(self.token_embedding_size)(obs_tokens)
+            tokenizer_output: TokenGroup = tok(observations, tasks, train=train)
+            if tokenizer_output is None:
+                logging.warning(f"Skipping observation tokenizer: {group_name}")
+                continue
+
+            obs_tokens = nn.Dense(
+                self.token_embedding_size, name=f"{group_name}_projection"
+            )(tokenizer_output.tokens)
             # obs_tokens shape is (batch, horizon, n_tokens, token_embedding_size)
 
             # Add positional embedding
-            obs_pos_embedding = self._create_positional_embedding(
-                f"obs_{name}", obs_tokens.shape[2], prefix=False
-            )
-            obs_tokens += obs_pos_embedding[:, :horizon, :, :]
+            obs_tokens += self._create_positional_embedding(group_name, obs_tokens)
+
+            # Update mask to account for which timesteps are padding
+            obs_pad_mask = jnp.logical_and(pad_mask[:, :, None], tokenizer_output.mask)
 
             all_timestep_groups.append(
-                TimestepGroup(f"obs_{name}", obs_tokens, observation_attention_rules)
+                TimestepGroup(
+                    tokens=obs_tokens,
+                    mask=obs_pad_mask,
+                    name=group_name,
+                    attention_rules=observation_attention_rules,
+                )
             )
-
+        #
         # Finally, add the readout tokens
+        #
+
         for readout_name in readouts:
-            # Readouts do not correspond to any inputs, so we just create a bunch of zeros
+            group_name = f"readout_{readout_name}"
+            # Readouts do not correspond to any inputs, just positional embeddings
             n_tokens_for_readout = self.readouts[readout_name]
             readout_tokens = jnp.zeros(
                 (batch_size, horizon, n_tokens_for_readout, self.token_embedding_size)
             )
 
             # Add positional embedding
-            readout_pos_embedding = self._create_positional_embedding(
-                f"readout_{readout_name}", n_tokens_for_readout, prefix=False
+            readout_tokens += self._create_positional_embedding(
+                group_name, readout_tokens
             )
-            readout_tokens += readout_pos_embedding[:, :horizon, :, :]
-
-            attention_rules = {
-                **{
-                    name: AttentionRule.CAUSAL
-                    for name in all_task_names + all_obs_names
-                },
-                f"readout_{readout_name}": AttentionRule.CAUSAL,
-            }  # Attend to tasks, all previous observations, and your own previous readout tokens
+            readout_mask = jnp.ones((batch_size, horizon, n_tokens_for_readout))
+            readout_attention_rules = {
+                "task_*": AttentionRule.CAUSAL,
+                "obs_*": AttentionRule.CAUSAL,
+                group_name: AttentionRule.CAUSAL,
+            }  # Attend to tasks, all previous observations, and *only it's own own readout*
 
             all_timestep_groups.append(
                 TimestepGroup(
-                    f"readout_{readout_name}",
-                    readout_tokens,
-                    attention_rules,
+                    tokens=readout_tokens,
+                    mask=readout_mask,
+                    name=group_name,
+                    attention_rules=readout_attention_rules,
                 )
             )
 
@@ -198,30 +231,34 @@ class OrcaTransformer(nn.Module):
             self.transformer_kwargs.get("add_position_embedding", False) is False
         ), "Already added positional embeddings to the tokens"
 
-        prefix_outputs, timestep_outputs = BlockTransformer(**self.transformer_kwargs)(
+        prefix_outputs, timestep_outputs = BlockTransformer(self.transformer_kwargs)(
             all_prefix_groups,
             all_timestep_groups,
-            pad_mask,
             train=train,
             verbose=verbose,
         )
-
-        outputs = dict()
-        outputs.update({group.name: group.tokens for group in prefix_outputs})
+        outputs = {}
         outputs.update(
             {
-                group.name.removeprefix("readout_"): group.tokens
+                group.name: TokenGroup(group.tokens, group.mask)
+                for group in prefix_outputs
+            }
+        )
+        outputs.update(
+            {
+                group.name: TokenGroup(group.tokens, group.mask)
                 for group in timestep_outputs
             }
         )
 
         if len(prefix_outputs) > 0:
-            outputs["task"] = jnp.concatenate(
-                [group.tokens for group in prefix_outputs], axis=-2
+            outputs["task"] = TokenGroup.concatenate(
+                [TokenGroup(group.tokens, group.mask) for group in prefix_outputs]
             )
-        outputs["obs"] = jnp.concatenate(
+
+        outputs["obs"] = TokenGroup.concatenate(
             [
-                group.tokens
+                TokenGroup(group.tokens, group.mask)
                 for group in timestep_outputs
                 if group.name.startswith("obs_")
             ],
@@ -230,16 +267,25 @@ class OrcaTransformer(nn.Module):
 
         return outputs
 
-    def _create_positional_embedding(self, name, n_tokens, prefix=False):
-        if prefix:
-            shape = (1, n_tokens, self.token_embedding_size)
+    def _create_positional_embedding(self, name: str, tokens: jax.Array):
+        if tokens.ndim == 3:  # for prefixes
+            shape = (1, *tokens.shape[-2:])
+        elif (
+            tokens.ndim == 4
+        ):  # for timesteps, create embedding for max_horizon, then truncate
+            shape = (1, self.max_horizon, *tokens.shape[-2:])
         else:
-            shape = (1, self.max_horizon, n_tokens, self.token_embedding_size)
-        return self.param(
+            raise ValueError(f"Invalid tokens shape: {tokens.shape}")
+
+        embedding = self.param(
             f"{name}_pos_embedding",
-            posemb_init,
+            nn.initializers.normal(stddev=0.02),
             shape,
         )
+        if tokens.ndim == 4:
+            # Use only the timesteps we receive as input
+            embedding = embedding[:, : tokens.shape[1]]
+        return jnp.broadcast_to(embedding, tokens.shape)
 
 
 class OrcaModel(nn.Module):

@@ -112,14 +112,32 @@ def remove_text(tasks: Data, zero_text_encoding: Data):
             tasks["language_instruction"],
             zero_text_encoding,
         )
-        tasks = flax.core.copy(tasks, {"language_instruction": new_language})
+        new_pad_dict = flax.core.copy(
+            tasks["pad_mask_dict"],
+            {
+                "language_instruction": jnp.zeros_like(
+                    tasks["pad_mask_dict"]["language_instruction"]
+                )
+            },
+        )
+        tasks = flax.core.copy(
+            tasks, {"language_instruction": new_language, "pad_mask_dict": new_pad_dict}
+        )
     return tasks
 
 
 def remove_images(tasks: Data):
     """Replaces images inside task dict with zero (black) images."""
-    new_images = {k: jnp.zeros_like(v) for k, v in tasks.items() if "image" in k}
-    return flax.core.copy(tasks, new_images)
+    updates = {k: jnp.zeros_like(v) for k, v in tasks.items() if "image" in k}
+    updates["pad_mask_dict"] = flax.core.copy(
+        tasks["pad_mask_dict"],
+        {
+            k: jnp.zeros_like(v)
+            for k, v in tasks["pad_mask_dict"].items()
+            if "image" in k
+        },
+    )
+    return flax.core.copy(tasks, updates)
 
 
 @partial(jax.jit, static_argnames=("samples_per_state", "policy_mode"))
@@ -215,11 +233,12 @@ class ValidationCallback(Callback):
             if "base" in self.modes_to_evaluate:
                 all_tasks["base"] = batch["tasks"]
             if "image_conditioned" in self.modes_to_evaluate:
-                all_tasks["text_conditioned"] = remove_images(batch["tasks"])
-            if "text_conditioned" in self.modes_to_evaluate:
                 all_tasks["image_conditioned"] = remove_text(
                     batch["tasks"], self.zero_text
                 )
+            if "text_conditioned" in self.modes_to_evaluate:
+                all_tasks["text_conditioned"] = remove_images(batch["tasks"])
+
             if "unconditioned" in self.modes_to_evaluate:
                 all_tasks["unconditioned"] = remove_text(
                     remove_images(batch["tasks"]), self.zero_text
