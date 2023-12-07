@@ -79,7 +79,7 @@ def get_config(
                 end_value=0.0,
             ),
             weight_decay=0.01,
-            clip_gradient=placeholder(float),
+            clip_gradient=1.0,
             frozen_keys=frozen_keys,
         ),
         val_kwargs=dict(
