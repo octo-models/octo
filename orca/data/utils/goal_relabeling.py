@@ -5,10 +5,8 @@ Contains simple goal relabeling logic for BC use-cases where rewards and next_ob
 import tensorflow as tf
 
 
-def uniform(traj):
-    """
-    Relabels with a true uniform distribution over future states.
-    """
+def uniform(traj: dict) -> dict:
+    """Relabels with a true uniform distribution over future states."""
     traj_len = tf.shape(tf.nest.flatten(traj["observation"])[0])[0]
 
     # select a random future index for each transition i in the range [i + 1, traj_len)
@@ -30,10 +28,8 @@ def uniform(traj):
     return traj
 
 
-def no_image_conditioning(traj):
-    """
-    Relabels with empty goal images.
-    """
+def no_image_conditioning(traj: dict) -> dict:
+    """Relabels with empty goal images."""
     traj_len = tf.shape(tf.nest.flatten(traj["observation"])[0])[0]
     traj["task"] = tf.nest.map_structure(
         lambda x: tf.zeros_like(x),

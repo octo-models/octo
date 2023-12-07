@@ -7,6 +7,8 @@ from typing import Any, Dict, List, Tuple
 
 import tensorflow as tf
 
+from orca.data.utils.data_utils import to_padding
+
 
 def delete_task_conditioning(
     traj: Dict[str, Any],
@@ -48,9 +50,7 @@ def delete_task_conditioning(
         for key in matching_keys:
             new_task[key] = tf.where(
                 i == delete_group_idx,
-                tf.zeros_like(task[key])
-                if tf.debugging.is_numeric_tensor(task[key])
-                else "",
+                to_padding(task[key]),
                 task[key],
             )
             new_task["pad_mask_dict"][key] = tf.where(
