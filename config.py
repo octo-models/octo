@@ -230,7 +230,7 @@ def get_model_config(transformer_size):
 
     return {
         **get_transformer_kwargs(transformer_size),
-        "proper_pad_mask": False,
+        "proper_pad_mask": True,
         "max_horizon": 10,
         "readouts": dict(),
         "heads": dict(
