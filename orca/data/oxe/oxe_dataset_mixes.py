@@ -1,8 +1,9 @@
 """Defines dataset mixtures and weights for the Open X-Embodiment Datasets."""
 import copy
-from typing import Any, Dict, List, Tuple
+import logging
+from typing import Any, Dict, List, Sequence, Tuple, Union
 
-from orca.data.oxe import oxe_dataset_configs
+from orca.data.oxe.oxe_dataset_configs import ActionEncoding, OXE_DATASET_CONFIGS
 
 BRIDGE_MIX = [
     ("bridge_dataset", 1.0),
@@ -131,7 +132,7 @@ OXE_FULL_MIX = [
     ("berkeley_gnm_sac_son", 1.0),
 ]
 
-mixes = {
+OXE_NAMED_MIXES = {
     "bridge": BRIDGE_MIX,
     "rtx": RT_X_MIX,
     "rtx_franka": RT_X_MIX + OXE_FRANKA_MIX,
@@ -140,11 +141,10 @@ mixes = {
 
 
 def make_oxe_dataset_kwargs_and_weights(
-    data_mix: List[Tuple[str, float]],
+    data_mix: Union[str, Sequence[Tuple[str, float]]],
     data_dir: str,
     deduplicate: bool = True,
-    n_third_person_cameras: int = 1,
-    n_wrist_cameras: int = 0,
+    load_camera_views: Sequence[str] = ("primary",),
     load_depth: bool = True,
     load_proprio: bool = True,
 ) -> Tuple[Dict[str, Any], List[float]]:
@@ -152,16 +152,20 @@ def make_oxe_dataset_kwargs_and_weights(
     Generates dataset kwargs for a given dataset mix from the Open X-Embodiment dataset.
 
     Args:
-         data_mix: List of (dataset name, sampling weight) tuples.
+         data_mix: List of (dataset name, sampling weight) tuples, or a string specifying a pre-defined mix to
+            load from `OXE_NAMED_MIXES` above.
          data_dir: Base data directory that gets registered in each dataset.
          deduplicate: If True, discards any duplicate dataset entries based on dataset name.
-         n_third_person_cameras: Number of RGB third person camera input streams to load.
-         n_wrist_cameras: Number of RGB wrist camera input streams to load.
+         load_camera_views: Which views to load from each dataset. See the top of `oxe_dataset_configs.py`
+            for available views.
          load_depth: If True, loads corresponding depth channels for each RGB channel.
          load_proprio: If True, loads proprioceptive information.
     Returns:
         Tuple of (dataset_kwargs_list, sampling weights).
     """
+    if isinstance(data_mix, str):
+        data_mix = OXE_NAMED_MIXES[data_mix]
+
     if deduplicate:
         filtered_datasets, included_dataset_names = [], []
         for dataset, weight in data_mix:
@@ -169,42 +173,34 @@ def make_oxe_dataset_kwargs_and_weights(
                 filtered_datasets.append((dataset, weight))
                 included_dataset_names.append(dataset)
             else:
-                print(f"Skipping duplicate: {(dataset, weight)}.")
+                logging.warning(f"Skipping duplicate: {(dataset, weight)}.")
         data_mix = filtered_datasets
 
     data_kwargs_list, weights = [], []
     for dataset, weight in data_mix:
-        dataset_kwargs = copy.deepcopy(oxe_dataset_configs.OXE_DATASET_KWARGS[dataset])
-        if (
-            dataset_kwargs["action_encoding"]
-            is not oxe_dataset_configs.ActionEncoding.EEF_POS
-        ):
-            print(
+        dataset_kwargs = copy.deepcopy(OXE_DATASET_CONFIGS[dataset])
+        if dataset_kwargs["action_encoding"] is not ActionEncoding.EEF_POS:
+            logging.warning(
                 f"Skipping {dataset} since only EEF pose delta action encoding "
                 f"is supported."
             )
             continue
 
         # adjust loaded features in kwargs
-        dataset_kwargs["image_obs_keys"] = dataset_kwargs["image_obs_keys"][
-            :n_third_person_cameras
-        ] + (
-            dataset_kwargs["image_obs_keys"][-n_wrist_cameras:]
-            if n_wrist_cameras
-            else []
-        )
+        dataset_kwargs["image_obs_keys"] = [
+            dataset_kwargs["image_obs_keys"][k] for k in load_camera_views
+        ]
 
         if not any([e is not None for e in dataset_kwargs["image_obs_keys"]]):
-            print(f"Skipping {dataset} since no image input was loaded from it.")
+            logging.warning(
+                f"Skipping {dataset} since no image input was loaded from it."
+            )
             continue
 
-        dataset_kwargs["depth_obs_keys"] = dataset_kwargs["depth_obs_keys"][
-            :n_third_person_cameras
-        ] + (
-            dataset_kwargs["depth_obs_keys"][-n_wrist_cameras:]
-            if n_wrist_cameras
-            else []
-        )
+        dataset_kwargs["depth_obs_keys"] = [
+            dataset_kwargs["depth_obs_keys"][k] for k in load_camera_views
+        ]
+
         if not load_depth:
             dataset_kwargs.pop("depth_obs_keys")
         if not load_proprio:
