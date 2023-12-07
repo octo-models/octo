@@ -77,7 +77,7 @@ python train.py --config config.py:vit_s --name=orca --config.dataset_kwargs.oxe
 ## Evaluation
 
 To evaluate policies on a robot, first wrap your robot controller in a Gym environment. As an example, see
-[widowx_wrapper.py](experiments/homer/bridge/widowx_wrapper.py) which wraps the robot controller used for the
+[widowx_wrapper.py](eval/robot_wrappers/widowx_wrapper.py) which wraps the robot controller used for the
 WidowX robot in BridgeData.
 
 The `step` and `reset` functions of the Gym environment should return observations with the images, depth images, and/or
@@ -96,19 +96,9 @@ obs = {
 ```
 
 Then, write a script that creates your Gym environment, loads the pretrained model, and passes both into the
-`run_eval_loop` function from [orca/utils/run_eval_loop.py](orca/utils/run_eval_loop.py).
+`run_eval_loop` function from [orca/utils/run_eval.py](orca/utils/run_eval.py). As an example, see [eval/eval_widowx.py](eval/eval_widowx.py). A command to run this script can be found in [scripts/widowx_eval.sh](scripts/widowx_eval.sh). **VERY IMPORTANT**: make sure to wrap the Gym environment for your robot in the [UnnormalizeActionProprio](orca/utils/gym_wrappers.py) wrapper to unnormalize/normalize the actions and proprio so that they match what the policy was trained on.
 
-As an example, see [experiments/homer/bridge/eval.py](orca/homer/bridge/eval.py).
-
-We also provide a simple sim as an example of how to do evaluation.
-
-To run evaluation in sim, you can use the following command:
-```bash
-# requires pybullet and kinpy to be installed
-bash scripts/sim_eval.sh
-```
-
-This will spawn a `pybullet` environment with a WidowX robot. Since this environment is not used in training, this is purely for testing the pipeline.
+We also provide a simple simulated robot environment as another example of how to perform evaluation. See [eval/eval_sim.py](eval/eval_sim.py) and [scripts/widowx_eval.sh](scripts/widowx_eval.sh). The simulated environment requires `pybullet` and `kinpy` to be installed.
 
 ## Contributing
 Experimental things and training/eval scripts should go in `experiments/<your_name>`. To make any changes to files outside of your experiments directory, please open a pull request.
