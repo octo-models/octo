@@ -21,6 +21,14 @@ logging.set_verbosity(logging.WARNING)
 
 FLAGS = flags.FLAGS
 
+flags.DEFINE_multi_string(
+    "checkpoint_weights_path", None, "Path to checkpoint", required=True
+)
+flags.DEFINE_multi_integer("checkpoint_step", None, "Checkpoint step", required=True)
+flags.DEFINE_string(
+    "checkpoint_cache_dir", "/tmp/", "Where to cache checkpoints downloaded from GCS"
+)
+
 # custom to bridge_data_robot
 flags.DEFINE_string("ip", "localhost", "IP address of the robot")
 flags.DEFINE_integer("port", 5556, "Port of the robot")
@@ -117,9 +125,18 @@ def main(_):
             weights_path, step=int(step)
         )
 
-    metadata_path = os.path.join(
-        FLAGS.checkpoint_weights_path[0], f"dataset_statistics_bridge_dataset.json"
-    )
+    if "finetune" in weights_path:
+        metadata_path = os.path.join(
+            weights_path, "dataset_statistics.json"
+        )
+    elif "from_scratch" in weights_path:
+        metadata_path = os.path.join(
+            weights_path, "dataset_statistics_widowx_cleaver:2.0.0.json"
+        )
+    else:
+        metadata_path = os.path.join(
+            weights_path, "dataset_statistics_bridge_dataset.json"
+        )
     with open(metadata_path, "r") as f:
         metadata = json.load(f)
 
