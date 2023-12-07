@@ -1,10 +1,10 @@
-from enum import IntEnum
+from enum import Enum
 import hashlib
 import inspect
 import json
 import logging
 import os
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, List, Tuple
 
 import dlimp as dl
 import numpy as np
@@ -20,74 +20,30 @@ def tree_map(fn: Callable, tree: dict) -> dict:
     }
 
 
-class StateEncoding(IntEnum):
-    """Defines supported proprio state encoding schemes for different datasets."""
+class NormalizationType(str, Enum):
+    """Defines supported normalization schemes for action and proprio."""
 
-    NONE = -1  # no state provided
-    POS_EULER = 1  # EEF XYZ + roll-pitch-yaw + 1 x pad + gripper open/close
-    POS_QUAT = 2  # EEF XYZ + quaternion + gripper open/close
-    JOINT = 3  # 7 x joint angles (padding added if fewer) + gripper open/close
-    JOINT_BIMANUAL = 4  # 2 x [6 x joint angles + gripper open/close]
+    NORMAL = "normal"  # normalize to mean 0, std 1
+    BOUNDS = "bounds"  # normalize to [-1, 1]
 
 
-class ActionEncoding(IntEnum):
-    """Defines supported action encoding schemes for different datasets."""
-
-    EEF_POS = 1  # EEF delta XYZ + roll-pitch-yaw + gripper open/close
-    JOINT_POS = 2  # 7 x joint delta position + gripper open/close
-    JOINT_POS_BIMANUAL = 3  # 2 x [6 x joint pos + gripper]
-
-
-def state_encoding_length(state_encoding):
-    if state_encoding == StateEncoding.NONE:
-        return 0
-    # TODO: remove hack that POS_EULER pads 0 to match length
-    elif state_encoding in [
-        StateEncoding.POS_EULER,
-        StateEncoding.POS_QUAT,
-        StateEncoding.JOINT,
-    ]:
-        return 8
-    elif state_encoding in [StateEncoding.JOINT_BIMANUAL]:
-        return 14
+def to_padding(tensor: tf.Tensor) -> tf.Tensor:
+    if tf.debugging.is_numeric_tensor(tensor):
+        return tf.zeros_like(tensor)
+    elif tensor.dtype == tf.string:
+        return tf.fill(tf.shape(tensor), "")
     else:
-        raise ValueError(f"State encoding {state_encoding} not supported.")
+        raise ValueError(f"Cannot generate padding for tensor of type {tensor.dtype}.")
 
 
-def action_encoding_length(action_encoding):
-    if action_encoding in [ActionEncoding.EEF_POS]:
-        return 7
-    elif action_encoding in [ActionEncoding.JOINT_POS]:
-        return 8
-    elif action_encoding in [ActionEncoding.JOINT_POS_BIMANUAL]:
-        return 14
-    else:
-        raise ValueError(f"Action encoding {action_encoding} not supported.")
-
-
-def make_zero_actions(action, action_encoding):
+def make_neutral_actions(
+    action: tf.Tensor, absolute_action_mask: tf.Tensor
+) -> tf.Tensor:
+    """Returns "neutral" actions, meaning relative actions are zeroed and absolute actions are retrained.
+    `absolute_action_mask` should be a 1D boolean mask that indicates which action dimensions are absolute.
     """
-    Returns neutral action for action encoding, matches shape of input action.
-    Zero-action 0s out all relative actions and retains value of absolute actions like gripper open/close.
-    """
-    assert action.shape[-1] == action_encoding_length(action_encoding), (
-        f"For action encoding {action_encoding} expected {action_encoding_length(action_encoding)}-dim action,"
-        f" but got {action.shape[-1]}-dim action."
-    )
-    if action_encoding == ActionEncoding.EEF_POS:
-        is_absolute_action = tf.range(action.shape[-1]) >= 6
-    elif action_encoding == ActionEncoding.JOINT_POS:
-        is_absolute_action = tf.range(action.shape[-1]) >= 7
-    elif action_encoding == ActionEncoding.JOINT_POS_BIMANUAL:
-        is_absolute_action = tf.math.logical_or(
-            tf.range(action.shape[-1]) == 6,
-            tf.range(action.shape[-1]) == 13,
-        )
-    else:
-        raise ValueError(f"Action encoding {action_encoding} not supported.")
-
     return tf.where(
-        is_absolute_action[None, None, :],
+        absolute_action_mask[(None,) * (action.ndim - 1)],
         action,
         tf.zeros_like(action),
     )
@@ -112,27 +68,22 @@ def pprint_data_mixture(
 
 def get_dataset_statistics(
     builder: DatasetBuilder,
-    state_obs_keys: List[str],
-    restructure_fn: Callable,
-    transform_fn: Callable,
+    restructure_fn: Callable[[dict], dict],
+    hash_dependencies: Tuple[str, ...],
 ) -> dict:
-    """Either computes the statistics of a dataset or loads them from a cache file if this function
-    has been called before with the same arguments. Currently, the statistics include the
-    min/max/mean/std of the actions and proprio as well as the number of transitions and
-    trajectories in the dataset.
+    """Either computes the statistics of a dataset or loads them from a cache file if this function has been
+    called before with the same arguments. Currently, the statistics include the min/max/mean/std of the
+    actions and proprio as well as the number of transitions and trajectories in the dataset.
     """
-    # compute a hash of the dataset info, state observation keys, and transform function
-    # to determine the name of the cache file
-    data_info_hash = hashlib.sha256(
-        (
-            str(builder.info)
-            + str(state_obs_keys)
-            + str(inspect.getsource(restructure_fn))
-            + str(inspect.getsource(transform_fn))
-        ).encode("utf-8")
+    # compute a hash of the dataset info, restructure function source code, and any additional dependencies
+    unique_hash = hashlib.sha256(
+        "".join(
+            (str(builder.info), inspect.getsource(restructure_fn), *hash_dependencies)
+        ).encode(),
+        usedforsecurity=False,
     ).hexdigest()
     path = tf.io.gfile.join(
-        builder.info.data_dir, f"dataset_statistics_{data_info_hash}.json"
+        builder.info.data_dir, f"dataset_statistics_{unique_hash}.json"
     )
     # fallback local path for when data_dir is not writable
     local_path = os.path.expanduser(
@@ -141,7 +92,7 @@ def get_dataset_statistics(
             ".cache",
             "orca",
             builder.name,
-            f"dataset_statistics_{data_info_hash}.json",
+            f"dataset_statistics_{unique_hash}.json",
         )
     )
 
@@ -158,19 +109,15 @@ def get_dataset_statistics(
             metadata = json.load(f)
         return metadata
 
-    if "val" not in builder.info.splits:
-        split = "train[:95%]"
-        expected_trajs = int(builder.info.splits["train"].num_examples * 0.95)
-    else:
-        split = "train"
-        expected_trajs = builder.info.splits["train"].num_examples
     dataset = (
-        dl.DLataset.from_rlds(builder, split=split, shuffle=False)
-        .map(restructure_fn)
-        .map(
+        dl.DLataset.from_rlds(builder, split="train", shuffle=False)
+        .traj_map(restructure_fn)
+        .traj_map(
             lambda traj: {
                 "action": traj["action"],
-                "proprio": traj["observation"]["proprio"],
+                "proprio": traj["observation"]["proprio"]
+                if "proprio" in traj["observation"]
+                else tf.zeros_like(traj["action"]),
             }
         )
     )
@@ -184,7 +131,7 @@ def get_dataset_statistics(
     num_trajectories = 0
     for traj in tqdm.tqdm(
         dataset.iterator(),
-        total=expected_trajs,
+        total=builder.info.splits["train"].num_examples,
     ):
         actions.append(traj["action"])
         proprios.append(traj["proprio"])
@@ -224,13 +171,15 @@ def get_dataset_statistics(
     return metadata
 
 
-def normalize_action_and_proprio(traj, metadata, normalization_type):
+def normalize_action_and_proprio(
+    traj: dict, metadata: dict, normalization_type: NormalizationType
+):
     # maps keys of `metadata` to corresponding keys in `traj`
     keys_to_normalize = {
         "action": "action",
         "proprio": "observation/proprio",
     }
-    if normalization_type == "normal":
+    if normalization_type == NormalizationType.NORMAL:
         # normalize to mean 0, std 1
         for key, traj_key in keys_to_normalize.items():
             traj = dl.transforms.selective_tree_map(
@@ -241,7 +190,7 @@ def normalize_action_and_proprio(traj, metadata, normalization_type):
             )
         return traj
 
-    if normalization_type == "bounds":
+    if normalization_type == NormalizationType.BOUNDS:
         # normalize to [-1, 1]
         for key, traj_key in keys_to_normalize.items():
             traj = dl.transforms.selective_tree_map(

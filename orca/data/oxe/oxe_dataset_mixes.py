@@ -7,7 +7,6 @@ import tensorflow_datasets as tfds
 import tqdm
 
 from orca.data.oxe import oxe_dataset_configs
-from orca.data.utils.data_utils import ActionEncoding
 
 BRIDGE_MIX = [
     ("bridge_dataset", 1.0),
@@ -180,7 +179,10 @@ def make_oxe_dataset_kwargs_and_weights(
     data_kwargs_list, weights = [], []
     for dataset, weight in data_mix:
         dataset_kwargs = copy.deepcopy(oxe_dataset_configs.OXE_DATASET_KWARGS[dataset])
-        if dataset_kwargs["action_encoding"] is not ActionEncoding.EEF_POS:
+        if (
+            dataset_kwargs["action_encoding"]
+            is not oxe_dataset_configs.ActionEncoding.EEF_POS
+        ):
             print(
                 f"Skipping {dataset} since only EEF pose delta action encoding "
                 f"is supported."
@@ -212,6 +214,9 @@ def make_oxe_dataset_kwargs_and_weights(
         if not load_proprio:
             dataset_kwargs.pop("state_obs_keys")
 
+        del dataset_kwargs["state_encoding"]
+        del dataset_kwargs["action_encoding"]
+
         # add dataset to list
         data_kwargs_list.append(
             {"name": dataset, "data_dir": data_dir, **dataset_kwargs}
@@ -219,39 +224,3 @@ def make_oxe_dataset_kwargs_and_weights(
         weights.append(weight)
 
     return data_kwargs_list, weights
-
-
-if __name__ == "__main__":
-    from orca.data.dataset import make_interleaved_dataset
-
-    base_data_config = dict(
-        window_size=4,
-        image_augment_kwargs=dict(
-            random_resized_crop=dict(scale=[0.8, 1.0], ratio=[0.9, 1.1]),
-            random_brightness=[0.2],
-            random_contrast=[0.8, 1.2],
-            random_saturation=[0.8, 1.2],
-            random_hue=[0.1],
-            augment_order=[
-                "random_resized_crop",
-                "random_brightness",
-                "random_contrast",
-                "random_saturation",
-                "random_hue",
-            ],
-        ),
-        goal_relabeling_strategy="uniform",
-        action_proprio_normalization_type="normal",
-        resize_size=(256, 256),
-    )
-    data_kwargs_list, weights = make_oxe_dataset_kwargs_and_weights(
-        data_mix=RT_X_MIX,
-        data_dir="gs://rail-orca-central1",
-        balance_sampling_ratios=True,
-        n_third_person_cameras=1,
-        load_depth=False,
-    )
-    ds = make_interleaved_dataset(
-        base_data_config, data_kwargs_list, train=True, sample_weights=weights
-    )
-    print(ds.element_spec)

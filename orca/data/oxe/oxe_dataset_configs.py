@@ -14,7 +14,26 @@ Target configuration:
     state_encoding: Type of state encoding used -- see above
     action_encoding: Type of action encoding used, e.g. EEF position vs joint position control
 """
-from orca.data.utils.data_utils import ActionEncoding, StateEncoding
+from enum import IntEnum
+
+
+class StateEncoding(IntEnum):
+    """Defines supported proprio state encoding schemes for different datasets."""
+
+    NONE = -1  # no state provided
+    POS_EULER = 1  # EEF XYZ + roll-pitch-yaw + 1 x pad + gripper open/close
+    POS_QUAT = 2  # EEF XYZ + quaternion + gripper open/close
+    JOINT = 3  # 7 x joint angles (padding added if fewer) + gripper open/close
+    JOINT_BIMANUAL = 4  # 2 x [6 x joint angles + gripper open/close]
+
+
+class ActionEncoding(IntEnum):
+    """Defines supported action encoding schemes for different datasets."""
+
+    EEF_POS = 1  # EEF delta XYZ + roll-pitch-yaw + gripper open/close
+    JOINT_POS = 2  # 7 x joint delta position + gripper open/close
+    JOINT_POS_BIMANUAL = 3  # 2 x [6 x joint pos + gripper]
+
 
 OXE_DATASET_KWARGS = {
     "fractal20220817_data": {

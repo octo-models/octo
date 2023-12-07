@@ -4,6 +4,8 @@ import functools
 from ml_collections import ConfigDict
 from ml_collections.config_dict import FieldReference, placeholder
 
+from orca.data.utils.data_utils import NormalizationType
+
 
 def update_config(config, **kwargs):
     updates = ConfigDict(kwargs)
@@ -104,7 +106,7 @@ def get_config(
 
 
 def get_dataset_config(modality="multimodal", window_size=1):
-    normalization_type = "normal"
+    normalization_type = NormalizationType.NORMAL
     if modality == "multimodal":
         task_augmentation = dict(
             task_augment_strategy="delete_task_conditioning",
@@ -154,11 +156,11 @@ def get_dataset_config(modality="multimodal", window_size=1):
                     "random_hue",
                 ],
             ),
+            num_parallel_calls=200,
             **task_augmentation,
         ),
         "traj_transform_threads": 48,  # shared between all datasets
         "traj_read_threads": 48,  # shared between all datasets
-        "frame_transform_threads": 200,  # not shared between datasets
         "shuffle_buffer_size": 100000,  # shared between all datasets
         "batch_size": 1024,
         "balance_weights": True,

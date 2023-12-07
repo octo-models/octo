@@ -40,9 +40,13 @@ def get_config():
                     "state_obs_keys": ["state"],
                 },
             ],
+            "frame_transform_kwargs": {
+                "resize_size": (128, 128),
+                "image_augment_kwargs": [None],
+                "num_parallel_calls": 4,
+            },
             "traj_transform_threads": 1,  # shared between all datasets
             "traj_read_threads": 1,  # shared between all datasets
-            "frame_transform_threads": 4,  # not shared between datasets
             "batch_size": 64,
             "sample_weights": None,
             "shuffle_buffer_size": 1000,

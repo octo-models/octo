@@ -47,9 +47,11 @@ def create_validation_dataset(
             **traj_transform_kwargs,
             "num_parallel_calls": 4,
         },
-        frame_transform_kwargs=frame_transform_kwargs,
+        frame_transform_kwargs={
+            **frame_transform_kwargs,
+            "num_parallel_calls": 16,
+        },
         train=train,
-        frame_transform_threads=16,
     )
 
 
