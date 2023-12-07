@@ -1,13 +1,10 @@
 from functools import partial
 import logging
 import os
-from pathlib import Path, PurePath
+from pathlib import Path
 
 import jax
-import jax.numpy as jnp
 import tensorflow as tf
-
-from orca.utils.pretrained_utils import PretrainedModel
 
 
 def supply_rng(f, rng=jax.random.PRNGKey(0)):

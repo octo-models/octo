@@ -4,9 +4,8 @@ import matplotlib
 
 matplotlib.use("Agg")
 from dataclasses import dataclass
-from functools import reduce
 import json
-from typing import Any, Callable, Dict, Optional, Tuple, Union
+from typing import Any, Dict, Optional, Union
 
 import dlimp as dl
 import flax
@@ -17,7 +16,6 @@ from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 import matplotlib.gridspec as gridspec
 import matplotlib.pyplot as plt
 import numpy as np
-from PIL import Image
 import plotly.graph_objects as go
 import tensorflow as tf
 import tqdm
