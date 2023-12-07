@@ -3,7 +3,7 @@ from contextlib import contextmanager
 from fnmatch import fnmatch
 import logging
 import time
-from typing import Any, Callable, Mapping, Optional, Sequence, Union
+from typing import Any, Callable, List, Mapping, Optional, Sequence, Union
 
 import flax
 import flax.linen as nn
@@ -189,6 +189,58 @@ def filter_eval_datasets(dataset_kwargs_list, sample_weights, eval_datasets=None
         )
 
 
+def freeze_weights(
+    tx: optax.GradientTransformation,
+    params_or_params_shape: Params,
+    frozen_keys: List[str],
+):
+    """
+    Freezes all weights in params_or_params_shape whose keys fnmatch the ones in frozen_keys.
+    Example usage:
+        tx = freeze_weights(tx, model.params, ["orca_transformer.*"])
+    """
+    logging.info(f"Freezing parameters that include the following keys: {frozen_keys}.")
+    partition_optimizers = {
+        "trainable": tx,
+        "frozen": optax.set_to_zero(),
+    }
+    # freeze anything that matches fnmatch patterns in `frozen_keys`
+    # path is a string of .-separated module names, e.g. ('orca_transformer.BlockTransformer_0...')
+    param_partitions = flax.traverse_util.path_aware_map(
+        lambda path, v: "frozen"
+        if any([fnmatch(".".join(path), key) for key in frozen_keys])
+        else "trainable",
+        params_or_params_shape,
+    )
+    tx = optax.multi_transform(partition_optimizers, param_partitions)
+
+    logging.debug("Frozen params:")
+    flax.traverse_util.path_aware_map(
+        lambda path, opt_status: logging.debug(".".join(path))
+        if opt_status == "frozen"
+        else None,
+        param_partitions,
+    )
+    total_params = sum(
+        jax.tree_util.tree_leaves(
+            jax.tree_map(lambda x: x.size, params_or_params_shape)
+        )
+    )
+    trainable_params = sum(
+        jax.tree_util.tree_leaves(
+            jax.tree_map(
+                lambda x, y: x.size if y == "trainable" else 0,
+                params_or_params_shape,
+                param_partitions,
+            )
+        )
+    )
+    logging.info(f"Num trainable params: {trainable_params:,}.")
+    logging.info(f"Num frozen params: {total_params - trainable_params:,}.")
+    logging.info("To see a detailed list of frozen params, set logging level to DEBUG.")
+    return tx
+
+
 def create_optimizer(
     params_or_params_shape: Params, optimizer_kwargs: dict
 ) -> optax.GradientTransformation:
@@ -226,51 +278,14 @@ def create_optimizer(
         )
 
     if frozen_keys:
-        # define trainable and frozen parameter sets
-        logging.info(
-            f"Freezing parameters that include the following keys: {frozen_keys}."
-        )
-        partition_optimizers = {
-            "trainable": tx,
-            "frozen": optax.set_to_zero(),
-        }
-        # freeze anything that matches fnmatch patterns in `frozen_keys`
-        # path is a string of .-separated module names, e.g. ('orca_transformer.BlockTransformer_0...')
+        tx = freeze_weights(tx, params_or_params_shape, frozen_keys)
+
         param_partitions = flax.traverse_util.path_aware_map(
             lambda path, v: "frozen"
             if any([fnmatch(".".join(path), key) for key in frozen_keys])
             else "trainable",
             params_or_params_shape,
         )
-        tx = optax.multi_transform(partition_optimizers, param_partitions)
-
-        logging.debug("Frozen params:")
-        flax.traverse_util.path_aware_map(
-            lambda path, opt_status: logging.debug(".".join(path))
-            if opt_status == "frozen"
-            else None,
-            param_partitions,
-        )
-        total_params = sum(
-            jax.tree_util.tree_leaves(
-                jax.tree_map(lambda x: x.size, params_or_params_shape)
-            )
-        )
-        trainable_params = sum(
-            jax.tree_util.tree_leaves(
-                jax.tree_map(
-                    lambda x, y: x.size if y == "trainable" else 0,
-                    params_or_params_shape,
-                    param_partitions,
-                )
-            )
-        )
-        logging.info(f"Num trainable params: {trainable_params:,}.")
-        logging.info(f"Num frozen params: {total_params - trainable_params:,}.")
-        logging.info(
-            "To see a detailed list of frozen params, set logging level to DEBUG."
-        )
-
         zero_frozen_params = lambda params: jax.tree_map(
             lambda x, y: x if y == "trainable" else jnp.zeros(()),
             params,
