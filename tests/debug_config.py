@@ -40,7 +40,6 @@ def get_config():
             ],
             "frame_transform_kwargs": {
                 "resize_size": (128, 128),
-                "image_augment_kwargs": [None],
                 "num_parallel_calls": 4,
             },
             "traj_transform_threads": 1,  # shared between all datasets

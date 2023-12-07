@@ -4,6 +4,7 @@ import logging
 from typing import Any, Dict, List, Sequence, Tuple, Union
 
 from orca.data.oxe.oxe_dataset_configs import ActionEncoding, OXE_DATASET_CONFIGS
+from orca.data.oxe.oxe_standardization_transforms import OXE_STANDARDIZATION_TRANSFORMS
 
 BRIDGE_MIX = [
     ("bridge_dataset", 1.0),
@@ -168,20 +169,20 @@ def make_oxe_dataset_kwargs_and_weights(
 
     if deduplicate:
         filtered_datasets, included_dataset_names = [], []
-        for dataset, weight in data_mix:
-            if dataset not in included_dataset_names:
-                filtered_datasets.append((dataset, weight))
-                included_dataset_names.append(dataset)
+        for name, weight in data_mix:
+            if name not in included_dataset_names:
+                filtered_datasets.append((name, weight))
+                included_dataset_names.append(name)
             else:
-                logging.warning(f"Skipping duplicate: {(dataset, weight)}.")
+                logging.warning(f"Skipping duplicate: {(name, weight)}.")
         data_mix = filtered_datasets
 
     data_kwargs_list, weights = [], []
-    for dataset, weight in data_mix:
-        dataset_kwargs = copy.deepcopy(OXE_DATASET_CONFIGS[dataset])
+    for name, weight in data_mix:
+        dataset_kwargs = copy.deepcopy(OXE_DATASET_CONFIGS[name])
         if dataset_kwargs["action_encoding"] is not ActionEncoding.EEF_POS:
             logging.warning(
-                f"Skipping {dataset} since only EEF pose delta action encoding "
+                f"Skipping {name} since only EEF pose delta action encoding "
                 f"is supported."
             )
             continue
@@ -192,9 +193,7 @@ def make_oxe_dataset_kwargs_and_weights(
         ]
 
         if not any([e is not None for e in dataset_kwargs["image_obs_keys"]]):
-            logging.warning(
-                f"Skipping {dataset} since no image input was loaded from it."
-            )
+            logging.warning(f"Skipping {name} since no image input was loaded from it.")
             continue
 
         dataset_kwargs["depth_obs_keys"] = [
@@ -209,10 +208,11 @@ def make_oxe_dataset_kwargs_and_weights(
         del dataset_kwargs["state_encoding"]
         del dataset_kwargs["action_encoding"]
 
+        # get standardization transform
+        dataset_kwargs["standardize_fn"] = OXE_STANDARDIZATION_TRANSFORMS[name]
+
         # add dataset to list
-        data_kwargs_list.append(
-            {"name": dataset, "data_dir": data_dir, **dataset_kwargs}
-        )
+        data_kwargs_list.append({"name": name, "data_dir": data_dir, **dataset_kwargs})
         weights.append(weight)
 
     return data_kwargs_list, weights

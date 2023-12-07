@@ -10,7 +10,6 @@ import numpy as np
 import tensorflow as tf
 import tensorflow_datasets as tfds
 
-from orca.data.standardization_transforms import RLDS_STANDARDIZATION_TRANSFORMS
 from orca.data.utils import bc_goal_relabeling, task_augmentation
 from orca.data.utils.data_utils import (
     allocate_threads,
@@ -545,9 +544,6 @@ def make_single_dataset(
     """
     dataset, dataset_statistics = make_dataset_from_rlds(
         **dataset_kwargs,
-        standardize_fn=RLDS_STANDARDIZATION_TRANSFORMS.get(
-            dataset_kwargs["name"], None
-        ),
         train=train,
     )
     dataset = apply_trajectory_transforms(dataset, **traj_transform_kwargs, train=train)
@@ -602,13 +598,7 @@ def make_interleaved_dataset(
     dataset_sizes = []
     all_dataset_statistics = []
     for dataset_kwargs in dataset_kwargs_list:
-        _, dataset_statistics = make_dataset_from_rlds(
-            **dataset_kwargs,
-            standardize_fn=RLDS_STANDARDIZATION_TRANSFORMS.get(
-                dataset_kwargs["name"], None
-            ),
-            train=train,
-        )
+        _, dataset_statistics = make_dataset_from_rlds(**dataset_kwargs, train=train)
         dataset_sizes.append(dataset_statistics["num_transitions"])
         all_dataset_statistics.append(dataset_statistics)
 
@@ -641,9 +631,6 @@ def make_interleaved_dataset(
     ):
         dataset, _ = make_dataset_from_rlds(
             **dataset_kwargs,
-            standardize_fn=RLDS_STANDARDIZATION_TRANSFORMS.get(
-                dataset_kwargs["name"], None
-            ),
             train=train,
             num_parallel_calls=threads,
             num_parallel_reads=reads,
