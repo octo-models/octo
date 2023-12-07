@@ -20,6 +20,7 @@ from orca.utils.train_callbacks import SaveCallback
 from orca.utils.train_utils import (
     create_optimizer,
     freeze_weights,
+    merge_params,
     process_text,
     TrainState,
 )
@@ -46,7 +47,7 @@ def main(_):
 
     # load pre-trained model
     logging.info("Loading pre-trained model...")
-    model = PretrainedModel.load_pretrained(FLAGS.pretrained_path)
+    pretrained_model = PretrainedModel.load_pretrained(FLAGS.pretrained_path)
 
     # make finetuning dataset
     # apply Gaussian normalization, load chunks of 50 actions since we'll train with action chunking
@@ -89,8 +90,10 @@ def main(_):
     )
 
     # run text tokenizer over batch (this needs to happen before training / sharding) + delete unused keys
+    text_processor = pretrained_model.text_processor
+
     def process_batch(batch):
-        batch = process_text(batch, model.text_processor)
+        batch = process_text(batch, text_processor)
         del batch["dataset_name"]
         return batch
 
@@ -126,14 +129,19 @@ def main(_):
         ),
     )
 
-    # update pre-trained model with new config & example batch
-    # this will initialize new position encodings for proprio inputs & weights for new action head
+    # initialize weights for modified ORCA model, then merge in all applicable pre-trained weights
+    # new position encodings for proprio inputs & weights for new action head will remain "from scratch"
     logging.info("Updating model for new observation & action space...")
-    model.update(config, example_batch)
-    model_def = model.model_def
+    model = PretrainedModel.from_config(config, example_batch)
+    merged_params = merge_params(model.params, pretrained_model.params)
+    # can perform any additional parameter surgery here...
+    # ...
+    model = model.replace(params=merged_params)
+    del pretrained_model
 
     # create optimizer & train_state, optionally freeze keys for pre-trained transformer
     # train_state bundles parameters & optimizers
+    model_def = model.model_def
     tx = create_optimizer(
         model.params,
         dict(
