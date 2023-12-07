@@ -1,19 +1,23 @@
 #!/usr/bin/env python3
 
+import json
 import os
 
 from absl import app, flags, logging
 import numpy as np
-import json
+from robot_wrappers.widowx_wrapper import (
+    convert_obs,
+    state_to_eep,
+    wait_for_obs,
+    WidowXGym,
+)
 import tensorflow as tf
-
-from orca.utils.run_eval import run_eval_loop
-from orca.utils.pretrained_utils import PretrainedModel
-from orca.utils.gym_wrappers import UnnormalizeActionProprio
-from orca.utils.eval_utils import download_checkpoint_from_gcs
-
 from widowx_envs.widowx_env_service import WidowXClient, WidowXConfigs, WidowXStatus
-from widowx_wrapper import convert_obs, state_to_eep, wait_for_obs, WidowXGym
+
+from orca.utils.eval_utils import download_checkpoint_from_gcs
+from orca.utils.gym_wrappers import UnnormalizeActionProprio
+from orca.utils.pretrained_utils import PretrainedModel
+from orca.utils.run_eval import run_eval_loop
 
 np.set_printoptions(suppress=True)
 
@@ -126,9 +130,7 @@ def main(_):
         )
 
     if "finetune" in weights_path:
-        metadata_path = os.path.join(
-            weights_path, "dataset_statistics.json"
-        )
+        metadata_path = os.path.join(weights_path, "dataset_statistics.json")
     elif "from_scratch" in weights_path:
         metadata_path = os.path.join(
             weights_path, "dataset_statistics_widowx_cleaver:2.0.0.json"
