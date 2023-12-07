@@ -1,4 +1,3 @@
-import copy
 from functools import partial
 import inspect
 import json
@@ -10,7 +9,8 @@ import numpy as np
 import tensorflow as tf
 import tensorflow_datasets as tfds
 
-from orca.data.utils import bc_goal_relabeling, task_augmentation
+from orca.data import obs_transforms, traj_transforms
+from orca.data.utils import goal_relabeling, task_augmentation
 from orca.data.utils.data_utils import (
     allocate_threads,
     get_dataset_statistics,
@@ -19,159 +19,6 @@ from orca.data.utils.data_utils import (
     pprint_data_mixture,
     tree_map,
 )
-
-
-def _chunk_act_obs(
-    traj,
-    window_size,
-    additional_action_window_size=0,
-):
-    """
-    Chunks actions and observations into the given window_size.
-
-    The "action" and "observation" keys are each given a new axis (at index 1) of size `window_size`.
-    """
-    traj_len = tf.shape(traj["action"])[0]
-    chunk_indices = tf.broadcast_to(
-        tf.range(-window_size + 1, 1), [traj_len, window_size]
-    ) + tf.broadcast_to(tf.range(traj_len)[:, None], [traj_len, window_size])
-
-    action_chunk_indices = tf.broadcast_to(
-        tf.range(-window_size + 1, 1 + additional_action_window_size),
-        [traj_len, window_size + additional_action_window_size],
-    ) + tf.broadcast_to(
-        tf.range(traj_len)[:, None],
-        [traj_len, window_size + additional_action_window_size],
-    )
-
-    floored_chunk_indices = tf.maximum(chunk_indices, 0)
-
-    if "task" in traj:
-        goal_timestep = traj["task"]["goal_timestep"]
-    else:
-        goal_timestep = tf.fill([traj_len], traj_len, dtype=tf.int32)
-
-    floored_action_chunk_indices = tf.minimum(
-        tf.maximum(action_chunk_indices, 0), goal_timestep[:, None] - 1
-    )
-
-    traj["observation"] = tf.nest.map_structure(
-        lambda x: tf.gather(x, floored_chunk_indices), traj["observation"]
-    )
-    traj["action"] = tf.gather(traj["action"], floored_action_chunk_indices)
-
-    # indicates whether an entire observation is padding
-    traj["observation"]["pad_mask"] = chunk_indices >= 0
-
-    # Actions past the goal timestep become no-ops
-    action_past_goal = action_chunk_indices > goal_timestep[:, None] - 1
-    # zero_actions = make_neutral_actions(traj["action"], action_encoding)
-    # traj["action"] = tf.where(
-    #     action_past_goal[:, :, None], zero_actions, traj["action"]
-    # )
-    return traj
-
-
-def _subsample(traj, subsample_length):
-    """Subsamples trajectories to the given length."""
-    traj_len = tf.shape(traj["action"])[0]
-    if traj_len > subsample_length:
-        indices = tf.random.shuffle(tf.range(traj_len))[:subsample_length]
-        traj = tf.nest.map_structure(lambda x: tf.gather(x, indices), traj)
-    return traj
-
-
-def _add_pad_mask_dict(traj):
-    """Adds a dictionary indicating which elements of the observation are padding.
-
-    traj["observation"]["pad_mask_dict"] = {k: traj["observation"][k] is not padding}
-    """
-    traj_len = tf.shape(traj["action"])[0]
-    pad_masks = {}
-    for key in traj["observation"]:
-        if traj["observation"][key].dtype == tf.string:
-            pad_masks[key] = tf.strings.length(traj["observation"][key]) != 0
-        else:
-            pad_masks[key] = tf.ones([traj_len], dtype=tf.bool)
-    traj["observation"]["pad_mask_dict"] = pad_masks
-    return traj
-
-
-def _decode_images(obs: dict) -> dict:
-    """Decodes images and depth images."""
-    for key in obs:
-        if "image" in key:
-            if obs[key].dtype == tf.string:
-                if tf.strings.length(obs[key]) == 0:
-                    # this is a padding image
-                    obs[key] = tf.zeros((1, 1, 3), dtype=tf.uint8)
-                else:
-                    obs[key] = tf.io.decode_image(
-                        obs[key], expand_animations=False, dtype=tf.uint8
-                    )
-            elif obs[key].dtype == tf.uint8:
-                pass
-            else:
-                raise ValueError(
-                    f"Unsupported image dtype: found {key} with dtype {obs[key].dtype}"
-                )
-        elif "depth" in key:
-            if obs[key].dtype == tf.string:
-                if tf.strings.length(obs[key]) == 0:
-                    # this is a padding image
-                    obs[key] = tf.zeros((1, 1), dtype=tf.float32)
-                else:
-                    obs[key] = tf.io.decode_image(
-                        obs[key], expand_animations=False, dtype=tf.float32
-                    )[..., 0]
-            elif obs[key].dtype == tf.float32:
-                pass
-            else:
-                raise ValueError(
-                    f"Unsupported depth dtype: found {key} with dtype {obs[key].dtype}"
-                )
-    return obs
-
-
-def _augment(obs: dict, seed, augment_kwargs) -> dict:
-    """Augments images, skipping padding images."""
-    num_image_keys = sum(["image" in key for key in obs])
-
-    if not isinstance(augment_kwargs, Sequence):
-        augment_kwargs = [copy.deepcopy(augment_kwargs)] * num_image_keys
-
-    for i in range(num_image_keys):
-        if augment_kwargs[i] is not None:
-            key = f"image_{i}"
-            if obs["pad_mask_dict"][key]:
-                obs[key] = dl.transforms.augment_image(
-                    obs[key], **augment_kwargs[i], seed=seed + i
-                )
-    return obs
-
-
-def _resize(obs: dict, resize_size, depth_resize_size) -> dict:
-    """Resizes images and depth images."""
-    num_image_keys = sum(["image" in key for key in obs])
-    num_depth_keys = sum(["depth" in key for key in obs])
-
-    if resize_size is None or isinstance(resize_size[0], int):
-        resize_size = [resize_size] * num_image_keys
-    if depth_resize_size is None or isinstance(depth_resize_size[0], int):
-        depth_resize_size = [depth_resize_size] * num_depth_keys
-
-    for i in range(num_image_keys):
-        if resize_size[i] is not None:
-            key = f"image_{i}"
-            obs[key] = dl.transforms.resize_image(obs[key], size=resize_size[i])
-
-    for i in range(num_depth_keys):
-        if depth_resize_size[i] is not None:
-            key = f"depth_{i}"
-            obs[key] = dl.transforms.resize_depth_image(
-                obs[key], size=depth_resize_size[i]
-            )
-    return obs
 
 
 def apply_trajectory_transforms(
@@ -200,7 +47,7 @@ def apply_trajectory_transforms(
         dataset (dl.DLataset): The dataset to transform.
         train (bool): Whether the dataset is for training (affects subsampling).
         goal_relabeling_strategy (str, optional): The goal relabeling strategy to use, or None for
-            no goal relabeling. See `bc_goal_relabeling.py`.
+            no goal relabeling. See `goal_relabeling.py`.
         goal_relabeling_kwargs (dict, optional): Additional keyword arguments to pass to the goal relabeling function.
         window_size (int, optional): The length of the snippets that trajectories are chunked into.
         additional_action_window_size (int, optional): The number of additional actions beyond window_size to include
@@ -232,39 +79,42 @@ def apply_trajectory_transforms(
         )
 
     # marks which observations are padding
-    dataset = dataset.traj_map(_add_pad_mask_dict, num_parallel_calls)
+    dataset = dataset.traj_map(traj_transforms.add_pad_mask_dict, num_parallel_calls)
 
     # adds the "task" key
     if goal_relabeling_strategy is not None:
         dataset = dataset.traj_map(
             partial(
-                getattr(bc_goal_relabeling, goal_relabeling_strategy),
+                getattr(goal_relabeling, goal_relabeling_strategy),
                 **goal_relabeling_kwargs,
             ),
             num_parallel_calls,
         )
 
-        if "language_instruction" in dataset.element_spec:
+    if "language_instruction" in dataset.element_spec:
 
-            def move_language_instruction_to_task(traj):
-                traj["task"]["language_instruction"] = traj.pop("language_instruction")
-                traj["task"]["pad_mask_dict"]["language_instruction"] = (
-                    tf.strings.length(traj["task"]["language_instruction"]) != 0
-                )
-                return traj
-
-            dataset = dataset.traj_map(
-                move_language_instruction_to_task, num_parallel_calls
+        def process_language_instruction(traj):
+            # move the "language_instruction" key into the "task" dict
+            if "task" not in traj:
+                traj["task"] = {}
+            traj["task"]["language_instruction"] = traj.pop("language_instruction")
+            # mark whether the language instruction is padding
+            traj["task"]["pad_mask_dict"]["language_instruction"] = (
+                tf.strings.length(traj["task"]["language_instruction"]) != 0
             )
+            return traj
+
+        dataset = dataset.traj_map(process_language_instruction, num_parallel_calls)
 
     if train and subsample_length is not None:
         dataset = dataset.traj_map(
-            partial(_subsample, subsample_length=subsample_length), num_parallel_calls
+            partial(traj_transforms.subsample, subsample_length=subsample_length),
+            num_parallel_calls,
         )
 
     dataset = dataset.traj_map(
         partial(
-            _chunk_act_obs,
+            traj_transforms.chunk_act_obs,
             window_size=window_size,
             additional_action_window_size=additional_action_window_size,
         ),
@@ -318,7 +168,8 @@ def apply_frame_transforms(
     # it to the chunked "observation" dict as well as the non-chunked "task" dict
     def apply_obs_transform(fn: Callable[[dict], dict], frame):
         # task is not chunked -- apply fn directly
-        frame["task"] = fn(frame["task"])
+        if "task" in frame:
+            frame["task"] = fn(frame["task"])
         # observation is chunked -- apply fn along first axis
         frame["observation"] = dl.vmap(fn)(frame["observation"])
         return frame
@@ -335,7 +186,7 @@ def apply_frame_transforms(
 
     # decode images (and depth images)
     dataset = dataset.frame_map(
-        partial(apply_obs_transform, _decode_images), num_parallel_calls
+        partial(apply_obs_transform, obs_transforms.decode_images), num_parallel_calls
     )
 
     # resize images (and depth images)
@@ -343,7 +194,9 @@ def apply_frame_transforms(
         partial(
             apply_obs_transform,
             partial(
-                _resize, resize_size=resize_size, depth_resize_size=depth_resize_size
+                obs_transforms.resize,
+                resize_size=resize_size,
+                depth_resize_size=depth_resize_size,
             ),
         ),
         num_parallel_calls,
@@ -353,7 +206,9 @@ def apply_frame_transforms(
         # augment all images with the same seed, skipping padding images
         def aug(frame):
             seed = tf.random.uniform([2], maxval=tf.dtypes.int32.max, dtype=tf.int32)
-            aug_fn = partial(_augment, seed=seed, augment_kwargs=image_augment_kwargs)
+            aug_fn = partial(
+                obs_transforms.augment, seed=seed, augment_kwargs=image_augment_kwargs
+            )
             return apply_obs_transform(aug_fn, frame)
 
         dataset = dataset.frame_map(aug, num_parallel_calls)

@@ -39,7 +39,7 @@ def to_padding(tensor: tf.Tensor) -> tf.Tensor:
 def make_neutral_actions(
     action: tf.Tensor, absolute_action_mask: tf.Tensor
 ) -> tf.Tensor:
-    """Returns "neutral" actions, meaning relative actions are zeroed and absolute actions are retrained.
+    """Returns "neutral" actions, meaning relative actions are zeroed and absolute actions are retained.
     `absolute_action_mask` should be a 1D boolean mask that indicates which action dimensions are absolute.
     """
     return tf.where(
@@ -174,6 +174,7 @@ def get_dataset_statistics(
 def normalize_action_and_proprio(
     traj: dict, metadata: dict, normalization_type: NormalizationType
 ):
+    """Normalizes the action and proprio fields of a trajectory using the given metadata."""
     # maps keys of `metadata` to corresponding keys in `traj`
     keys_to_normalize = {
         "action": "action",
@@ -213,15 +214,12 @@ def normalize_action_and_proprio(
 def binarize_gripper_actions(actions: tf.Tensor) -> tf.Tensor:
     """Converts gripper actions from continous to binary values (0 and 1).
 
-    We exploit that fact that most of the time, the gripper is fully open (near
-    1.0) or fully closed (near 0.0). As it transitions between the two, it
-    sometimes passes through a few intermediate values. We relabel those
-    intermediate values based on the state that is reached _after_ those
-    intermediate values.
+    We exploit that fact that most of the time, the gripper is fully open (near 1.0) or fully closed (near
+    0.0). As it transitions between the two, it sometimes passes through a few intermediate values. We relabel
+    those intermediate values based on the state that is reached _after_ those intermediate values.
 
-    In the edge case that the trajectory ends with an intermediate value, we
-    give up on binarizing and relabel that chunk of intermediate values as
-    the last action in the trajectory.
+    In the edge case that the trajectory ends with an intermediate value, we give up on binarizing and relabel
+    that chunk of intermediate values as the last action in the trajectory.
 
     The scan implements the following code:
 
@@ -254,8 +252,8 @@ def binarize_gripper_actions(actions: tf.Tensor) -> tf.Tensor:
 
 
 def rel2abs_gripper_actions(actions: tf.Tensor):
-    """
-    Converts relative actions (-1 for closing, +1 for opening) to absolute gripper actions in range [0...1].
+    """Converts relative actions (-1 for closing, +1 for opening) to absolute gripper actions in range
+    [0...1].
     """
     abs_actions = tf.math.cumsum(actions, axis=0)
     abs_actions = tf.clip_by_value(abs_actions, 0, 1)
@@ -267,9 +265,8 @@ def invert_gripper_actions(actions: tf.Tensor):
 
 
 def allocate_threads(n: int, weights: np.ndarray):
-    """
-    Allocates an integer n across an array based on weights. The final array sums to n, but each
-    element is no less than 1.
+    """Allocates an integer n across an array based on weights. The final array sums to n, but each element is
+    no less than 1.
     """
     assert np.all(weights >= 0), "Weights must be non-negative"
     assert (
