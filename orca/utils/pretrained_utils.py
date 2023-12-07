@@ -85,7 +85,7 @@ class PretrainedModel:
                 lambda example: jnp.zeros(
                     (batch_size, *example.shape[1:]), dtype=example.dtype
                 ),
-                self.example_batch["tasks"],
+                self.example_batch["task"],
             )
 
         if texts is None:
@@ -94,7 +94,7 @@ class PretrainedModel:
         if self.text_processor is not None:
             tasks["language_instruction"] = self.text_processor.encode(texts)
 
-        _verify_shapes(tasks, self.example_batch["tasks"], starting_dim=1)
+        _verify_shapes(tasks, self.example_batch["task"], starting_dim=1)
         return tasks
 
     def run_transformer(self, observations, tasks, pad_mask, train=False):
@@ -103,13 +103,13 @@ class PretrainedModel:
             observations: dictionary of arrays of shape (batch_size, window_size, *shape).
                 Shape must be consistent with self.example_batch["observation"]
             tasks: dict of tasks of shape (batch_size, *shape)
-                Shape must be consistent with self.example_batch["tasks"]
+                Shape must be consistent with self.example_batch["task"]
             pad_mask: (batch_size, window_size) Boolean mask that is False when the timestep corresponds to padding
             train: whether to run in train mode
             *args, **kwargs: Additional arguments for transformer or model.apply
         """
         _verify_shapes(observations, self.example_batch["observation"], starting_dim=2)
-        _verify_shapes(tasks, self.example_batch["tasks"], starting_dim=1)
+        _verify_shapes(tasks, self.example_batch["task"], starting_dim=1)
 
         return self.orca_transformer(observations, tasks, pad_mask, train=train)
 
@@ -195,8 +195,8 @@ class PretrainedModel:
             )
             logging.info("Checking task definition:...")
             changed_input = changed_input or _verify_shapes(
-                example_batch["tasks"],
-                orig_example_batch["tasks"],
+                example_batch["task"],
+                orig_example_batch["task"],
                 starting_dim=1,
                 raise_error=False,
             )
@@ -232,7 +232,7 @@ class PretrainedModel:
             partial(orig_model_def.init, train=False),
             rng,
             orig_example_batch["observation"],
-            orig_example_batch["tasks"],
+            orig_example_batch["task"],
             orig_example_batch["observation"]["pad_mask"],
         )["params"]
         all_steps = orbax.checkpoint.utils.checkpoint_steps(checkpoint_path)
@@ -265,7 +265,7 @@ class PretrainedModel:
                 return model_def.init(
                     rng,
                     example_batch["observation"],
-                    example_batch["tasks"],
+                    example_batch["task"],
                     example_batch["observation"]["pad_mask"],
                     train=False,
                 )

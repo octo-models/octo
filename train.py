@@ -220,7 +220,7 @@ def main(_):
     construct_rng = jax.random.PRNGKey(FLAGS.config.seed)
     model_init_args = (
         example_batch["observation"],
-        example_batch["tasks"],
+        example_batch["task"],
         example_batch["observation"]["pad_mask"],
     )
     print(
@@ -299,7 +299,7 @@ def main(_):
         model = model_def.bind({"params": params}, rngs={"dropout": rng})
         transformer_embeddings = model.orca_transformer(
             batch["observation"],
-            batch["tasks"],
+            batch["task"],
             batch["observation"]["pad_mask"],
             train=train,
         )
