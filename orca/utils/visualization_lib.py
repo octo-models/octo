@@ -23,7 +23,6 @@ import tensorflow as tf
 import tqdm
 import wandb
 
-from orca.data.utils.data_utils import ActionEncoding
 from orca.utils.gym_wrappers import (
     HistoryWrapper,
     RHCWrapper,
@@ -203,12 +202,8 @@ class Visualizer:
             info = add_unnormalized_info(info, self.action_proprio_stats)
             info = add_manipulation_metrics(info)
 
-            if (
-                int(traj["observation"]["action_encoding"][0, 0, 0])
-                == ActionEncoding.EEF_POS
-            ):
-                plotly_fig = plot_trajectory_actions(**info)
-                visualizations[f"traj_{n}"] = plotly_fig
+            plotly_fig = plot_trajectory_actions(**info)
+            visualizations[f"traj_{n}"] = plotly_fig
 
             # plot qualitative action trajectory per dimension w/ and w/o action chunk
             visualizations[f"traj_{n}_mpl"] = plot_trajectory_overview_mpl(

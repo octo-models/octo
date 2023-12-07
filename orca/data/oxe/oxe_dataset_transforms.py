@@ -12,11 +12,9 @@ step = {
 }
 """
 
-import math
 from typing import Any, Dict
 
 import tensorflow as tf
-import tensorflow_datasets as tfds
 
 from orca.data.utils.data_utils import (
     binarize_gripper_actions,
