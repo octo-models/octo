@@ -62,9 +62,10 @@ class SaveCallback(Callback):
     save_dir: Optional[str]
 
     def __post_init__(self):
-        if self.save_dir is not None and jax.process_index() == 0:
-            tf.io.gfile.makedirs(self.save_dir)
-            logging.info(f"Created {self.save_dir}")
+        if self.save_dir is not None:
+            if jax.process_index() == 0:
+                tf.io.gfile.makedirs(self.save_dir)
+                logging.info(f"Created {self.save_dir}")
             # make checkpointers
             # only keep latest full TrainState
             self.state_checkpointer = orbax.checkpoint.CheckpointManager(
@@ -81,7 +82,7 @@ class SaveCallback(Callback):
             )
 
     def __call__(self, train_state: TrainState, step: int):
-        if self.save_dir is not None and jax.process_index() == 0:
+        if self.save_dir is not None:
             self.params_checkpointer.save(
                 step,
                 train_state.params,
@@ -219,7 +220,10 @@ class ValidationCallback(Callback):
             val_iterator = map(self.process_batch_fn, val_iterator)
             self.val_iterators[single_dataset_kwargs["name"]] = val_iterator
 
-        @jax.jit
+        @partial(
+            jax.jit,
+            out_shardings=jax.sharding.PositionalSharding(jax.devices()).replicate(),
+        )
         def eval_step(state, batch):
             loss_fn_partial = partial(
                 self.loss_fn,
