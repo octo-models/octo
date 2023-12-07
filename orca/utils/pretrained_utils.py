@@ -182,6 +182,9 @@ class PretrainedModel:
         )
         with tf.io.gfile.GFile(orig_example_batch_path, "rb") as f:
             orig_example_batch = flax.serialization.msgpack_restore(f.read())
+        # TODO: temporary shim for migrating from "tasks" to "task"
+        if "tasks" in orig_example_batch:
+            orig_example_batch["task"] = orig_example_batch.pop("tasks")
         if example_batch is not None:
             logging.info(
                 "Checking differences between provided example_batch and pre-trained model example_batch..."
