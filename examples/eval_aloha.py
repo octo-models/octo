@@ -52,22 +52,23 @@ def main(_):
     norm_stats = PretrainedModel.get_norm_stats(FLAGS.finetuned_path)
     env = UnnormalizeActionProprio(env, norm_stats, normalization_type="normal")
 
+    # jit model action prediction function for faster inference
+    policy_fn = jax.jit(model.sample_actions)
+
     # running rollouts
     for _ in range(10):
         obs, info = env.reset()
 
         # create task specification --> use model utility to create task dict with correct entries
         language_instruction = env.get_task()["language_instruction"]
-        task = model.create_tasks(texts=[language_instruction])
+        task = model.create_tasks(texts=language_instruction)
 
         # run rollout for 400 steps
         images = [obs["image_0"]]
         episode_return = 0.0
         while len(images) < 400:
             # model returns actions of shape [batch, horizon, action_dim] -- remove batch and horizon since they are 1
-            actions = model.sample_actions(jax.tree_map(lambda x: x[None], obs), task)[
-                0, 0
-            ]
+            actions = policy_fn(jax.tree_map(lambda x: x[None], obs), task)[0, 0]
 
             # step env -- info contains full "chunk" of observations for logging
             # obs only contains observation for final step of chunk
