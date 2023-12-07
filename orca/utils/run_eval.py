@@ -81,7 +81,7 @@ def run_eval_loop(
     # TODO: remove for release
     if FLAGS.add_jaxrlm_baseline:
         base_dir = "/mount/harddrive/homer/bridgev2_packaged/bridgev2policies/"
-        policies["jaxrl_gcbc"] = load_jaxrlm_checkpoint(
+        policies["jaxrl_gcbc"], models["jaxrl_gcbc"] = load_jaxrlm_checkpoint(
             weights_path=f"{base_dir}gcbc_256/checkpoint_300000/",
             config_path=f"{base_dir}gcbc_256/gcbc_256_config.json",
             code_path=f"{base_dir}bridge_data_v2.zip",
