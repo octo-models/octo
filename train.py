@@ -240,7 +240,7 @@ def main(_):
     )["params"]
     tx, lr_callable, param_norm_callable = create_optimizer(
         params_shape,
-        FLAGS.config.optimizer.to_dict(),
+        **FLAGS.config.optimizer.to_dict(),
     )
     train_state = create_train_state(
         construct_rng,

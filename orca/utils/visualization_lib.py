@@ -123,6 +123,14 @@ class Visualizer:
 
     def __post_init__(self):
         self.action_proprio_stats = self.dataset.dataset_statistics
+        cardinality = self.dataset.cardinality()
+        if (
+            cardinality == tf.data.INFINITE_CARDINALITY
+            or cardinality == tf.data.UNKNOWN_CARDINALITY
+        ):
+            self.cardinality = float("inf")
+        else:
+            self.cardinality = cardinality.numpy()
         self.visualized_trajs = False
         self._cached_iterators = {}
 
@@ -250,7 +258,8 @@ class Visualizer:
         return all_traj_info
 
     def get_iterator(self, dataset, n):
-        if dataset not in self._cached_iterators:
+        n = min(n, self.cardinality)
+        if n not in self._cached_iterators:
             self._cached_iterators[n] = (
                 dataset.take(n).repeat().as_numpy_iterator()
                 if self.freeze_trajs

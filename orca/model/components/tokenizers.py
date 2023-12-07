@@ -1,4 +1,3 @@
-import functools as ft
 import logging
 import re
 from typing import Dict, Optional, Sequence
@@ -13,8 +12,7 @@ from orca.model.components.base import TokenGroup
 from orca.model.components.transformer import MAPHead
 
 EPS = 1e-6
-from dataclasses import dataclass
-import os
+from dataclasses import field
 
 
 def generate_proper_pad_mask(
@@ -84,7 +82,7 @@ class ImageTokenizer(nn.Module):
     """
 
     encoder: str
-    encoder_kwargs: dict = None
+    encoder_kwargs: dict = field(default_factory=dict)
     use_token_learner: bool = False
     num_tokens: int = 8
     conditioning_type: str = "none"
