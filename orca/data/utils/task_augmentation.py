@@ -15,9 +15,9 @@ def delete_task_conditioning(
     """
     Randomly chooses one group, and deletes all the keys in the task dictionary matching this pattern.
 
-    :param traj: A dictionary containing trajectory data. should have a "task" key.
-    :param switch_key_groups_probs: A list of tuples, where each tuple contains a list of patterns and their probability.
-    :return: A dictionary with keys zeroed out according to the specified probabilities.
+    Args:
+        traj: A dictionary containing trajectory data. should have a "task" key.
+        delete_key_groups_probs: A list of tuples, where each tuple contains a list of patterns and their probability.
     """
     if tf.math.reduce_all(traj["task"]["language_instruction"] == ""):
         return traj
