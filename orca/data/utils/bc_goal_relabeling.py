@@ -20,12 +20,12 @@ def uniform(traj):
     # sometimes there are floating-point errors that cause an out-of-bounds
     goal_idxs = tf.minimum(goal_idxs, traj_len - 1)
 
-    traj["tasks"] = tf.nest.map_structure(
+    traj["task"] = tf.nest.map_structure(
         lambda x: tf.gather(x, goal_idxs),
         traj["observation"],
     )
-    traj["tasks"]["goal_timestep"] = goal_idxs + 1
-    traj["tasks"]["end_timestep"] = tf.ones_like(goal_idxs) * traj_len
+    traj["task"]["goal_timestep"] = goal_idxs + 1
+    traj["task"]["end_timestep"] = tf.ones_like(goal_idxs) * traj_len
 
     return traj
 
@@ -35,11 +35,11 @@ def no_image_conditioning(traj):
     Relabels with empty goal images.
     """
     traj_len = tf.shape(tf.nest.flatten(traj["observation"])[0])[0]
-    traj["tasks"] = tf.nest.map_structure(
+    traj["task"] = tf.nest.map_structure(
         lambda x: tf.zeros_like(x),
         traj["observation"],
     )
-    traj["tasks"]["goal_timestep"] = tf.fill([traj_len], traj_len)
-    traj["tasks"]["end_timestep"] = tf.fill([traj_len], traj_len)
+    traj["task"]["goal_timestep"] = tf.fill([traj_len], traj_len)
+    traj["task"]["end_timestep"] = tf.fill([traj_len], traj_len)
 
     return traj

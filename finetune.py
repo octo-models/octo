@@ -264,7 +264,7 @@ def main(_):
         model = model_def.bind({"params": params}, rngs={"dropout": rng})
         transformer_embeddings = model.orca_transformer(
             batch["observation"],
-            batch["tasks"],
+            batch["task"],
             batch["observation"]["pad_mask"],
             train=train,
         )

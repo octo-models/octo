@@ -235,20 +235,20 @@ class ValidationCallback(Callback):
             all_tasks = {}
 
             if "base" in self.modes_to_evaluate:
-                all_tasks["base"] = batch["tasks"]
+                all_tasks["base"] = batch["task"]
             if "image_conditioned" in self.modes_to_evaluate:
                 all_tasks["image_conditioned"] = remove_text(
-                    batch["tasks"], self.zero_text
+                    batch["task"], self.zero_text
                 )
             if "text_conditioned" in self.modes_to_evaluate:
                 all_tasks["text_conditioned"] = remove_images(batch["tasks"])
 
             if "unconditioned" in self.modes_to_evaluate:
                 all_tasks["unconditioned"] = remove_text(
-                    remove_images(batch["tasks"]), self.zero_text
+                    remove_images(batch["task"]), self.zero_text
                 )
             return {
-                k: loss_fn_partial(batch=flax.core.copy(batch, {"tasks": tasks}))[1]
+                k: loss_fn_partial(batch=flax.core.copy(batch, {"task": tasks}))[1]
                 for k, tasks in all_tasks.items()
             }
 
