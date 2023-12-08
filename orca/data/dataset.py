@@ -259,11 +259,6 @@ def apply_trajectory_transforms(
 
         dataset = dataset.map(move_language_instruction_to_tasks, num_parallel_calls)
 
-    if train and subsample_length is not None:
-        dataset = dataset.map(
-            partial(_subsample, subsample_length=subsample_length), num_parallel_calls
-        )
-
     dataset = dataset.map(
         partial(
             _chunk_act_obs,
@@ -273,6 +268,10 @@ def apply_trajectory_transforms(
         ),
         num_parallel_calls,
     )
+    if train and subsample_length is not None:
+        dataset = dataset.map(
+            partial(_subsample, subsample_length=subsample_length), num_parallel_calls
+        )
 
     return dataset
 
