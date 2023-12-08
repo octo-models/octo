@@ -261,13 +261,60 @@ def binarize_gripper_actions(actions: tf.Tensor) -> tf.Tensor:
     return new_actions
 
 
-def rel2abs_gripper_actions(actions: tf.Tensor):
-    """Converts relative actions (-1 for closing, +1 for opening) to absolute gripper actions in range
-    [0...1].
+def rel_open_or_closed(actions: tf.Tensor):
     """
-    abs_actions = tf.math.cumsum(actions, axis=0)
-    abs_actions = tf.clip_by_value(abs_actions, 0, 1)
-    return abs_actions
+    Returns the initial absolute gripper state, given relative actions (-1 for closing, +1 for opening)
+    Returns 1 if the gripper is initially open, 0 if it is initially closed.
+    If nothing taken, assumes gripper is initially open.
+
+    """
+    opening_mask = actions > 1e-3
+    closing_mask = actions < -1e-3
+    old_state_mask = tf.where(opening_mask, -1, tf.where(closing_mask, -1, 0))
+    # old_state_mask is 1 if closing, -1 if opening, 0 if no change
+
+    def scan_fn(carry, i):
+        return tf.cond(
+            old_state_mask[i] == 0,
+            lambda: tf.cast(carry, tf.float32),
+            lambda: (tf.cast(old_state_mask[i], tf.float32) + 1) / 2,
+        )
+
+    return tf.scan(
+        scan_fn,
+        tf.range(tf.shape(actions)[0]),
+        tf.zeros_like(actions[-1]),
+        reverse=True,
+    )[0]
+
+
+def rel2abs_gripper_actions(actions: tf.Tensor):
+    """
+    Converts relative gripper actions (+1 for closing, -1 for opening) to absolute gripper actions
+    (0 for closed, 1 for open). Assumes that the first relative gripper is not redundant
+    (i.e. close when already closed).
+    """
+    opening_mask = actions < -0.1
+    closing_mask = actions > 0.1
+
+    # -1 for closing, 1 for opening, 0 for no change
+    thresholded_actions = tf.where(opening_mask, 1, tf.where(closing_mask, -1, 0))
+
+    def scan_fn(carry, i):
+        return tf.cond(
+            thresholded_actions[i] == 0,
+            lambda: carry,
+            lambda: thresholded_actions[i],
+        )
+
+    # if no relative grasp, assumes open for whole trajectory
+    start = -1 * thresholded_actions[tf.argmax(thresholded_actions != 0, axis=0)]
+    start = tf.cond(start == 0, lambda: 1, lambda: start)
+    # -1 for closed, 1 for open
+    new_actions = tf.scan(scan_fn, tf.range(tf.shape(actions)[0]), start)
+
+    new_actions = tf.cast(new_actions, tf.float32) / 2 + 0.5
+    return new_actions
 
 
 def invert_gripper_actions(actions: tf.Tensor):
