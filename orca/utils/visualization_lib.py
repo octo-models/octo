@@ -97,6 +97,9 @@ def run_policy_on_trajectory(policy_fn, traj, *, text_processor=None):
         tasks["language_instruction"] = text_processor.encode(
             [s.decode("utf-8") for s in traj["tasks"]["language_instruction"]]
         )
+        tasks["pad_mask_dict"]["language_instruction"] = np.array(
+            [len(s.decode("utf-8")) > 0 for s in traj["tasks"]["language_instruction"]]
+        )
 
     actions = policy_fn(traj["observation"], tasks)
 
@@ -120,6 +123,14 @@ class Visualizer:
 
     def __post_init__(self):
         self.action_proprio_stats = self.dataset.dataset_statistics
+        cardinality = self.dataset.cardinality()
+        if (
+            cardinality == tf.data.INFINITE_CARDINALITY
+            or cardinality == tf.data.UNKNOWN_CARDINALITY
+        ):
+            self.cardinality = float("inf")
+        else:
+            self.cardinality = cardinality.numpy()
         self.visualized_trajs = False
         self._cached_iterators = {}
 
@@ -247,7 +258,8 @@ class Visualizer:
         return all_traj_info
 
     def get_iterator(self, dataset, n):
-        if dataset not in self._cached_iterators:
+        n = min(n, self.cardinality)
+        if n not in self._cached_iterators:
             self._cached_iterators[n] = (
                 dataset.take(n).repeat().as_numpy_iterator()
                 if self.freeze_trajs

@@ -62,9 +62,10 @@ class SaveCallback(Callback):
     save_dir: Optional[str]
 
     def __post_init__(self):
-        if self.save_dir is not None and jax.process_index() == 0:
-            tf.io.gfile.makedirs(self.save_dir)
-            logging.info(f"Created {self.save_dir}")
+        if self.save_dir is not None:
+            if jax.process_index() == 0:
+                tf.io.gfile.makedirs(self.save_dir)
+                logging.info(f"Created {self.save_dir}")
             # make checkpointers
             # only keep latest full TrainState
             self.state_checkpointer = orbax.checkpoint.CheckpointManager(
@@ -81,7 +82,7 @@ class SaveCallback(Callback):
             )
 
     def __call__(self, train_state: TrainState, step: int):
-        if self.save_dir is not None and jax.process_index() == 0:
+        if self.save_dir is not None:
             self.params_checkpointer.save(
                 step,
                 train_state.params,
@@ -112,14 +113,32 @@ def remove_text(tasks: Data, zero_text_encoding: Data):
             tasks["language_instruction"],
             zero_text_encoding,
         )
-        tasks = flax.core.copy(tasks, {"language_instruction": new_language})
+        new_pad_dict = flax.core.copy(
+            tasks["pad_mask_dict"],
+            {
+                "language_instruction": jnp.zeros_like(
+                    tasks["pad_mask_dict"]["language_instruction"]
+                )
+            },
+        )
+        tasks = flax.core.copy(
+            tasks, {"language_instruction": new_language, "pad_mask_dict": new_pad_dict}
+        )
     return tasks
 
 
 def remove_images(tasks: Data):
     """Replaces images inside task dict with zero (black) images."""
-    new_images = {k: jnp.zeros_like(v) for k, v in tasks.items() if "image" in k}
-    return flax.core.copy(tasks, new_images)
+    updates = {k: jnp.zeros_like(v) for k, v in tasks.items() if "image" in k}
+    updates["pad_mask_dict"] = flax.core.copy(
+        tasks["pad_mask_dict"],
+        {
+            k: jnp.zeros_like(v)
+            for k, v in tasks["pad_mask_dict"].items()
+            if "image" in k
+        },
+    )
+    return flax.core.copy(tasks, updates)
 
 
 @partial(jax.jit, static_argnames=("samples_per_state", "policy_mode"))
@@ -201,7 +220,10 @@ class ValidationCallback(Callback):
             val_iterator = map(self.process_batch_fn, val_iterator)
             self.val_iterators[single_dataset_kwargs["name"]] = val_iterator
 
-        @jax.jit
+        @partial(
+            jax.jit,
+            out_shardings=jax.sharding.PositionalSharding(jax.devices()).replicate(),
+        )
         def eval_step(state, batch):
             loss_fn_partial = partial(
                 self.loss_fn,
@@ -215,11 +237,12 @@ class ValidationCallback(Callback):
             if "base" in self.modes_to_evaluate:
                 all_tasks["base"] = batch["tasks"]
             if "image_conditioned" in self.modes_to_evaluate:
-                all_tasks["text_conditioned"] = remove_images(batch["tasks"])
-            if "text_conditioned" in self.modes_to_evaluate:
                 all_tasks["image_conditioned"] = remove_text(
                     batch["tasks"], self.zero_text
                 )
+            if "text_conditioned" in self.modes_to_evaluate:
+                all_tasks["text_conditioned"] = remove_images(batch["tasks"])
+
             if "unconditioned" in self.modes_to_evaluate:
                 all_tasks["unconditioned"] = remove_text(
                     remove_images(batch["tasks"]), self.zero_text

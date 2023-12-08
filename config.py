@@ -56,11 +56,11 @@ def get_config(
             dataset_kwargs=get_dataset_config(modality, window_size),
             optimizer=dict(
                 learning_rate=dict(
+                    name="rsqrt",
                     init_value=0.0,
                     peak_value=3e-4,
                     warmup_steps=2000,
-                    decay_steps=num_steps,
-                    end_value=0.0,
+                    timescale=10000,
                 ),
                 weight_decay=0.1,
                 clip_gradient=1.0,
@@ -93,12 +93,12 @@ def get_config(
                 entity=placeholder(str),
             ),
             wandb_resume_id=placeholder(str),
-            eval_datasets=[
+            eval_datasets=(
                 "bridge_dataset",
                 "taco_play",
                 "berkeley_cable_routing",
                 "berkeley_autolab_ur5",
-            ],
+            ),
         )
     )
 
@@ -107,8 +107,8 @@ def get_dataset_config(modality="multimodal", window_size=1):
     normalization_type = "normal"
     if modality == "multimodal":
         task_augmentation = dict(
-            task_augmentation_strategy="delete_task_conditioning",
-            task_augmentation_kwargs=dict(
+            task_augment_strategy="delete_task_conditioning",
+            task_augment_kwargs=dict(
                 delete_key_groups_probs=[
                     (["image_*"], 0.5),
                     (["language_instruction"], 0.5),
@@ -137,7 +137,6 @@ def get_dataset_config(modality="multimodal", window_size=1):
             additional_action_window_size=0,
             goal_relabeling_strategy="uniform",
             subsample_length=100,
-            **task_augmentation,
         ),
         "frame_transform_kwargs": dict(
             resize_size=(256, 256),
@@ -155,6 +154,7 @@ def get_dataset_config(modality="multimodal", window_size=1):
                     "random_hue",
                 ],
             ),
+            **task_augmentation,
         ),
         "traj_transform_threads": 48,  # shared between all datasets
         "traj_read_threads": 48,  # shared between all datasets
@@ -166,7 +166,7 @@ def get_dataset_config(modality="multimodal", window_size=1):
 
 
 def get_transformer_kwargs(transformer_size):
-    assert transformer_size in ["dummy", "vanilla", "vit_s", "vit_b", "vit_l"]
+    assert transformer_size in ["dummy", "vanilla", "vit_s", "vit_b", "vit_l", "vit_h"]
     default_params = {
         "attention_dropout_rate": 0.0,
         "add_position_embedding": False,
@@ -203,6 +203,12 @@ def get_transformer_kwargs(transformer_size):
             num_attention_heads=16,
             dropout_rate=0.1,
         ),
+        "vit_h": dict(
+            num_layers=32,
+            mlp_dim=5120,
+            num_attention_heads=16,
+            dropout_rate=0.1,
+        ),
     }
 
     TOKEN_DIMS = {
@@ -211,6 +217,7 @@ def get_transformer_kwargs(transformer_size):
         "vit_s": 384,
         "vit_b": 768,
         "vit_l": 1024,
+        "vit_h": 1280,
     }
     return dict(
         token_embedding_size=TOKEN_DIMS[transformer_size],
@@ -230,6 +237,7 @@ def get_model_config(transformer_size):
 
     return {
         **get_transformer_kwargs(transformer_size),
+        "proper_pad_mask": True,
         "max_horizon": 10,
         "readouts": dict(),
         "heads": dict(
