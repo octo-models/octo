@@ -17,7 +17,7 @@ import wandb
 from orca.data.dataset import make_single_dataset
 from orca.data.utils.text_processing import text_processors
 from orca.utils.jax_utils import initialize_compilation_cache
-from orca.utils.pretrained_utils import PretrainedModel
+from orca.utils.pretrained_utils import ORCAModel
 from orca.utils.train_callbacks import (
     RolloutVisualizationCallback,
     SaveCallback,
@@ -120,7 +120,7 @@ def main(_):
     #
     #########
 
-    orig_config = PretrainedModel.load_config(FLAGS.config.pretrained_path)
+    orig_config = ORCAModel.load_config(FLAGS.config.pretrained_path)
     flat_config = flax.traverse_util.flatten_dict(
         orig_config.to_dict(), keep_empty_nodes=True
     )
@@ -177,11 +177,11 @@ def main(_):
     #
     #########
 
-    pretrained_model = PretrainedModel.load_pretrained(
+    pretrained_model = ORCAModel.load_pretrained(
         FLAGS.config.pretrained_path,
         step=FLAGS.config.pretrained_step,
     )
-    model = PretrainedModel.from_config(config, example_batch, text_processor)
+    model = ORCAModel.from_config(config, example_batch, text_processor)
     merged_params = merge_params(model.params, pretrained_model.params)
     model = model.replace(params=merged_params)
     del pretrained_model

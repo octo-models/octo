@@ -24,7 +24,7 @@ import wandb
 
 from orca.data.dataset import make_single_dataset
 from orca.utils.jax_utils import initialize_compilation_cache
-from orca.utils.pretrained_utils import PretrainedModel
+from orca.utils.pretrained_utils import ORCAModel
 from orca.utils.train_utils import batched_apply, filter_eval_datasets
 from orca.utils.visualization_lib import Visualizer
 
@@ -99,7 +99,7 @@ def main(_):
 
     # prevent tensorflow from using GPUs
     tf.config.set_visible_devices([], "GPU")
-    model = PretrainedModel.load_pretrained(FLAGS.checkpoints)
+    model = ORCAModel.load_pretrained(FLAGS.checkpoints)
     text_processor = model.text_processor
     if text_processor is not None:
         zero_text = text_processor.encode([""])[0]
@@ -154,7 +154,7 @@ def main(_):
 
     @partial(jax.jit, static_argnames=("argmax", "n", "policy_mode"))
     def get_policy_sampled_actions(
-        model: PretrainedModel,
+        model: ORCAModel,
         observations,
         tasks,
         *,

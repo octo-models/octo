@@ -22,7 +22,7 @@ sys.path.append("/nfs/nfs2/users/karl/code/act")
 from aloha_sim_env import AlohaGymEnv
 
 from orca.utils.gym_wrappers import HistoryWrapper, RHCWrapper, UnnormalizeActionProprio
-from orca.utils.pretrained_utils import PretrainedModel
+from orca.utils.pretrained_utils import ORCAModel
 
 FLAGS = flags.FLAGS
 
@@ -37,7 +37,7 @@ def main(_):
 
     # load finetuned model
     logging.info("Loading finetuned model...")
-    model = PretrainedModel.load_pretrained(FLAGS.finetuned_path)
+    model = ORCAModel.load_pretrained(FLAGS.finetuned_path)
 
     # make gym environment
     ##################################################################################################################
@@ -62,7 +62,7 @@ def main(_):
     env = RHCWrapper(env, exec_horizon=50)
 
     # wrap env to handle action/proprio normalization -- match normalization type to the one used during finetuning
-    norm_stats = PretrainedModel.get_norm_stats(FLAGS.finetuned_path)
+    norm_stats = ORCAModel.get_norm_stats(FLAGS.finetuned_path)
     env = UnnormalizeActionProprio(env, norm_stats, normalization_type="normal")
 
     # jit model action prediction function for faster inference

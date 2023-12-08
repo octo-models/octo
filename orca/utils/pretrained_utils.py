@@ -22,11 +22,11 @@ nonpytree_field = partial(flax.struct.field, pytree_node=False)
 
 
 @flax.struct.dataclass
-class PretrainedModel:
-    """Recommended way of interacting with a pretrained model.
+class ORCAModel:
+    """Recommended way of interacting with a pretrained ORCA model.
 
     Usage (example):
-        model = PretrainedModel.load_pretrained(checkpoint_dir)
+        model = ORCAModel.load_pretrained(checkpoint_dir)
 
         # Create the task dict
         tasks = model.create_tasks(texts=["go to the red room"])
@@ -155,7 +155,7 @@ class PretrainedModel:
         checkpoint_path: str,
         example_batch: Optional[Data] = None,
         step: Optional[int] = None,
-    ) -> "PretrainedModel":
+    ) -> "ORCAModel":
         """Loads a pretrained model from a checkpoint. Important: this method expects the
         params-only checkpoint, not the full TrainState used for resuming training.
 
@@ -317,7 +317,7 @@ class PretrainedModel:
 class HeadWrapper:
     """Dummy class to help with the following syntactic sugar.
 
-    > PretrainedModel.heads["action"].predict_action(transformer_embeddings)
+    > ORCAModel.heads["action"].predict_action(transformer_embeddings)
     """
 
     def __init__(self, fn):

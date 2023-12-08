@@ -25,7 +25,7 @@ from orca.utils.eval_utils import (
     supply_rng,
 )
 from orca.utils.gym_wrappers import HistoryWrapper, RHCWrapper, TemporalEnsembleWrapper
-from orca.utils.pretrained_utils import PretrainedModel
+from orca.utils.pretrained_utils import ORCAModel
 
 np.set_printoptions(suppress=True)
 
@@ -66,7 +66,7 @@ flags.DEFINE_bool("show_image", False, "Show image")
 # TODO: use class UnnormalizeActionProprio instead
 @partial(jax.jit, static_argnames="argmax")
 def sample_unormalized_actions(
-    pretrained_model: PretrainedModel,
+    pretrained_model: ORCAModel,
     observations,
     tasks,
     mean,
@@ -94,7 +94,7 @@ def sample_unormalized_actions(
 
 
 def load_checkpoint(weights_path: str, step: int, dataset_name: str = "bridge_dataset"):
-    model = PretrainedModel.load_pretrained(weights_path, step=int(step))
+    model = ORCAModel.load_pretrained(weights_path, step=int(step))
     metadata_path = os.path.join(
         weights_path, f"dataset_statistics_{dataset_name}.json"
     )
@@ -177,7 +177,7 @@ def run_eval_loop(env: gym.Env, get_goal_condition: Callable, step_duration: flo
 
         policy_name = list(policies.keys())[policy_idx]
         policy_fn, model = policies[policy_name]
-        model: PretrainedModel  # type hinting
+        model: ORCAModel  # type hinting
 
         modality = FLAGS.modality
         if not modality:
