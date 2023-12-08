@@ -71,6 +71,7 @@ def get_config(
         window_size=window_size,
         optimizer=dict(
             learning_rate=dict(
+                name="cosine",
                 init_value=0.0,
                 peak_value=3e-4,
                 warmup_steps=2000,
@@ -78,7 +79,7 @@ def get_config(
                 end_value=0.0,
             ),
             weight_decay=0.01,
-            clip_gradient=placeholder(float),
+            clip_gradient=1.0,
             frozen_keys=frozen_keys,
         ),
         val_kwargs=dict(
@@ -116,28 +117,47 @@ def get_config(
         window_size=window_size,
         additional_action_window_size=0,
         goal_relabeling_strategy=goal_relabeling_strategy,
-        task_augmentation_strategy="delete_task_conditioning",
-        task_augmentation_kwargs=dict(
-            delete_key_groups_probs=delete_key_groups_probs,
-        ),
         # If the default data loading speed is too slow, try these:
         # num_parallel_calls=16,  # for less CPU-intensive ops
     )
+    workspace_augment_kwargs = dict(
+        random_resized_crop=dict(scale=[0.8, 1.0], ratio=[0.9, 1.1]),
+        random_brightness=[0.1],
+        random_contrast=[0.9, 1.1],
+        random_saturation=[0.9, 1.1],
+        random_hue=[0.05],
+        augment_order=[
+            "random_resized_crop",
+            "random_brightness",
+            "random_contrast",
+            "random_saturation",
+            "random_hue",
+        ],
+    )
+    wrist_augment_kwargs = dict(
+        random_brightness=[0.1],
+        random_contrast=[0.9, 1.1],
+        random_saturation=[0.9, 1.1],
+        random_hue=[0.05],
+        augment_order=[
+            "random_brightness",
+            "random_contrast",
+            "random_saturation",
+            "random_hue",
+        ],
+    )
     frame_transform_kwargs = dict(
-        resize_size=(256, 256),
-        image_augment_kwargs=dict(
-            random_resized_crop=dict(scale=[0.8, 1.0], ratio=[0.9, 1.1]),
-            random_brightness=[0.2],
-            random_contrast=[0.8, 1.2],
-            random_saturation=[0.8, 1.2],
-            random_hue=[0.1],
-            augment_order=[
-                "random_resized_crop",
-                "random_brightness",
-                "random_contrast",
-                "random_saturation",
-                "random_hue",
-            ],
+        resize_size=[
+            (256, 256),  # workspace (3rd person) camera is at 256x256
+            (128, 128),  # wrist camera is at 128x128
+        ],
+        image_augment_kwargs=[
+            workspace_augment_kwargs,
+            wrist_augment_kwargs,
+        ],
+        task_augment_strategy="delete_task_conditioning",
+        task_augment_kwargs=dict(
+            delete_key_groups_probs=delete_key_groups_probs,
         ),
     )
     # If the default data loading speed is too slow, try these:

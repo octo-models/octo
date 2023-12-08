@@ -86,23 +86,36 @@ def _subsample(traj, subsample_length):
     return traj
 
 
+def _add_pad_mask_dict(traj):
+    """Adds a dictionary indicating which elements of the observation are padding.
+
+    traj["observation"]["pad_mask_dict"] = {k: traj["observation"][k] is not padding}
+    """
+    traj_len = tf.shape(traj["action"])[0]
+    pad_masks = {}
+    for key in traj["observation"]:
+        if traj["observation"][key].dtype == tf.string:
+            pad_masks[key] = tf.strings.length(traj["observation"][key]) != 0
+        else:
+            pad_masks[key] = tf.ones([traj_len], dtype=tf.bool)
+    traj["observation"]["pad_mask_dict"] = pad_masks
+    return traj
+
+
 def _decode_images(obs: dict) -> dict:
-    """Decodes images and depth images, marking empty strings as padding."""
-    pad_mask_dict = {}  # indicates which keys in the dict are padding
+    """Decodes images and depth images."""
     for key in obs:
         if "image" in key:
             if obs[key].dtype == tf.string:
                 if tf.strings.length(obs[key]) == 0:
                     # this is a padding image
                     obs[key] = tf.zeros((1, 1, 3), dtype=tf.uint8)
-                    pad_mask_dict[key] = False
                 else:
                     obs[key] = tf.io.decode_image(
                         obs[key], expand_animations=False, dtype=tf.uint8
                     )
-                    pad_mask_dict[key] = True
             elif obs[key].dtype == tf.uint8:
-                pad_mask_dict[key] = True
+                pass
             else:
                 raise ValueError(
                     f"Unsupported image dtype: found {key} with dtype {obs[key].dtype}"
@@ -112,31 +125,57 @@ def _decode_images(obs: dict) -> dict:
                 if tf.strings.length(obs[key]) == 0:
                     # this is a padding image
                     obs[key] = tf.zeros((1, 1), dtype=tf.float32)
-                    pad_mask_dict[key] = False
                 else:
                     obs[key] = tf.io.decode_image(
                         obs[key], expand_animations=False, dtype=tf.float32
                     )[..., 0]
-                    pad_mask_dict[key] = True
             elif obs[key].dtype == tf.float32:
-                pad_mask_dict[key] = True
+                pass
             else:
                 raise ValueError(
                     f"Unsupported depth dtype: found {key} with dtype {obs[key].dtype}"
                 )
-
-    obs["pad_mask_dict"] = pad_mask_dict
     return obs
 
 
 def _augment(obs: dict, seed, augment_kwargs) -> dict:
     """Augments images, skipping padding images."""
-    for key in obs:
-        if "image" in key:
+    num_image_keys = sum(["image" in key for key in obs])
+
+    if not isinstance(augment_kwargs, Sequence):
+        augment_kwargs = [copy.deepcopy(augment_kwargs)] * num_image_keys
+
+    for i in range(num_image_keys):
+        if augment_kwargs[i] is not None:
+            key = f"image_{i}"
             if obs["pad_mask_dict"][key]:
                 obs[key] = dl.transforms.augment_image(
-                    obs[key], **augment_kwargs, seed=seed
+                    obs[key], **augment_kwargs[i], seed=seed + i
                 )
+    return obs
+
+
+def _resize(obs: dict, resize_size, depth_resize_size) -> dict:
+    """Resizes images and depth images."""
+    num_image_keys = sum(["image" in key for key in obs])
+    num_depth_keys = sum(["depth" in key for key in obs])
+
+    if resize_size is None or isinstance(resize_size[0], int):
+        resize_size = [resize_size] * num_image_keys
+    if depth_resize_size is None or isinstance(depth_resize_size[0], int):
+        depth_resize_size = [depth_resize_size] * num_depth_keys
+
+    for i in range(num_image_keys):
+        if resize_size[i] is not None:
+            key = f"image_{i}"
+            obs[key] = dl.transforms.resize_image(obs[key], size=resize_size[i])
+
+    for i in range(num_depth_keys):
+        if depth_resize_size[i] is not None:
+            key = f"depth_{i}"
+            obs[key] = dl.transforms.resize_depth_image(
+                obs[key], size=depth_resize_size[i]
+            )
     return obs
 
 
@@ -146,8 +185,6 @@ def apply_trajectory_transforms(
     train: bool,
     goal_relabeling_strategy: Optional[str] = None,
     goal_relabeling_kwargs: dict = {},
-    task_augmentation_strategy: Optional[str] = None,
-    task_augmentation_kwargs: dict = {},
     window_size: int = 1,
     additional_action_window_size: int = 0,
     action_encoding: ActionEncoding = ActionEncoding.EEF_POS,
@@ -172,9 +209,6 @@ def apply_trajectory_transforms(
         goal_relabeling_strategy (str, optional): The goal relabeling strategy to use, or None for
             no goal relabeling. See `bc_goal_relabeling.py`.
         goal_relabeling_kwargs (dict, optional): Additional keyword arguments to pass to the goal relabeling function.
-        task_augmentation_strategy (Optional[str], optional): The task augmentation strategy to use, or None for no task
-            augmentation. See `task_augmentation.py`.
-        task_augmentation_kwargs (dict, optional): Additional keyword arguments to pass to the task augmentation function.
         window_size (int, optional): The length of the snippets that trajectories are chunked into.
         additional_action_window_size (int, optional): The number of additional actions beyond window_size to include
             in the chunked actions.
@@ -204,6 +238,7 @@ def apply_trajectory_transforms(
                 tf.math.abs(x["observation"]["proprio"]) <= max_proprio
             )
         )
+    dataset = dataset.map(_add_pad_mask_dict, num_parallel_calls)
 
     # adds the "tasks" key
     if goal_relabeling_strategy is not None:
@@ -217,23 +252,12 @@ def apply_trajectory_transforms(
 
         def move_language_instruction_to_tasks(traj):
             traj["tasks"]["language_instruction"] = traj.pop("language_instruction")
+            traj["tasks"]["pad_mask_dict"]["language_instruction"] = (
+                tf.strings.length(traj["tasks"]["language_instruction"]) != 0
+            )
             return traj
 
         dataset = dataset.map(move_language_instruction_to_tasks, num_parallel_calls)
-
-    if train and subsample_length is not None:
-        dataset = dataset.map(
-            partial(_subsample, subsample_length=subsample_length), num_parallel_calls
-        )
-
-    if train and task_augmentation_strategy is not None:
-        dataset = dataset.map(
-            partial(
-                getattr(task_augmentation, task_augmentation_strategy),
-                **task_augmentation_kwargs,
-            ),
-            num_parallel_calls,
-        )
 
     dataset = dataset.map(
         partial(
@@ -244,14 +268,25 @@ def apply_trajectory_transforms(
         ),
         num_parallel_calls,
     )
+    if train and subsample_length is not None:
+        dataset = dataset.map(
+            partial(_subsample, subsample_length=subsample_length), num_parallel_calls
+        )
 
     return dataset
 
 
 def get_frame_transforms(
     train: bool,
-    image_augment_kwargs: Optional[dict] = None,
-    resize_size: Optional[Tuple[int, int]] = None,
+    image_augment_kwargs: Union[Optional[dict], Sequence[Optional[dict]]] = None,
+    resize_size: Union[
+        Optional[Tuple[int, int]], Sequence[Optional[Tuple[int, int]]]
+    ] = None,
+    depth_resize_size: Union[
+        Optional[Tuple[int, int]], Sequence[Optional[Tuple[int, int]]]
+    ] = None,
+    task_augment_strategy: Optional[str] = None,
+    task_augment_kwargs: dict = {},
 ) -> List[Callable[[dict], dict]]:
     """
     Returns a list of functions to be applied to each frame. These transforms are usually
@@ -259,9 +294,21 @@ def get_frame_transforms(
 
     Args:
         train (bool): Whether the dataset is for training (affects image augmentation).
-        image_augment_kwargs (dict): Keyword arguments to pass to the image augmentation function. See
-            `dlimp.transforms.augment_image` for documentation.
-        resize_size (Tuple[int, int], optional): If provided, images will be resized to this size.
+        image_augment_kwargs (dict or Sequence[dict]): Keyword arguments to pass to the image
+            augmentation function. See `dlimp.transforms.augment_image` for documentation. If a list
+            of dicts is provided, then the ith entry will be used for "image_i" (order determined by
+            "image_obs_keys"). A value of None or a None list entry will skip image augmentation for
+            the corresponding image(s).
+        resize_size (Tuple[int, int] or Sequence[Tuple[int, int]]): If provided, images will be
+            resized to this size. If a list of tuples is provided, then the ith entry will be used
+            for "image_i" and "depth_i" (order determined by "image_obs_keys" and "depth_obs_keys",
+            respectively). A value of None or a None list entry will skip resizing for the
+            corresponding image(s).
+        depth_resize_size (Tuple[int, int] or Sequence[Tuple[int, int]]): Same as resize_size, but
+            for depth images.
+        task_augmentation_strategy (Optional[str], optional): The task augmentation strategy to use, or None for no task
+            augmentation. See `task_augmentation.py`.
+        task_augmentation_kwargs (dict, optional): Additional keyword arguments to pass to the task augmentation function.
     """
 
     # convenience wrapper that takes a function that operates on a non-chunked "observation" dict
@@ -275,25 +322,29 @@ def get_frame_transforms(
 
     transforms = []
 
-    # decode images (and depth images), marking empty strings as padding
+    if train and task_augment_strategy is not None:
+        # perform task augmentation (e.g., dropping keys)
+        transforms.append(
+            partial(
+                getattr(task_augmentation, task_augment_strategy),
+                **task_augment_kwargs,
+            ),
+        )
+
+    # decode images (and depth images)
     transforms.append(partial(apply_obs_transform, _decode_images))
 
-    # resize images, if requested
-    if resize_size is not None:
-        transforms.append(
+    # resize images (and depth images)
+    transforms.append(
+        partial(
+            apply_obs_transform,
             partial(
-                apply_obs_transform,
-                partial(dl.transforms.resize_images, size=resize_size),
-            )
+                _resize, resize_size=resize_size, depth_resize_size=depth_resize_size
+            ),
         )
-        transforms.append(
-            partial(
-                apply_obs_transform,
-                partial(dl.transforms.resize_depth_images, size=resize_size),
-            )
-        )
+    )
 
-    if train and image_augment_kwargs is not None:
+    if train:
         # augment all images with the same seed, skipping padding images
         def aug(frame):
             seed = tf.random.uniform([2], maxval=tf.dtypes.int32.max, dtype=tf.int32)
@@ -310,9 +361,9 @@ def make_dataset_from_rlds(
     data_dir: str,
     train: bool,
     shuffle: bool = True,
-    image_obs_keys: Union[str, List[str]] = [],
-    depth_obs_keys: Union[str, List[str]] = [],
-    state_obs_keys: Union[str, List[str]] = [],
+    image_obs_keys: Union[str, Sequence[str]] = (),
+    depth_obs_keys: Union[str, Sequence[str]] = (),
+    state_obs_keys: Union[str, Sequence[str]] = (),
     state_encoding: StateEncoding = StateEncoding.NONE,
     action_encoding: ActionEncoding = ActionEncoding.EEF_POS,
     action_proprio_normalization_type: Optional[str] = None,
