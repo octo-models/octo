@@ -165,7 +165,11 @@ class UnnormalizeActionProprio(gym.ActionWrapper, gym.ObservationWrapper):
     def __init__(
         self, env: gym.Env, action_proprio_metadata: dict, normalization_type: str
     ):
-        self.action_proprio_metadata = action_proprio_metadata
+        self.action_proprio_metadata = jax.tree_map(
+            lambda x: np.array(x),
+            action_proprio_metadata,
+            is_leaf=lambda x: isinstance(x, list),
+        )
         self.normalization_type = normalization_type
         super().__init__(env)
 

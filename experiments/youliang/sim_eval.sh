@@ -2,11 +2,11 @@
 # The script is currently configured to run evaluation on a WidowXSimEnv
 
 PATHS=(
-    "gs://rail-dibya-central2/orca_releases/20231130/orca_small_ws2"
+    "/mnt2/homer/checkpoints/oxe_vitb"
 )
 
 STEPS=(
-    "120000"
+    "300000"
 )
 
 CONDITIONING_MODE=""
@@ -21,7 +21,7 @@ PRED_HORIZON="1"
 
 EXEC_HORIZON="1"
 
-CMD="python scripts/sim_eval.py \
+CMD="python eval/eval_sim.py \
     --num_timesteps $TIMESTEPS \
     $(for i in "${!PATHS[@]}"; do echo "--checkpoint_weights_path ${PATHS[$i]} "; done) \
     $(for i in "${!PATHS[@]}"; do echo "--checkpoint_step ${STEPS[$i]} "; done) \

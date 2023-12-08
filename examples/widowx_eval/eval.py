@@ -4,19 +4,30 @@ from datetime import datetime
 from functools import partial
 import os
 import time
-from typing import Callable, Dict
 
-from absl import flags, logging
+from absl import app, flags, logging
 import click
 import cv2
-import gym
 import imageio
 import jax
 import jax.numpy as jnp
 import numpy as np
+import tensorflow as tf
+from widowx_env import convert_obs, state_to_eep, wait_for_obs, WidowXGym
+from widowx_envs.widowx_env_service import WidowXClient, WidowXConfigs, WidowXStatus
 
-from orca.utils.eval_utils import load_jaxrlm_checkpoint, sample_actions, supply_rng
-from orca.utils.gym_wrappers import HistoryWrapper, RHCWrapper, TemporalEnsembleWrapper
+from orca.utils.eval_utils import (
+    download_checkpoint_from_gcs,
+    load_jaxrlm_checkpoint,
+    sample_actions,
+    supply_rng,
+)
+from orca.utils.gym_wrappers import (
+    HistoryWrapper,
+    RHCWrapper,
+    TemporalEnsembleWrapper,
+    UnnormalizeActionProprio,
+)
 from orca.utils.pretrained_utils import PretrainedModel
 
 np.set_printoptions(suppress=True)
@@ -24,6 +35,21 @@ np.set_printoptions(suppress=True)
 logging.set_verbosity(logging.WARNING)
 
 FLAGS = flags.FLAGS
+
+flags.DEFINE_multi_string(
+    "checkpoint_weights_path", None, "Path to checkpoint", required=True
+)
+flags.DEFINE_multi_integer("checkpoint_step", None, "Checkpoint step", required=True)
+flags.DEFINE_string(
+    "checkpoint_cache_dir", "/tmp/", "Where to cache checkpoints downloaded from GCS"
+)
+
+# custom to bridge_data_robot
+flags.DEFINE_string("ip", "localhost", "IP address of the robot")
+flags.DEFINE_integer("port", 5556, "Port of the robot")
+flags.DEFINE_spaceseplist("goal_eep", [0.3, 0.0, 0.15], "Goal position")
+flags.DEFINE_spaceseplist("initial_eep", [0.3, 0.0, 0.15], "Initial position")
+flags.DEFINE_bool("blocking", False, "Use the blocking controller")
 
 flags.DEFINE_bool("add_jaxrlm_baseline", False, "Also compare to jaxrl_m baseline")
 flags.DEFINE_string(
@@ -45,27 +71,85 @@ flags.DEFINE_bool("show_image", False, "Show image")
 
 ##############################################################################
 
+STEP_DURATION_MESSAGE = """
+Bridge data was collected with non-blocking control and a step duration of 0.2s.
+However, we relabel the actions to make it look like the data was collected with
+blocking control and we evaluate with blocking control.
+We also use a step duration of 0.4s to reduce the jerkiness of the policy.
+Be sure to change the step duration back to 0.2 if evaluating with non-blocking control.
+"""
+STEP_DURATION = 0.4
+STICKY_GRIPPER_NUM_STEPS = 1
+WORKSPACE_BOUNDS = [[0.1, -0.15, -0.01, -1.57, 0], [0.45, 0.25, 0.25, 1.57, 0]]
+CAMERA_TOPICS = [{"name": "/blue/image_raw"}]
+ENV_PARAMS = {
+    "camera_topics": CAMERA_TOPICS,
+    "override_workspace_boundaries": WORKSPACE_BOUNDS,
+    "move_duration": STEP_DURATION,
+}
 
-def run_eval_loop(
-    env: gym.Env,
-    models: Dict[str, PretrainedModel],
-    get_goal_condition: Callable,
-    step_duration: float,
-):
-    """
-    Main evaluation loop.
-    : param env: gym.Env            Gym environment for the robot.
-    : param models:                 A dictionary containing PretrainedModels to evaluate.
-    : param get_goal_condition:     Callable to get the image goal during the
-                                    init of the eval run.
-    : param step_duration:          Minimum duration of each step (policy forward pass + robot environment step).
-                                    Only matters if the robot controller is non-blocking.
+##############################################################################
 
-    """
-    FLAGS.modality = FLAGS.modality[:1]
-    if FLAGS.modality not in ["g", "l", ""]:
-        FLAGS.modality = ""
 
+def main(_):
+    # set up the widowx client
+    if FLAGS.initial_eep is not None:
+        assert isinstance(FLAGS.initial_eep, list)
+        initial_eep = [float(e) for e in FLAGS.initial_eep]
+        start_state = np.concatenate([initial_eep, [0, 0, 0, 1]])
+    else:
+        start_state = None
+
+    env_params = WidowXConfigs.DefaultEnvParams.copy()
+    env_params.update(ENV_PARAMS)
+    env_params["state_state"] = list(start_state)
+    widowx_client = WidowXClient(host=FLAGS.ip, port=FLAGS.port)
+    widowx_client.init(env_params, image_size=FLAGS.im_size)
+    env = WidowXGym(
+        widowx_client, FLAGS.im_size, FLAGS.blocking, STICKY_GRIPPER_NUM_STEPS
+    )
+    if not FLAGS.blocking:
+        assert STEP_DURATION == 0.2, STEP_DURATION_MESSAGE
+
+    # load models
+    assert len(FLAGS.checkpoint_weights_path) == len(FLAGS.checkpoint_step)
+    models = {}
+    for weights_path, step in zip(
+        FLAGS.checkpoint_weights_path,
+        FLAGS.checkpoint_step,
+    ):
+        weights_path, step = download_checkpoint_from_gcs(
+            weights_path,
+            step,
+            FLAGS.checkpoint_cache_dir,
+        )
+        assert tf.io.gfile.exists(weights_path), weights_path
+        run_name = weights_path.rpartition("/")[2]
+        models[f"{run_name}-{step}"] = PretrainedModel.load_pretrained(
+            weights_path, step=int(step)
+        )
+
+    # load action metadata
+    # TODO clean this up
+    model = next(iter(models.values()))
+    if "finetune" in weights_path:
+        metadata = model.load_dataset_statistics(FLAGS.checkpoint_weights_path[0])
+    elif "from_scratch" in weights_path:
+        metadata = model.load_dataset_statistics(
+            FLAGS.checkpoint_weights_path[0], "widowx_cleaver:2.0.0"
+        )
+    else:
+        metadata = model.load_dataset_statistics(
+            FLAGS.checkpoint_weights_path[0], "bridge_dataset"
+        )
+
+    # wrap the robot envionment
+    env = UnnormalizeActionProprio(env, metadata, normalization_type="normal")
+    env = HistoryWrapper(env, FLAGS.horizon)
+    # env = TemporalEnsembleWrapper(env, FLAGS.pred_horizon)
+    env = RHCWrapper(env, FLAGS.exec_horizon)
+
+    # create policy functions
     policies = {}
     for name, model in models.items():
         policy_fn = supply_rng(
@@ -87,12 +171,12 @@ def run_eval_loop(
             code_path=f"{base_dir}bridge_data_v2.zip",
         )
 
-    env = HistoryWrapper(env, FLAGS.horizon)
-    # env = TemporalEnsembleWrapper(env, FLAGS.pred_horizon)
-    env = RHCWrapper(env, FLAGS.exec_horizon)
-
     goal_image = jnp.zeros((FLAGS.im_size, FLAGS.im_size, 3), dtype=np.uint8)
     goal_instruction = ""
+
+    modality = FLAGS.modality[:1]
+    if modality not in ["g", "l", ""]:
+        modality = ""
 
     # goal sampling loop
     while True:
@@ -111,7 +195,6 @@ def run_eval_loop(
         model = models[policy_name]
         model: PretrainedModel  # type hinting
 
-        modality = FLAGS.modality
         if not modality:
             modality = click.prompt(
                 "Language or goal image?", type=click.Choice(["l", "g"])
@@ -119,7 +202,18 @@ def run_eval_loop(
 
         if modality == "g":
             if click.confirm("Take a new goal?", default=True):
-                obs = get_goal_condition()
+                assert isinstance(FLAGS.goal_eep, list)
+                _eep = [float(e) for e in FLAGS.goal_eep]
+                goal_eep = state_to_eep(_eep, 0)
+                widowx_client.move_gripper(1.0)  # open gripper
+
+                move_status = None
+                while move_status != WidowXStatus.SUCCESS:
+                    move_status = widowx_client.move(goal_eep, duration=1.5)
+
+                input("Press [Enter] when ready for taking the goal image. ")
+                obs = wait_for_obs(widowx_client)
+                obs = convert_obs(obs, FLAGS.im_size)
                 goal = jax.tree_map(lambda x: x[None], obs)
 
             task = model.create_tasks(goals=goal)
@@ -148,7 +242,7 @@ def run_eval_loop(
         goals = []
         t = 0
         while t < FLAGS.num_timesteps:
-            if time.time() > last_tstep + step_duration:
+            if time.time() > last_tstep + STEP_DURATION:
                 last_tstep = time.time()
 
                 # save images
@@ -184,4 +278,8 @@ def run_eval_loop(
                 f"{curr_time}_{policy_name}.mp4",
             )
             video = np.concatenate([np.stack(goals), np.stack(images)], axis=1)
-            imageio.mimsave(save_path, video, fps=1.0 / step_duration * 3)
+            imageio.mimsave(save_path, video, fps=1.0 / STEP_DURATION * 3)
+
+
+if __name__ == "__main__":
+    app.run(main)

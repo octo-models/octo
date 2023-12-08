@@ -1,8 +1,9 @@
+import time
+
 import gym
 import numpy as np
-from widowx_envs.widowx_env_service import WidowXClient
-import time
 from pyquaternion import Quaternion
+from widowx_envs.widowx_env_service import WidowXClient
 
 
 def state_to_eep(xyz_coor, zangle: float):
@@ -36,20 +37,20 @@ def convert_obs(obs, im_size):
     image_obs = (
         obs["image"].reshape(3, im_size, im_size).transpose(1, 2, 0) * 255
     ).astype(np.uint8)
-    # TODO: proprio from robot env doesn't match training proprio,
-    # need to add transformation somewhere (probably in PretrainedModel class)
-    # NOTE: assume image_1 is not avail
-    return {"image_0": image_obs,
-            "image_1": np.zeros((im_size, im_size, 3), dtype=np.uint8),
-            "proprio": obs["state"],
-            }
+    # add padding to proprio to match training
+    proprio = np.concatenate([obs["state"][:6], [0], obs["state"][-1:]])
+    # NOTE: assume image_1 is not available
+    return {
+        "image_0": image_obs,
+        "proprio": proprio,
+    }
 
 
 def null_obs(img_size):
-    return {"image_0": np.zeros((img_size, img_size, 3), dtype=np.uint8),
-            "image_1": np.zeros((img_size, img_size, 3), dtype=np.uint8),
-            "proprio": np.zeros((7,), dtype=np.float64),
-            }
+    return {
+        "image_0": np.zeros((img_size, img_size, 3), dtype=np.uint8),
+        "proprio": np.zeros((8,), dtype=np.float64),
+    }
 
 
 class WidowXGym(gym.Env):
@@ -76,13 +77,8 @@ class WidowXGym(gym.Env):
                     high=255 * np.ones((im_size, im_size, 3)),
                     dtype=np.uint8,
                 ),
-                "image_1": gym.spaces.Box(
-                    low=np.zeros((im_size, im_size, 3)),
-                    high=255 * np.ones((im_size, im_size, 3)),
-                    dtype=np.uint8,
-                ),
                 "proprio": gym.spaces.Box(
-                    low=np.ones((7,)) * -1, high=np.ones((7,)), dtype=np.float64
+                    low=np.ones((8,)) * -1, high=np.ones((8,)), dtype=np.float64
                 ),
             }
         )
