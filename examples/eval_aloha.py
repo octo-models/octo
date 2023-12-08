@@ -62,7 +62,7 @@ def main(_):
     env = RHCWrapper(env, exec_horizon=50)
 
     # wrap env to handle action/proprio normalization -- match normalization type to the one used during finetuning
-    norm_stats = ORCAModel.get_norm_stats(FLAGS.finetuned_path)
+    norm_stats = ORCAModel.load_dataset_statistics(FLAGS.finetuned_path)
     env = UnnormalizeActionProprio(env, norm_stats, normalization_type="normal")
 
     # jit model action prediction function for faster inference
