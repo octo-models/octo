@@ -15,7 +15,7 @@ from orca.data.dataset import make_single_dataset
 from orca.data.utils.data_utils import ActionEncoding, StateEncoding
 from orca.data.utils.text_processing import text_processors
 from orca.utils.jax_utils import initialize_compilation_cache
-from orca.utils.pretrained_utils import PretrainedModel
+from orca.utils.pretrained_utils import ORCAModel
 from orca.utils.train_callbacks import SaveCallback
 from orca.utils.train_utils import (
     create_optimizer,
@@ -49,7 +49,7 @@ def main(_):
 
     # load pre-trained model
     logging.info("Loading pre-trained model...")
-    pretrained_model = PretrainedModel.load_pretrained(FLAGS.pretrained_path)
+    pretrained_model = ORCAModel.load_pretrained(FLAGS.pretrained_path)
 
     # make finetuning dataset
     # apply Gaussian normalization, load chunks of 50 actions since we'll train with action chunking
@@ -104,7 +104,7 @@ def main(_):
 
     # load pre-training config and modify --> remove wrist cam, add proprio input, change action head
     # following Zhao et al. we use "action chunks" of length 50 and L1 loss for ALOHA
-    config = PretrainedModel.load_config(FLAGS.pretrained_path)
+    config = ORCAModel.load_config(FLAGS.pretrained_path)
     del config["model"]["observation_tokenizers"]["wrist"]
     config["model"]["observation_tokenizers"].update(
         dict(
@@ -134,7 +134,7 @@ def main(_):
     # initialize weights for modified ORCA model, then merge in all applicable pre-trained weights
     # new position encodings for proprio inputs & weights for new action head will remain "from scratch"
     logging.info("Updating model for new observation & action space...")
-    model = PretrainedModel.from_config(config, example_batch)
+    model = ORCAModel.from_config(config, example_batch)
     merged_params = merge_params(model.params, pretrained_model.params)
     # can perform any additional parameter surgery here...
     # ...

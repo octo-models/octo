@@ -37,7 +37,7 @@ def convert_obs(obs, im_size):
         obs["image"].reshape(3, im_size, im_size).transpose(1, 2, 0) * 255
     ).astype(np.uint8)
     # TODO: proprio from robot env doesn't match training proprio,
-    # need to add transformation somewhere (probably in PretrainedModel class)
+    # need to add transformation somewhere (probably in ORCAModel class)
     # NOTE: assume image_1 is not avail
     return {"image_0": image_obs,
             "image_1": np.zeros((im_size, im_size, 3), dtype=np.uint8),
