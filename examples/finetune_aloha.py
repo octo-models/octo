@@ -27,9 +27,11 @@ from orca.utils.train_utils import (
 
 FLAGS = flags.FLAGS
 
-flags.DEFINE_string("pretrained_path", "Path to pre-trained ORCA checkpoint directory.")
-flags.DEFINE_string("data_dir", "Path to finetuning dataset, in RLDS format.")
-flags.DEFINE_string("save_dir", "Directory for saving finetuning checkpoints.")
+flags.DEFINE_string(
+    "pretrained_path", None, "Path to pre-trained ORCA checkpoint directory."
+)
+flags.DEFINE_string("data_dir", None, "Path to finetuning dataset, in RLDS format.")
+flags.DEFINE_string("save_dir", None, "Directory for saving finetuning checkpoints.")
 flags.DEFINE_bool(
     "freeze_transformer",
     False,
@@ -69,15 +71,15 @@ def main(_):
             additional_action_window_size=49,  # so we get 50 actions for our action chunk
             goal_relabeling_strategy="no_image_conditioning",  # train only language-conditioned policy
             action_encoding=ActionEncoding.JOINT_POS_BIMANUAL,
-            task_augmentation_strategy="delete_task_conditioning",
-            task_augmentation_kwargs=dict(
+        ),
+        frame_transform_kwargs=dict(
+            resize_size=(256, 256),
+            task_augment_strategy="delete_task_conditioning",
+            task_augment_kwargs=dict(
                 delete_key_groups_probs=[
                     (["image_.*"], 1.0)
                 ],  # delete goal images in task definition
             ),
-        ),
-        frame_transform_kwargs=dict(
-            resize_size=(256, 256),
         ),
         train=True,
     )
@@ -142,20 +144,17 @@ def main(_):
     # create optimizer & train_state, optionally freeze keys for pre-trained transformer
     # train_state bundles parameters & optimizers
     model_def = model.model_def
-    tx = create_optimizer(
+    tx, _, _ = create_optimizer(
         model.params,
-        dict(
-            learning_rate=dict(
-                init_value=0.0,
-                peak_value=3e-5,
-                warmup_steps=20,
-                decay_steps=20000,
-                end_value=0.0,
-            ),
-            weight_decay=0.0,
+        learning_rate=dict(
+            name="constant",
+            init_value=0.0,
+            peak_value=3e-5,
+            warmup_steps=1000,
         ),
+        weight_decay=0.0,
     )
-    frozen_keys = model.config.frozen_keys
+    frozen_keys = model.config["optimizer"]["frozen_keys"]
     if FLAGS.freeze_transformer:
         frozen_keys.append("BlockTransformer_0")
     tx = freeze_weights(tx, model.params, frozen_keys)
@@ -200,7 +199,7 @@ def main(_):
         if (i + 1) % 100 == 0:
             update_info = jax.device_get(update_info)
             wandb.log(
-                flax.traverse_utils.flatten_dict({"training": update_info}, sep="/"),
+                flax.traverse_util.flatten_dict({"training": update_info}, sep="/"),
                 step=i,
             )
 
