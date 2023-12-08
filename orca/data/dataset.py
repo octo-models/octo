@@ -106,12 +106,6 @@ def apply_trajectory_transforms(
 
         dataset = dataset.traj_map(process_language_instruction, num_parallel_calls)
 
-    if train and subsample_length is not None:
-        dataset = dataset.traj_map(
-            partial(traj_transforms.subsample, subsample_length=subsample_length),
-            num_parallel_calls,
-        )
-
     dataset = dataset.traj_map(
         partial(
             traj_transforms.chunk_act_obs,
@@ -120,6 +114,12 @@ def apply_trajectory_transforms(
         ),
         num_parallel_calls,
     )
+
+    if train and subsample_length is not None:
+        dataset = dataset.traj_map(
+            partial(traj_transforms.subsample, subsample_length=subsample_length),
+            num_parallel_calls,
+        )
 
     return dataset
 
