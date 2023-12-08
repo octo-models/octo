@@ -63,7 +63,7 @@ PRED_HORIZON="1"
 
 EXEC_HORIZON="1"
 
-CMD="python eval/eval_widowx.py \
+CMD="python examples/widowx_eval/eval.py \
     --num_timesteps $TIMESTEPS \
     --video_save_path /mount/harddrive/homer/videos/$VIDEO_DIR \
     $(for i in "${!PATHS[@]}"; do echo "--checkpoint_weights_path ${PATHS[$i]} "; done) \

@@ -4,13 +4,13 @@ import json
 import os
 
 from absl import app, flags, logging
-import numpy as np
-from robot_wrappers.widowx_wrapper import (
+from examples.widowx_eval.widowx_env import (
     convert_obs,
     state_to_eep,
     wait_for_obs,
     WidowXGym,
 )
+import numpy as np
 import tensorflow as tf
 from widowx_envs.widowx_env_service import WidowXClient, WidowXConfigs, WidowXStatus
 

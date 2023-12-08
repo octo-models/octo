@@ -77,11 +77,6 @@ class WidowXGym(gym.Env):
                     high=255 * np.ones((im_size, im_size, 3)),
                     dtype=np.uint8,
                 ),
-                "image_1": gym.spaces.Box(
-                    low=np.zeros((im_size, im_size, 3)),
-                    high=255 * np.ones((im_size, im_size, 3)),
-                    dtype=np.uint8,
-                ),
                 "proprio": gym.spaces.Box(
                     low=np.ones((8,)) * -1, high=np.ones((8,)), dtype=np.float64
                 ),
