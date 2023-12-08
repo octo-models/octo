@@ -1,15 +1,24 @@
 """
 This script demonstrates how to load and rollout a finetuned ORCA model.
 We use the ORCA model finetuned on ALOHA sim data from the examples/finetune_aloha.py script.
+
+For installing the ALOHA sim environment, clone: https://github.com/tonyzhaozh/act
+Then run:
+pip3 install opencv-python modern_robotics pyrealsense2 h5py_cache pyquaternion pyyaml rospkg pexpect mujoco==2.3.3 dm_control==1.0.9 einops packaging h5py
+
+Finally modify the sys.import statement below to add the ACT repo to your path
 """
+import sys
+
 from absl import app, flags, logging
 import gym
 import jax
 import numpy as np
 import wandb
 
-# TODO: move AlohaGymEnv into examples and remove dependency on files in "experiments"
-from experiments.lucy.aloha_wrapper import AlohaGymEnv
+sys.path.append("../act")
+from examples.envs.aloha_sim_env import AlohaGymEnv
+
 from orca.utils.gym_wrappers import HistoryWrapper, RHCWrapper, UnnormalizeActionProprio
 from orca.utils.pretrained_utils import PretrainedModel
 
