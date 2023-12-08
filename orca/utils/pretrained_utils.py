@@ -174,14 +174,14 @@ class PretrainedModel:
                 "Checking differences between provided example_batch and pre-trained model example_batch..."
             )
             logging.info("Checking input observation:...")
-            changed_input = _verify_shapes(
+            _verify_shapes(
                 example_batch["observation"],
                 orig_example_batch["observation"],
                 starting_dim=2,
                 raise_error=False,
             )
             logging.info("Checking task definition:...")
-            changed_input = changed_input or _verify_shapes(
+            _verify_shapes(
                 example_batch["tasks"],
                 orig_example_batch["tasks"],
                 starting_dim=1,

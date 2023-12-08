@@ -28,6 +28,7 @@ from orca.utils.train_utils import (
     check_config_diff,
     create_optimizer,
     format_name_with_config,
+    merge_params,
     process_text,
     Timer,
     TrainState,
@@ -176,14 +177,16 @@ def main(_):
     #
     #########
 
-    model = PretrainedModel.load_pretrained(
+    pretrained_model = PretrainedModel.load_pretrained(
         FLAGS.config.pretrained_path,
-        config=config,
-        example_batch=example_batch,
-        text_processor=text_processor,
         step=FLAGS.config.pretrained_step,
     )
+    model = PretrainedModel.from_config(config, example_batch, text_processor)
+    merged_params = merge_params(model.params, pretrained_model.params)
+    model = model.replace(params=merged_params)
+    del pretrained_model
     model_def = model.model_def
+
     #########
     #
     # Setup Optimizer and Train State
