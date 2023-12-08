@@ -6,7 +6,9 @@ For installing the ALOHA sim environment, clone: https://github.com/tonyzhaozh/a
 Then run:
 pip3 install opencv-python modern_robotics pyrealsense2 h5py_cache pyquaternion pyyaml rospkg pexpect mujoco==2.3.3 dm_control==1.0.9 einops packaging h5py
 
-Finally modify the sys.import statement below to add the ACT repo to your path
+Finally modify the sys.import statement below to add the ACT repo to your path and start a virtual display:
+    Xvfb :1 -screen 0 1024x768x16 &
+    export DISPLAY=:1
 """
 import sys
 
@@ -16,15 +18,17 @@ import jax
 import numpy as np
 import wandb
 
-sys.path.append("../act")
-from examples.envs.aloha_sim_env import AlohaGymEnv
+sys.path.append("/nfs/nfs2/users/karl/code/act")
+from aloha_sim_env import AlohaGymEnv
 
 from orca.utils.gym_wrappers import HistoryWrapper, RHCWrapper, UnnormalizeActionProprio
 from orca.utils.pretrained_utils import PretrainedModel
 
 FLAGS = flags.FLAGS
 
-flags.DEFINE_string("finetuned_path", "Path to finetuned ORCA checkpoint directory.")
+flags.DEFINE_string(
+    "finetuned_path", None, "Path to finetuned ORCA checkpoint directory."
+)
 
 
 def main(_):
@@ -65,7 +69,7 @@ def main(_):
     policy_fn = jax.jit(model.sample_actions)
 
     # running rollouts
-    for _ in range(10):
+    for _ in range(3):
         obs, info = env.reset()
 
         # create task specification --> use model utility to create task dict with correct entries
@@ -73,16 +77,19 @@ def main(_):
         task = model.create_tasks(texts=language_instruction)
 
         # run rollout for 400 steps
-        images = [obs["image_0"]]
+        images = [obs["image_0"][0]]
         episode_return = 0.0
         while len(images) < 400:
-            # model returns actions of shape [batch, horizon, action_dim] -- remove batch and horizon since they are 1
-            actions = policy_fn(jax.tree_map(lambda x: x[None], obs), task)[0, 0]
+            # model returns actions of shape [batch, pred_horizon, action_dim] -- remove batch
+            actions = policy_fn(
+                jax.tree_map(lambda x: x[None], obs), task, rng=jax.random.PRNGKey(0)
+            )
+            actions = actions[0]
 
             # step env -- info contains full "chunk" of observations for logging
             # obs only contains observation for final step of chunk
             obs, reward, done, trunc, info = env.step(actions)
-            images.extend([o["image_0"] for o in info["observations"]])
+            images.extend([o["image_0"][0] for o in info["observations"]])
             episode_return += reward
             if done or trunc:
                 break
