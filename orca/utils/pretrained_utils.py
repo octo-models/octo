@@ -149,6 +149,12 @@ class ORCAModel:
         statistics_path = tf.io.gfile.join(checkpoint_path, statistics_path)
         with tf.io.gfile.GFile(statistics_path, "r") as f:
             statistics = json.load(f)
+
+        statistics = jax.tree_map(
+            lambda x: np.array(x),
+            statistics,
+            is_leaf=lambda x: not isinstance(x, dict),
+        )
         return statistics
 
     @staticmethod
@@ -305,25 +311,6 @@ class ORCAModel:
             example_batch=example_batch,
             config=config.to_dict(),
         )
-
-    @classmethod
-    def get_norm_stats(
-        cls,
-        checkpoint_path: str,
-    ):
-        """
-        Loads normalization statistics used for training the model.
-        """
-        with tf.io.gfile.GFile(
-            os.path.join(checkpoint_path, "dataset_statistics.json"), "r"
-        ) as f:
-            norm_stats = json.load(f)
-        norm_stats = jax.tree_map(
-            lambda x: np.array(x),
-            norm_stats,
-            is_leaf=lambda x: not isinstance(x, dict),
-        )
-        return norm_stats
 
 
 class HeadWrapper:
