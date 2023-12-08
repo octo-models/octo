@@ -150,7 +150,7 @@ def main(_):
             name="constant",
             init_value=0.0,
             peak_value=3e-5,
-            warmup_steps=1000,
+            warmup_steps=100,
         ),
         weight_decay=0.0,
     )
@@ -191,9 +191,20 @@ def main(_):
         new_state = state.apply_gradients(grads=grads, rng=rng)
         return new_state, info
 
+    # save all info for loading of finetuned model
+    # (config, normalization stats, example batch)
+    save_callback = SaveCallback(FLAGS.save_dir)
+    with save_callback.open("config.json", "w") as config_file:
+        config_file.write(config.to_json_best_effort())
+    with save_callback.open("dataset_statistics.json", "w") as f:
+        stats = jax.tree_map(lambda x: x.tolist(), dataset.dataset_statistics)
+        json.dump(stats, f)
+    with save_callback.open("example_batch.msgpack", "wb") as f:
+        f.write(flax.serialization.msgpack_serialize(example_batch))
+
     # run finetuning loop
     logging.info("Starting finetuning...")
-    for i in tqdm.tqdm(range(20000), total=20000, dynamic_ncols=True):
+    for i in tqdm.tqdm(range(2000), total=2000, dynamic_ncols=True):
         batch = next(train_data_iter)
         train_state, update_info = train_step(train_state, batch)
         if (i + 1) % 100 == 0:
@@ -202,19 +213,9 @@ def main(_):
                 flax.traverse_util.flatten_dict({"training": update_info}, sep="/"),
                 step=i,
             )
-
-    # save finetuned weights + all info for loading of finetuned checkpoint
-    # (config, normalization stats, example batch)
-    logging.info("Saving results...")
-    save_callback = SaveCallback(FLAGS.save_dir)
-    save_callback(train_state, 20000)
-    with save_callback.open("config.json", "w") as config_file:
-        config_file.write(config.to_json_best_effort())
-    with save_callback.open("dataset_statistics.json", "w") as f:
-        stats = jax.tree_map(lambda x: x.tolist(), dataset.dataset_statistics)
-        json.dump(stats, f)
-    with save_callback.open("example_batch.msgpack", "wb") as f:
-        f.write(flax.serialization.msgpack_serialize(example_batch))
+        if (i + 1) % 500 == 0:
+            # save checkpoint
+            save_callback(train_state, i)
 
 
 if __name__ == "__main__":
