@@ -8,17 +8,12 @@ import time
 from absl import app, flags, logging
 import click
 import cv2
-from examples.widowx_eval.widowx_env import (
-    convert_obs,
-    state_to_eep,
-    wait_for_obs,
-    WidowXGym,
-)
 import imageio
 import jax
 import jax.numpy as jnp
 import numpy as np
 import tensorflow as tf
+from widowx_env import convert_obs, state_to_eep, wait_for_obs, WidowXGym
 from widowx_envs.widowx_env_service import WidowXClient, WidowXConfigs, WidowXStatus
 
 from orca.utils.eval_utils import (
@@ -136,7 +131,7 @@ def main(_):
 
     # load action metadata
     # TODO clean this up
-    model = models.values()[0]
+    model = next(iter(models.values()))
     if "finetune" in weights_path:
         metadata = model.load_dataset_statistics(FLAGS.checkpoint_weights_path[0])
     elif "from_scratch" in weights_path:
