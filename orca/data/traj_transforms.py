@@ -34,10 +34,10 @@ def chunk_act_obs(
     if "task" in traj:
         goal_timestep = traj["task"]["goal_timestep"]
     else:
-        goal_timestep = tf.fill([traj_len], traj_len, dtype=tf.int32)
+        goal_timestep = tf.fill([traj_len - 1], traj_len, dtype=tf.int32)
 
     floored_action_chunk_indices = tf.minimum(
-        tf.maximum(action_chunk_indices, 0), goal_timestep[:, None] - 1
+        tf.maximum(action_chunk_indices, 0), goal_timestep[:, None]
     )
 
     traj["observation"] = tf.nest.map_structure(
@@ -49,7 +49,7 @@ def chunk_act_obs(
     traj["observation"]["pad_mask"] = chunk_indices >= 0
 
     # Actions past the goal timestep become no-ops
-    action_past_goal = action_chunk_indices > goal_timestep[:, None] - 1
+    action_past_goal = action_chunk_indices > goal_timestep[:, None]
     # zero_actions = make_neutral_actions(traj["action"], action_encoding)
     # traj["action"] = tf.where(
     #     action_past_goal[:, :, None], zero_actions, traj["action"]
