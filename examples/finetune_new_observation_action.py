@@ -1,12 +1,13 @@
 """
-This script demonstrates how to finetune ORCA on an ALOHA cube handover task.
-We demonstrate finetuning ORCA to a new observation space (single camera + proprio) and new action space (bimanual).
+This script demonstrates how to finetune ORCA to a new observation space (single camera + proprio)
+and new action space (bimanual) using a simulated ALOHA cube handover dataset (https://tonyzhaozh.github.io/aloha/).
 """
 import json
 
 from absl import app, flags, logging
 import flax
 import jax
+import optax
 import tensorflow as tf
 import tqdm
 import wandb
@@ -18,7 +19,6 @@ from orca.utils.jax_utils import initialize_compilation_cache
 from orca.utils.pretrained_utils import ORCAModel
 from orca.utils.train_callbacks import SaveCallback
 from orca.utils.train_utils import (
-    create_optimizer,
     freeze_weights,
     merge_params,
     process_text,
@@ -144,16 +144,10 @@ def main(_):
     # create optimizer & train_state, optionally freeze keys for pre-trained transformer
     # train_state bundles parameters & optimizers
     model_def = model.model_def
-    tx, _, _ = create_optimizer(
-        model.params,
-        learning_rate=dict(
-            name="constant",
-            init_value=0.0,
-            peak_value=3e-5,
-            warmup_steps=100,
-        ),
-        weight_decay=0.0,
+    learning_rate = optax.join_schedules(
+        optax.linear_schedule(0, 3e-5, 100), optax.constant_schedule(3e-5)
     )
+    tx = optax.adamw(learning_rate)
     frozen_keys = model.config["optimizer"]["frozen_keys"]
     if FLAGS.freeze_transformer:
         frozen_keys.append("BlockTransformer_0")
