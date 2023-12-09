@@ -77,7 +77,7 @@ python train.py --config config.py:vit_s --name=orca --config.dataset_kwargs.oxe
 ## Evaluation
 
 To evaluate policies on a robot, first wrap your robot controller in a Gym environment. As an example, see
-[widowx_env.py](examples/widowx_eval/widowx_env.py) which wraps the robot controller used for the
+[widowx_env.py](examples/envs/widowx_env.py) which wraps the robot controller used for the
 WidowX robot in BridgeData.
 
 The `step` and `reset` functions of the Gym environment should return observations with the images, depth images, and/or
@@ -96,7 +96,7 @@ obs = {
 ```
 
 Then, write a script that creates your Gym environment, loads the pretrained model, and passes both into the
-`run_eval_loop` function from [orca/utils/run_eval.py](orca/utils/run_eval.py). As an example, see [eval_widowx.py](examples/widowx_eval/eval.py). A command to run this script can be found in [eval.sh](examples/widowx_eval/eval.sh). **VERY IMPORTANT**: make sure to wrap the Gym environment for your robot in the [UnnormalizeActionProprio](orca/utils/gym_wrappers.py) wrapper to unnormalize/normalize the actions and proprio so that they match what the policy was trained on.
+`run_eval_loop` function from [orca/utils/run_eval.py](orca/utils/run_eval.py). As an example, see [eval_widowx.py](examples/eval.py). A command to run this script can be found in [eval.sh](examples/widowx_eval/eval.sh). **VERY IMPORTANT**: make sure to wrap the Gym environment for your robot in the [UnnormalizeActionProprio](orca/utils/gym_wrappers.py) wrapper to unnormalize/normalize the actions and proprio so that they match what the policy was trained on.
 
 ## Contributing
 Experimental things and training/eval scripts should go in `experiments/<your_name>`. To make any changes to files outside of your experiments directory, please open a pull request.
