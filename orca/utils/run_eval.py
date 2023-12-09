@@ -17,7 +17,7 @@ import numpy as np
 
 from orca.utils.eval_utils import load_jaxrlm_checkpoint, sample_actions, supply_rng
 from orca.utils.gym_wrappers import HistoryWrapper, RHCWrapper, TemporalEnsembleWrapper
-from orca.utils.pretrained_utils import PretrainedModel
+from orca.utils.pretrained_utils import ORCAModel
 
 np.set_printoptions(suppress=True)
 
@@ -48,7 +48,7 @@ flags.DEFINE_bool("show_image", False, "Show image")
 
 def run_eval_loop(
     env: gym.Env,
-    models: Dict[str, PretrainedModel],
+    models: Dict[str, ORCAModel],
     get_goal_condition: Callable,
     step_duration: float,
 ):
@@ -109,7 +109,7 @@ def run_eval_loop(
         policy_name = list(policies.keys())[policy_idx]
         policy_fn = policies[policy_name]
         model = models[policy_name]
-        model: PretrainedModel  # type hinting
+        model: ORCAModel  # type hinting
 
         modality = FLAGS.modality
         if not modality:

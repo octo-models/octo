@@ -292,6 +292,10 @@ class MSEActionHead(BasicActionHead):
         mean = jnp.tanh(mean / self.max_action) * self.max_action
         return mean
 
+    def _objective(self, actions, pred_actions, pad_mask):
+        action_mse = jnp.square(actions - pred_actions).sum(axis=-1)
+        return masked_mean(action_mse, pad_mask[:, :, None])
+
     def loss(
         self, transformer_outputs: Dict[str, TokenGroup], actions, pad_mask, train=True
     ):
@@ -326,11 +330,12 @@ class MSEActionHead(BasicActionHead):
         horizon = mean.shape[1]
         actions_chunked = actions_chunked[:, :horizon]
 
+        action_loss = self._objective(actions_chunked, mean, pad_mask)
+
+        # log mse and mse histogram
         action_mse = jnp.square(actions_chunked - mean).sum(axis=-1)
         action_mse_hist = (action_mse * pad_mask[:, :, None]).reshape(-1)
         action_mse = masked_mean(action_mse, pad_mask[:, :, None])
-
-        action_loss = action_mse
 
         return action_loss, {
             "loss": action_loss,
@@ -362,8 +367,15 @@ class MSEActionHead(BasicActionHead):
         return action
 
 
+class L1ActionHead(MSEActionHead):
+    def _objective(self, actions, pred_actions, pad_mask):
+        action_l1 = jnp.abs(actions - pred_actions).sum(axis=-1)
+        return masked_mean(action_l1, pad_mask[:, :, None])
+
+
 ACTION_HEADS = {
     "basic_action_head": BasicActionHead,
     "token_per_dim_action_head": TokenPerDimActionHead,
     "mse_action_head": MSEActionHead,
+    "l1_action_head": L1ActionHead,
 }

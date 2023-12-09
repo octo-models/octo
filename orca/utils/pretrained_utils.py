@@ -1,6 +1,7 @@
 from functools import partial
 import json
 import logging
+import os
 from typing import Any, Optional
 
 import flax
@@ -8,24 +9,24 @@ import flax.struct
 import jax
 import jax.numpy as jnp
 from ml_collections import ConfigDict
+import numpy as np
 import orbax.checkpoint
 import tensorflow as tf
 
 from orca.data.utils.text_processing import text_processors, TextProcessor
 from orca.model import create_model_def
 from orca.model.orca_model import OrcaModel
-from orca.utils.train_utils import check_config_diff, merge_params
 from orca.utils.typing import Config, Data, Params, Sequence
 
 nonpytree_field = partial(flax.struct.field, pytree_node=False)
 
 
 @flax.struct.dataclass
-class PretrainedModel:
-    """Recommended way of interacting with a pretrained model.
+class ORCAModel:
+    """Recommended way of interacting with a pretrained ORCA model.
 
     Usage (example):
-        model = PretrainedModel.load_pretrained(checkpoint_dir)
+        model = ORCAModel.load_pretrained(checkpoint_dir)
 
         # Create the task dict
         tasks = model.create_tasks(texts=["go to the red room"])
@@ -148,6 +149,12 @@ class PretrainedModel:
         statistics_path = tf.io.gfile.join(checkpoint_path, statistics_path)
         with tf.io.gfile.GFile(statistics_path, "r") as f:
             statistics = json.load(f)
+
+        statistics = jax.tree_map(
+            lambda x: np.array(x),
+            statistics,
+            is_leaf=lambda x: not isinstance(x, dict),
+        )
         return statistics
 
     @staticmethod
@@ -164,88 +171,36 @@ class PretrainedModel:
     def load_pretrained(
         cls,
         checkpoint_path: str,
-        config: Optional[Config] = None,
-        example_batch: Optional[Data] = None,
-        text_processor: Optional[Any] = None,
         step: Optional[int] = None,
-    ) -> "PretrainedModel":
+    ) -> "ORCAModel":
         """Loads a pretrained model from a checkpoint. Important: this method expects the
         params-only checkpoint, not the full TrainState used for resuming training.
 
-        This method operates in three steps:
-            1. Load original model params with original config & example batch
-            2. Create *new* model params with provided config (defaults to original config if config=None)
-            3. Copy over all parameters from original model that have same key+shape in new model.
-
         Args:
             checkpoint_path (str): A path to either a directory of checkpoints or a single checkpoint.
-            config (Dict[str, Any], optional): Config dict. If None, defaults to checkpoint_path/config.json.
-            example_batch (Dict[str, Any], optional): Example_batch. If None,
-                defaults to checkpoint_path/example_batch.msgpack.
-            text_processor (Any, optional): Preprocessor for text inputs.
             step (int, optional): If multiple checkpoints are present, which one to load. Defaults to the latest.
         """
-        orig_config = cls.load_config(checkpoint_path)
-        if config is None:
-            config = orig_config
+        config = cls.load_config(checkpoint_path)
+        example_batch_path = tf.io.gfile.join(checkpoint_path, "example_batch.msgpack")
+        with tf.io.gfile.GFile(example_batch_path, "rb") as f:
+            example_batch = flax.serialization.msgpack_restore(f.read())
 
-        orig_example_batch_path = tf.io.gfile.join(
-            checkpoint_path, "example_batch.msgpack"
-        )
-        with tf.io.gfile.GFile(orig_example_batch_path, "rb") as f:
-            orig_example_batch = flax.serialization.msgpack_restore(f.read())
-        if example_batch is not None:
-            logging.info(
-                "Checking differences between provided example_batch and pre-trained model example_batch..."
-            )
-            logging.info("Checking input observation:...")
-            changed_input = _verify_shapes(
-                example_batch["observation"],
-                orig_example_batch["observation"],
-                starting_dim=2,
-                raise_error=False,
-            )
-            logging.info("Checking task definition:...")
-            changed_input = changed_input or _verify_shapes(
-                example_batch["tasks"],
-                orig_example_batch["tasks"],
-                starting_dim=1,
-                raise_error=False,
-            )
-
-            # check whether window size changed compared to pre-training
-            if "window_size" in orig_config:
-                pretraining_horizon = orig_config["window_size"]
-            else:
-                pretraining_horizon = orig_config["dataset_kwargs"][
-                    "traj_transform_kwargs"
-                ]["window_size"]
-            finetuning_horizon = example_batch["observation"]["pad_mask"].shape[1]
-            if pretraining_horizon != finetuning_horizon:
-                logging.warning(
-                    "Model was pretrained with window size %d", pretraining_horizon
-                )
-                logging.warning("Finetuning with window size %d", finetuning_horizon)
-            assert finetuning_horizon <= pretraining_horizon
-        else:
-            example_batch = orig_example_batch
-            changed_input = False
         logging.debug(
             "Using example batch with structure: %s",
             flax.core.pretty_repr(jax.tree_map(jnp.shape, example_batch)),
         )
 
         # load params into original model shape
-        orig_model_def = create_model_def(
-            **orig_config["model"].to_dict(),
+        model_def = create_model_def(
+            **config["model"].to_dict(),
         )
         rng = jax.random.PRNGKey(0)
-        orig_params_shape = jax.eval_shape(
-            partial(orig_model_def.init, train=False),
+        params_shape = jax.eval_shape(
+            partial(model_def.init, train=False),
             rng,
-            orig_example_batch["observation"],
-            orig_example_batch["tasks"],
-            orig_example_batch["observation"]["pad_mask"],
+            example_batch["observation"],
+            example_batch["tasks"],
+            example_batch["observation"]["pad_mask"],
         )["params"]
         all_steps = orbax.checkpoint.utils.checkpoint_steps(checkpoint_path)
         if all_steps:
@@ -259,40 +214,58 @@ class PretrainedModel:
                 checkpoint_path,
             )
 
-        orig_params = orbax.checkpoint.PyTreeCheckpointer().restore(
-            tf.io.gfile.join(checkpoint_path, "default"), orig_params_shape
+        params = orbax.checkpoint.PyTreeCheckpointer().restore(
+            tf.io.gfile.join(checkpoint_path, "default"), params_shape
         )
 
-        if (
-            check_config_diff(config["model"], orig_config["model"], silent=True)
-            or changed_input
-        ):
-            # create new model, then copy params from original model into new model
-            model_def = create_model_def(
-                **config["model"].to_dict(),
+        if config["text_processor"] is not None:
+            text_processor = text_processors[config["text_processor"]](
+                **config.get("text_processor_kwargs", {})
+            )
+        else:
+            text_processor = None
+
+        return cls(
+            model_def=model_def,
+            params=params,
+            text_processor=text_processor,
+            example_batch=example_batch,
+            config=config.to_dict(),
+        )
+
+    @classmethod
+    def from_config(
+        cls,
+        config: Config,
+        example_batch: Data,
+        text_processor: Optional[Any] = None,
+    ):
+        """Initializes a model with a fresh set of weights from a given config + example_batch.
+
+        Args:
+            config (Dict[str, Any]): Config dict. If None, defaults to checkpoint_path/config.json.
+            example_batch (Dict[str, Any]): Example_batch.
+            text_processor (Any, optional): Preprocessor for text inputs.
+        """
+        model_def = create_model_def(
+            **config["model"].to_dict(),
+        )
+
+        @jax.jit
+        def _init():
+            return model_def.init(
+                jax.random.PRNGKey(0),
+                example_batch["observation"],
+                example_batch["tasks"],
+                example_batch["observation"]["pad_mask"],
+                train=False,
             )
 
-            @jax.jit
-            def _init():
-                return model_def.init(
-                    rng,
-                    example_batch["observation"],
-                    example_batch["tasks"],
-                    example_batch["observation"]["pad_mask"],
-                    train=False,
-                )
-
-            params = _init()["params"]
-            params = merge_params(target_params=params, pretrained_params=orig_params)
-        else:
-            model_def = orig_model_def
-            params = orig_params
-
+        params = _init()["params"]
         if not text_processor and config["text_processor"] is not None:
             text_processor = text_processors[config["text_processor"]](
                 **config.get("text_processor_kwargs", {})
             )
-
         return cls(
             model_def=model_def,
             params=params,
@@ -305,7 +278,7 @@ class PretrainedModel:
 class HeadWrapper:
     """Dummy class to help with the following syntactic sugar.
 
-    > PretrainedModel.heads["action"].predict_action(transformer_embeddings)
+    > ORCAModel.heads["action"].predict_action(transformer_embeddings)
     """
 
     def __init__(self, fn):
