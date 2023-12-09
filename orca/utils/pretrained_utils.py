@@ -171,7 +171,6 @@ class ORCAModel:
     def load_pretrained(
         cls,
         checkpoint_path: str,
-        example_batch: Optional[Data] = None,
         step: Optional[int] = None,
     ) -> "ORCAModel":
         """Loads a pretrained model from a checkpoint. Important: this method expects the
@@ -179,49 +178,12 @@ class ORCAModel:
 
         Args:
             checkpoint_path (str): A path to either a directory of checkpoints or a single checkpoint.
-            example_batch (Data, optional): If provided, checks that example batch conforms with pre-training.
             step (int, optional): If multiple checkpoints are present, which one to load. Defaults to the latest.
         """
         config = cls.load_config(checkpoint_path)
         example_batch_path = tf.io.gfile.join(checkpoint_path, "example_batch.msgpack")
         with tf.io.gfile.GFile(example_batch_path, "rb") as f:
-            orig_example_batch = flax.serialization.msgpack_restore(f.read())
-
-        if example_batch:
-            logging.info(
-                "Checking differences between provided example_batch and pre-trained model example_batch..."
-            )
-            logging.info("Checking input observation:...")
-            _verify_shapes(
-                example_batch["observation"],
-                orig_example_batch["observation"],
-                starting_dim=2,
-                raise_error=False,
-            )
-            logging.info("Checking task definition:...")
-            _verify_shapes(
-                example_batch["tasks"],
-                orig_example_batch["tasks"],
-                starting_dim=1,
-                raise_error=False,
-            )
-
-            # check whether window size changed compared to pre-training
-            if "window_size" in config:
-                pretraining_horizon = config["window_size"]
-            else:
-                pretraining_horizon = config["dataset_kwargs"]["traj_transform_kwargs"][
-                    "window_size"
-                ]
-            finetuning_horizon = example_batch["observation"]["pad_mask"].shape[1]
-            if pretraining_horizon != finetuning_horizon:
-                logging.warning(
-                    "Model was pretrained with window size %d", pretraining_horizon
-                )
-                logging.warning("Finetuning with window size %d", finetuning_horizon)
-            assert finetuning_horizon <= pretraining_horizon
-        else:
-            example_batch = orig_example_batch
+            example_batch = flax.serialization.msgpack_restore(f.read())
 
         logging.debug(
             "Using example batch with structure: %s",

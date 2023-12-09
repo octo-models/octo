@@ -132,7 +132,7 @@ def sample_actions(
 
 def load_checkpoint(weights_path, config_path, metadata_path, example_batch_path):
     model = ORCAModel.load_pretrained(
-        weights_path, config_path, example_batch_path
+        weights_path
     )
 
     with open(metadata_path, "r") as f:
