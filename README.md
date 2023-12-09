@@ -107,10 +107,3 @@ Steps to contribute:
 3. Test that a basic training starts with the debug dataset with: ```
 python train.py --config tests/debug_config.py
 ```
-
-
-## FAQ
-
-- **Jax complains about wrong CUDA / CuDNN version**: [Jax picks up on the system CuDNN first](https://github.com/google/jax/issues/17497)
-(before using the bundled CUDA), so if you encounter version issues please update your system CUDA / CuDNN
-or remove it so Jax uses the bundled packages
