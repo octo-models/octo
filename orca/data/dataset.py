@@ -335,7 +335,7 @@ def make_dataset_from_rlds(
             )
 
         # add timestep info
-        new_obs["timestep"] = tf.range(traj_len) + 1
+        new_obs["timestep"] = tf.range(traj_len)
 
         traj["action"] = tf.cast(traj["action"], tf.float32)
         traj["observation"] = new_obs

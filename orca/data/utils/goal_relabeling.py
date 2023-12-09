@@ -22,8 +22,8 @@ def uniform(traj: dict) -> dict:
         lambda x: tf.gather(x, goal_idxs),
         traj["observation"],
     )
-    traj["task"]["goal_timestep"] = goal_idxs + 1
-    traj["task"]["end_timestep"] = tf.ones_like(goal_idxs) * traj_len
+    traj["task"]["goal_timestep"] = goal_idxs
+    traj["task"]["end_timestep"] = tf.fill([traj_len], traj_len - 1)
 
     return traj
 
@@ -35,7 +35,7 @@ def no_image_conditioning(traj: dict) -> dict:
         lambda x: tf.zeros_like(x),
         traj["observation"],
     )
-    traj["task"]["goal_timestep"] = tf.fill([traj_len], traj_len)
-    traj["task"]["end_timestep"] = tf.fill([traj_len], traj_len)
+    traj["task"]["goal_timestep"] = tf.fill([traj_len], traj_len - 1)
+    traj["task"]["end_timestep"] = tf.fill([traj_len], traj_len - 1)
 
     return traj
