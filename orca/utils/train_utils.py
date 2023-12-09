@@ -240,6 +240,7 @@ def freeze_weights(
     tx: optax.GradientTransformation,
     params_or_params_shape: Params,
     frozen_keys: List[str],
+    return_partitions: bool = False,
 ):
     """
     Freezes all weights in params_or_params_shape whose keys fnmatch the ones in frozen_keys.
@@ -285,7 +286,7 @@ def freeze_weights(
     logging.info(f"Num trainable params: {trainable_params:,}.")
     logging.info(f"Num frozen params: {total_params - trainable_params:,}.")
     logging.info("To see a detailed list of frozen params, set logging level to DEBUG.")
-    return tx
+    return (tx, param_partitions) if return_partitions else tx
 
 
 def create_optimizer(
@@ -326,13 +327,8 @@ def create_optimizer(
         )
 
     if frozen_keys:
-        tx = freeze_weights(tx, params_or_params_shape, frozen_keys)
-
-        param_partitions = flax.traverse_util.path_aware_map(
-            lambda path, v: "frozen"
-            if any([fnmatch(".".join(path), key) for key in frozen_keys])
-            else "trainable",
-            params_or_params_shape,
+        tx, param_partitions = freeze_weights(
+            tx, params_or_params_shape, frozen_keys, return_partitions=True
         )
         zero_frozen_params = lambda params: jax.tree_map(
             lambda x, y: x if y == "trainable" else jnp.zeros(()),
