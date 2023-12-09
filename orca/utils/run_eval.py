@@ -2,28 +2,20 @@
 
 from datetime import datetime
 from functools import partial
-import json
 import os
 import time
-from typing import Callable, Optional
+from typing import Callable, Dict
 
-from absl import app, flags, logging
+from absl import flags, logging
 import click
 import cv2
-import flax
 import gym
 import imageio
 import jax
 import jax.numpy as jnp
 import numpy as np
-import tensorflow as tf
 
-from orca.sim.widowx_sim_env import WidowXSimEnv
-from orca.utils.eval_utils import (
-    download_checkpoint_from_gcs,
-    load_jaxrlm_checkpoint,
-    supply_rng,
-)
+from orca.utils.eval_utils import load_jaxrlm_checkpoint, sample_actions, supply_rng
 from orca.utils.gym_wrappers import HistoryWrapper, RHCWrapper, TemporalEnsembleWrapper
 from orca.utils.pretrained_utils import ORCAModel
 
@@ -33,20 +25,12 @@ logging.set_verbosity(logging.WARNING)
 
 FLAGS = flags.FLAGS
 
-flags.DEFINE_multi_string(
-    "checkpoint_weights_path", None, "Path to checkpoint", required=True
-)
-flags.DEFINE_multi_integer("checkpoint_step", None, "Checkpoint step", required=True)
 flags.DEFINE_bool("add_jaxrlm_baseline", False, "Also compare to jaxrl_m baseline")
-flags.DEFINE_string(
-    "checkpoint_cache_dir", "/tmp/", "Where to cache checkpoints downloaded from GCS"
-)
 flags.DEFINE_string(
     "modality",
     "",
     "Either 'g', 'goal', 'l', 'language' (leave empty to prompt when running)",
 )
-
 flags.DEFINE_integer("im_size", None, "Image size", required=True)
 flags.DEFINE_string("video_save_path", None, "Path to save video")
 flags.DEFINE_integer("num_timesteps", 120, "num timesteps")
@@ -59,98 +43,45 @@ flags.DEFINE_bool("deterministic", False, "Whether to sample action deterministi
 # show image flag
 flags.DEFINE_bool("show_image", False, "Show image")
 
-
 ##############################################################################
 
 
-# TODO: use class UnnormalizeActionProprio instead
-@partial(jax.jit, static_argnames="argmax")
-def sample_unormalized_actions(
-    pretrained_model: ORCAModel,
-    observations,
-    tasks,
-    mean,
-    std,
-    rng,
-    argmax=False,
-    temperature=1.0,
+def run_eval_loop(
+    env: gym.Env,
+    models: Dict[str, ORCAModel],
+    get_goal_condition: Callable,
+    step_duration: float,
 ):
-    # add batch dim to observations
-    observations = jax.tree_map(lambda x: x[None], observations)
-    # tasks = jax.tree_map(lambda x: x[None], tasks)
-    logging.warning(
-        "observations: %s", flax.core.pretty_repr(jax.tree_map(jnp.shape, observations))
-    )
-    logging.warning("tasks: %s", flax.core.pretty_repr(jax.tree_map(jnp.shape, tasks)))
-    actions = pretrained_model.sample_actions(
-        observations,
-        tasks,
-        rng=rng,
-        argmax=argmax,
-        temperature=temperature,
-    )
-    # remove batch dim
-    return actions[0] * std + mean
-
-
-def load_checkpoint(weights_path: str, step: int, dataset_name: str = "bridge_dataset"):
-    model = ORCAModel.load_pretrained(weights_path, step=int(step))
-    metadata_path = os.path.join(
-        weights_path, f"dataset_statistics_{dataset_name}.json"
-    )
-    with open(metadata_path, "r") as f:
-        action_proprio_metadata = json.load(f)
-    action_mean = jnp.array(action_proprio_metadata["action"]["mean"])
-    action_std = jnp.array(action_proprio_metadata["action"]["std"])
-
-    policy_fn = supply_rng(
-        partial(
-            sample_unormalized_actions,
-            model,
-            argmax=FLAGS.deterministic,
-            mean=action_mean,
-            std=action_std,
-            temperature=FLAGS.temperature,
-        ),
-    )
-    return (policy_fn, model)
-
-
-def run_eval_loop(env: gym.Env, get_goal_condition: Callable, step_duration: float):
     """
     Main evaluation loop.
-    : param env: gym.Env
+    : param env: gym.Env            Gym environment for the robot.
+    : param models:                 A dictionary containing PretrainedModels to evaluate.
     : param get_goal_condition:     Callable to get the image goal during the
-                                    init of the eval run
-    : param step_duration:          Duration of each step
+                                    init of the eval run.
+    : param step_duration:          Minimum duration of each step (policy forward pass + robot environment step).
+                                    Only matters if the robot controller is non-blocking.
+
     """
-    assert len(FLAGS.checkpoint_weights_path) == len(FLAGS.checkpoint_step)
     FLAGS.modality = FLAGS.modality[:1]
     if FLAGS.modality not in ["g", "l", ""]:
         FLAGS.modality = ""
 
-    # policies is a dict from run_name to policy function
     policies = {}
-    for (checkpoint_weights_path, checkpoint_step,) in zip(
-        FLAGS.checkpoint_weights_path,
-        FLAGS.checkpoint_step,
-    ):
-        checkpoint_weights_path, checkpoint_step = download_checkpoint_from_gcs(
-            checkpoint_weights_path,
-            checkpoint_step,
-            FLAGS.checkpoint_cache_dir,
+    for name, model in models.items():
+        policy_fn = supply_rng(
+            partial(
+                sample_actions,
+                model,
+                argmax=FLAGS.deterministic,
+                temperature=FLAGS.temperature,
+            ),
         )
-        assert tf.io.gfile.exists(checkpoint_weights_path), checkpoint_weights_path
-        run_name = checkpoint_weights_path.rpartition("/")[2]
-        policies[f"{run_name}-{checkpoint_step}"] = load_checkpoint(
-            checkpoint_weights_path,
-            checkpoint_step,
-        )
+        policies[name] = policy_fn
 
-    # TODO: prevent having custom impl
+    # TODO: remove for release
     if FLAGS.add_jaxrlm_baseline:
         base_dir = "/mount/harddrive/homer/bridgev2_packaged/bridgev2policies/"
-        policies["jaxrl_gcbc"] = load_jaxrlm_checkpoint(
+        policies["jaxrl_gcbc"], models["jaxrl_gcbc"] = load_jaxrlm_checkpoint(
             weights_path=f"{base_dir}gcbc_256/checkpoint_300000/",
             config_path=f"{base_dir}gcbc_256/gcbc_256_config.json",
             code_path=f"{base_dir}bridge_data_v2.zip",
@@ -158,7 +89,7 @@ def run_eval_loop(env: gym.Env, get_goal_condition: Callable, step_duration: flo
 
     env = HistoryWrapper(env, FLAGS.horizon)
     # env = TemporalEnsembleWrapper(env, FLAGS.pred_horizon)
-    env = RHCWrapper(env, FLAGS.pred_horizon, FLAGS.exec_horizon)
+    env = RHCWrapper(env, FLAGS.exec_horizon)
 
     goal_image = jnp.zeros((FLAGS.im_size, FLAGS.im_size, 3), dtype=np.uint8)
     goal_instruction = ""
@@ -176,7 +107,8 @@ def run_eval_loop(env: gym.Env, get_goal_condition: Callable, step_duration: flo
             policy_idx = click.prompt("Select policy", type=int)
 
         policy_name = list(policies.keys())[policy_idx]
-        policy_fn, model = policies[policy_name]
+        policy_fn = policies[policy_name]
+        model = models[policy_name]
         model: ORCAModel  # type hinting
 
         modality = FLAGS.modality
@@ -188,7 +120,6 @@ def run_eval_loop(env: gym.Env, get_goal_condition: Callable, step_duration: flo
         if modality == "g":
             if click.confirm("Take a new goal?", default=True):
                 obs = get_goal_condition()
-                obs.pop("proprio")  # TODO: remove this fix
                 goal = jax.tree_map(lambda x: x[None], obs)
 
             task = model.create_tasks(goals=goal)
@@ -207,7 +138,6 @@ def run_eval_loop(env: gym.Env, get_goal_condition: Callable, step_duration: flo
 
         # reset env
         obs, _ = env.reset()
-        obs.pop("proprio")  # TODO: remove this fix
         time.sleep(2.0)
 
         input("Press [Enter] to start.")
@@ -239,7 +169,6 @@ def run_eval_loop(env: gym.Env, get_goal_condition: Callable, step_duration: flo
                 start_time = time.time()
                 obs, _, _, truncated, _ = env.step(action)
                 print("step time: ", time.time() - start_time)
-                obs.pop("proprio")  # TODO: remove this fix
 
                 t += 1
 
