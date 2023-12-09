@@ -1,7 +1,7 @@
 from functools import partial
 import inspect
 import json
-from typing import Callable, List, Optional, Sequence, Tuple, Union
+from typing import Callable, List, Mapping, Optional, Sequence, Tuple, Union
 
 from absl import logging
 import dlimp as dl
@@ -128,13 +128,9 @@ def apply_frame_transforms(
     dataset: dl.DLataset,
     *,
     train: bool,
-    image_augment_kwargs: Union[Optional[dict], Sequence[Optional[dict]]] = None,
-    resize_size: Union[
-        Optional[Tuple[int, int]], Sequence[Optional[Tuple[int, int]]]
-    ] = None,
-    depth_resize_size: Union[
-        Optional[Tuple[int, int]], Sequence[Optional[Tuple[int, int]]]
-    ] = None,
+    image_augment_kwargs: Union[dict, Mapping[str, dict]] = {},
+    resize_size: Union[Tuple[int, int], Mapping[str, Tuple[int, int]]] = {},
+    depth_resize_size: Union[Tuple[int, int], Mapping[str, Tuple[int, int]]] = {},
     task_augment_strategy: Optional[str] = None,
     task_augment_kwargs: dict = {},
     num_parallel_calls: int = tf.data.AUTOTUNE,
@@ -145,17 +141,16 @@ def apply_frame_transforms(
     Args:
         train (bool): Whether the dataset is for training (affects image augmentation).
         dataset (dl.DLataset): The dataset to transform.
-        image_augment_kwargs (dict|Sequence[dict]): Keyword arguments to pass to the image augmentation
-            function. See `dlimp.transforms.augment_image` for documentation of these kwargs. If a list of dicts
-            is provided, then the ith entry will be used for "image_i" (order determined by `image_obs_keys` in
-            `make_dataset_from_rlds`). A None list entry will skip image augmentation for the corresponding
-            image(s).
-        resize_size (Tuple[int, int]|Sequence[Tuple[int, int]]): If provided, images will be
-            resized to this size. If a list of tuples is provided, then the ith entry will be used for
-            "image_i" and "depth_i" (order determined by `image_obs_keys` and `depth_obs_keys`, respectively,
-            in `make_dataset_from_rlds`). A value of None or a None list entry will skip resizing for the
-            corresponding image(s).
-        depth_resize_size (Tuple[int, int]|Sequence[Tuple[int, int]]): Same as resize_size, but for depth
+        image_augment_kwargs (dict|Mapping[str, dict]): Keyword arguments to pass to the image augmentation
+            function. See `dlimp.transforms.augment_image` for documentation of these kwargs. If a dict of
+            dicts is provided, then key "k" will be used for "image_{k}" (names determined by `image_obs_keys`
+            in `make_dataset_from_rlds`). Augmentation will be skipped for missing keys (so pass an empty dict
+            to skip augmentation for all images).
+        resize_size (Tuple[int, int]|Mapping[str, Tuple[int, int]]): If provided, images will be resized to
+            this size. If a dict of tuples is provided, then key "k" will be used for "image_{k}" (names
+            determined by `image_obs_keys` in `make_dataset_from_rlds`). Resizing will be skipped for missing
+            keys (so pass an empty dict to skip resizing for all images).
+        depth_resize_size (Tuple[int, int]|Mapping[str, Tuple[int, int]]): Same as resize_size, but for depth
             images.
         task_augmentation_strategy (str, optional): The task augmentation strategy to use, or None for no task
             augmentation. See `task_augmentation.py`.
@@ -222,9 +217,9 @@ def make_dataset_from_rlds(
     train: bool,
     standardize_fn: Optional[Callable[[dict], dict]] = None,
     shuffle: bool = True,
-    image_obs_keys: Union[str, Sequence[str]] = (),
-    depth_obs_keys: Union[str, Sequence[str]] = (),
-    state_obs_keys: Union[str, Sequence[str]] = (),
+    image_obs_keys: Mapping[str, Optional[str]] = {},
+    depth_obs_keys: Mapping[str, Optional[str]] = {},
+    state_obs_keys: Sequence[Optional[str]] = (),
     action_proprio_normalization_type: NormalizationType = NormalizationType.NORMAL,
     dataset_statistics: Optional[Union[dict, str]] = None,
     num_parallel_reads: int = tf.data.AUTOTUNE,
@@ -236,13 +231,18 @@ def make_dataset_from_rlds(
     If `standardize_fn` is provided, it will be applied to each trajectory. This function should get the
     trajectory into a standard format, which includes the keys "observation", "action", "is_terminal", and
     "is_last". "observation" should be a dictionary containing some number of additional keys, which will be
-    extracted into an even more standardized numbered format according to the "*_obs_keys" arguments.
+    extracted into an even more standardized format according to the "*_obs_keys" arguments.
 
-    For example, if the "observation" dict has the keys "image_workspace" and "image_wrist" after
-    `standardize_fn`, and `image_obs_keys=("image_workspace", None, "image_wrist")`, then the resulting
-    dataset will have an "observation" dict containing the keys "image_0", "image_1", and "image_2", where
-    "image_0" corresponds to "image_workspace", "image_1" is a padding image, and "image_2" corresponds to
-    "image_wrist".
+    The `image_obs_keys` and `depth_obs_keys` arguments are mappings from new names to old names, or None in
+    place of an old name to insert padding. For example, if after `standardize_fn`, your "observation" dict
+    has RGB images called "workspace" and "wrist", and `image_obs_keys={"primary": "workspace", "secondary":
+    None, "wrist": "wrist"}`, then the resulting dataset will have an "observation" dict containing the keys
+    "image_primary", "image_secondary", and "image_wrist", where "image_primary" corresponds to "workspace",
+    "image_secondary" is a padding image, and "image_wrist" corresponds to "wrist".
+
+    `state_obs_keys` is a list of 1-dimensional proprioceptive keys to concatenate into a single array, which
+    will be placed in the "proprio" key of the "observation" dict. A single padding element (zero) will be
+    inserted for each None entry.
 
     Args:
         name (str): The name of the RLDS dataset (usually "name" or "name:version").
@@ -250,13 +250,15 @@ def make_dataset_from_rlds(
         train (bool): Whether to use the training or validation set.
         shuffle (bool, optional): Whether to shuffle the file read order (does NOT fully shuffle directories,
             since one file usually contains many trajectories!).
-        image_obs_keys (str|Sequence[str], optional): List of keys to be extracted from the "observation"
-            dict and mapped to "image_{i}". Inserts padding (an empty string) for each None entry.
-        depth_obs_keys (str|Sequence[str], optional): List of keys to be extracted from the "observation"
-            dict and mapped to "depth_{i}". Inserts padding (an empty string) for each None entry.
-        state_obs_keys (str|Sequence[str], optional): List of 1-dimensional proprioception keys to be
-            extracted from the "observation" dict, concatenated, and mapped to "proprio". Inserts 1 element of
-            padding (zero) for each None entry.
+        image_obs_keys (Mapping[str, str|None]): Mapping from {new: old} indicating which RGB images to
+            extract from the "observation" dict. `new_obs = {f"image_{new}": old_obs[old] for new, old in
+            image_obs_keys.items()}`. If a value of `old` is None, inserts a padding image instead (empty
+            string).
+        depth_obs_keys (Mapping[str, str|None]): Same as `image_obs_keys`, but for depth images. Keys will be
+            prefixed with "depth_" instead of "image_".
+        state_obs_keys (Sequence[str|None]): List of 1-dimensional proprioception keys to be extracted from
+            the "observation" dict, concatenated, and mapped to "proprio". Inserts 1 element of padding (zero) for
+            each None entry.
         action_proprio_normalization_type (str, optional): The type of normalization to perform on the action,
             proprio, or both. Can be "normal" (mean 0, std 1) or "bounds" (normalized to [-1, 1]).
         dataset_statistics: (dict|str, optional): dict (or path to JSON file) that contains dataset statistics
@@ -269,13 +271,13 @@ def make_dataset_from_rlds(
     Returns:
         Dataset of trajectories where each step has the following fields:
         - observation:
-            - image_{0, 1, ..., N} # RGB image observations
-            - depth_{0, 1, ..., N} # depth image observations
-            - proprio              # 1-dimensional array of proprioceptive observations
-        - action                   # action vector
-        - is_last                  # boolean indicator, 1 on last step
-        - is_terminal              # boolean indicator, 1 on last step *if not timeout*
-        - language_instruction     # string language instruction (optional)
+            - image_{name1, name2, ...} # RGB image observations
+            - depth_{name1, name2, ...} # depth image observations
+            - proprio                   # 1-dimensional array of proprioceptive observations
+        - action                        # action vector
+        - is_last                       # boolean indicator, 1 on last step
+        - is_terminal                   # boolean indicator, 1 on last step *if not timeout*
+        - language_instruction          # string language instruction (optional)
     """
     builder = tfds.builder(name, data_dir=data_dir)
     if "val" not in builder.info.splits:
@@ -286,13 +288,6 @@ def make_dataset_from_rlds(
     dataset = dl.DLataset.from_rlds(
         builder, split=split, shuffle=shuffle, num_parallel_reads=num_parallel_reads
     )
-
-    if not isinstance(image_obs_keys, Sequence):
-        image_obs_keys = [image_obs_keys]
-    if not isinstance(depth_obs_keys, Sequence):
-        depth_obs_keys = [depth_obs_keys]
-    if not isinstance(state_obs_keys, Sequence):
-        state_obs_keys = [state_obs_keys]
 
     def restructure(traj):
         standard_keys = {
@@ -320,17 +315,17 @@ def make_dataset_from_rlds(
         traj_len = tf.shape(traj["action"])[0]
         old_obs = traj["observation"]
         new_obs = {}
-        for i, key in enumerate(image_obs_keys):
-            if key is None:
-                new_obs[f"image_{i}"] = tf.repeat("", traj_len)  # padding
+        for new, old in image_obs_keys.items():
+            if old is None:
+                new_obs[f"image_{new}"] = tf.repeat("", traj_len)  # padding
             else:
-                new_obs[f"image_{i}"] = old_obs[key]
+                new_obs[f"image_{new}"] = old_obs[old]
 
-        for i, key in enumerate(depth_obs_keys):
-            if key is None:
-                new_obs[f"depth_{i}"] = tf.repeat("", traj_len)  # padding
+        for new, old in depth_obs_keys.items():
+            if old is None:
+                new_obs[f"depth_{new}"] = tf.repeat("", traj_len)  # padding
             else:
-                new_obs[f"depth_{i}"] = old_obs[key]
+                new_obs[f"depth_{new}"] = old_obs[old]
 
         if state_obs_keys:
             new_obs["proprio"] = tf.concat(
