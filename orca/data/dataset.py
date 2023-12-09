@@ -229,9 +229,9 @@ def make_dataset_from_rlds(
     standardized format. Yields a dataset of trajectories. Does not include CPU-intensive operations.
 
     If `standardize_fn` is provided, it will be applied to each trajectory. This function should get the
-    trajectory into a standard format, which includes the keys "observation", "action", "is_terminal", and
-    "is_last". "observation" should be a dictionary containing some number of additional keys, which will be
-    extracted into an even more standardized format according to the "*_obs_keys" arguments.
+    trajectory into a standard format, which includes the keys "observation" and "action". "observation"
+    should be a dictionary containing some number of additional keys, which will be extracted into an even
+    more standardized format according to the "*_obs_keys" arguments.
 
     The `image_obs_keys` and `depth_obs_keys` arguments are mappings from new names to old names, or None in
     place of an old name to insert padding. For example, if after `standardize_fn`, your "observation" dict
@@ -275,8 +275,6 @@ def make_dataset_from_rlds(
             - depth_{name1, name2, ...} # depth image observations
             - proprio                   # 1-dimensional array of proprioceptive observations
         - action                        # action vector
-        - is_last                       # boolean indicator, 1 on last step
-        - is_terminal                   # boolean indicator, 1 on last step *if not timeout*
         - language_instruction          # string language instruction (optional)
     """
     builder = tfds.builder(name, data_dir=data_dir)
@@ -293,8 +291,6 @@ def make_dataset_from_rlds(
         standard_keys = {
             "observation",
             "action",
-            "is_terminal",
-            "is_last",
         }
 
         # apply a standardization function, if provided
