@@ -2,8 +2,8 @@
 Contains observation-level transforms used in the orca data pipeline. These transforms operate on the
 "observation" dictionary, and are applied at a per-frame level.
 """
-import copy
-from typing import Sequence
+import logging
+from typing import Mapping
 
 import dlimp as dl
 import tensorflow as tf
@@ -47,40 +47,48 @@ def decode_images(obs: dict) -> dict:
 
 def augment(obs: dict, seed, augment_kwargs) -> dict:
     """Augments images, skipping padding images."""
-    num_image_keys = sum(["image" in key for key in obs])
+    image_names = {key[6:] for key in obs if key.startswith("image_")}
 
-    if not isinstance(augment_kwargs, Sequence):
-        augment_kwargs = [copy.deepcopy(augment_kwargs)] * num_image_keys
+    # "augment_order" is required in augment_kwargs, so if it's there, we can assume that the user has passed
+    # in a single augmentation dict (otherwise, we assume that the user has passed in a mapping from image
+    # name to augmentation dict)
+    if "augment_order" in augment_kwargs:
+        augment_kwargs = {name: augment_kwargs for name in image_names}
 
-    for i in range(num_image_keys):
-        if augment_kwargs[i] is not None:
-            key = f"image_{i}"
-            if obs["pad_mask_dict"][key]:
-                obs[key] = dl.transforms.augment_image(
-                    obs[key], **augment_kwargs[i], seed=seed + i
-                )
+    for i, (name, kwargs) in enumerate(augment_kwargs.items()):
+        logging.debug(f"Augmenting image_{name} with kwargs {kwargs}")
+        obs[f"image_{name}"] = tf.cond(
+            obs["pad_mask_dict"][f"image_{name}"],
+            lambda: dl.transforms.augment_image(
+                obs[f"image_{name}"],
+                **kwargs,
+                seed=seed + i,  # augment each image differently
+            ),
+            lambda: obs[f"image_{name}"],
+        )
+
     return obs
 
 
 def resize(obs: dict, resize_size, depth_resize_size) -> dict:
     """Resizes images and depth images."""
-    num_image_keys = sum(["image" in key for key in obs])
-    num_depth_keys = sum(["depth" in key for key in obs])
+    # just gets the part after "image_" or "depth_"
+    image_names = {key[6:] for key in obs if key.startswith("image_")}
+    depth_names = {key[6:] for key in obs if key.startswith("depth_")}
 
-    if resize_size is None or isinstance(resize_size[0], int):
-        resize_size = [resize_size] * num_image_keys
-    if depth_resize_size is None or isinstance(depth_resize_size[0], int):
-        depth_resize_size = [depth_resize_size] * num_depth_keys
+    if not isinstance(resize_size, Mapping):
+        resize_size = {name: resize_size for name in image_names}
+    if not isinstance(depth_resize_size, Mapping):
+        depth_resize_size = {name: depth_resize_size for name in depth_names}
 
-    for i in range(num_image_keys):
-        if resize_size[i] is not None:
-            key = f"image_{i}"
-            obs[key] = dl.transforms.resize_image(obs[key], size=resize_size[i])
+    for name, size in resize_size.items():
+        obs[f"image_{name}"] = dl.transforms.resize_image(
+            obs[f"image_{name}"], size=size
+        )
 
-    for i in range(num_depth_keys):
-        if depth_resize_size[i] is not None:
-            key = f"depth_{i}"
-            obs[key] = dl.transforms.resize_depth_image(
-                obs[key], size=depth_resize_size[i]
-            )
+    for name, size in depth_resize_size.items():
+        obs[f"depth_{name}"] = dl.transforms.resize_depth_image(
+            obs[f"depth_{name}"], size=size
+        )
+
     return obs

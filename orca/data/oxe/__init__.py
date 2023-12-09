@@ -54,17 +54,21 @@ def make_oxe_dataset_kwargs_and_weights(
             continue
 
         # adjust loaded features in kwargs
-        dataset_kwargs["image_obs_keys"] = [
-            dataset_kwargs["image_obs_keys"][k] for k in load_camera_views
-        ]
+        dataset_kwargs["image_obs_keys"] = {
+            k: v
+            for k, v in dataset_kwargs["image_obs_keys"].items()
+            if k in load_camera_views
+        }
 
-        if not any([e is not None for e in dataset_kwargs["image_obs_keys"]]):
+        if not any([e is not None for e in dataset_kwargs["image_obs_keys"].values()]):
             logging.warning(f"Skipping {name} since no image input was loaded from it.")
             continue
 
-        dataset_kwargs["depth_obs_keys"] = [
-            dataset_kwargs["depth_obs_keys"][k] for k in load_camera_views
-        ]
+        dataset_kwargs["depth_obs_keys"] = {
+            k: v
+            for k, v in dataset_kwargs["depth_obs_keys"].items()
+            if k in load_camera_views
+        }
 
         if not load_depth:
             dataset_kwargs.pop("depth_obs_keys")
