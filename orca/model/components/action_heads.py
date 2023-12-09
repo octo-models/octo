@@ -18,6 +18,192 @@ def masked_mean(x, mask):
     return jnp.mean(x * mask) / jnp.clip(jnp.mean(mask), a_min=1e-5, a_max=None)
 
 
+def chunk_actions(actions, pred_horizon):
+    """Chunk actions for predicting actions `pred_horizon` steps into the future.
+
+    The resulting actions have shape (batch, actions.shape[-2] - (pred_horizon - 1), pred_horizon, action_dim)
+
+    This folds chunk_actions([a_1, a_2, a_3, a_4, a_5], 3) into:
+     [
+       [a_1, a_2, a_3],
+       [a_2, a_3, a_4],
+       [a_3, a_4, a_5],
+    ]
+
+    """
+    window_size = actions.shape[1]
+    assert window_size >= pred_horizon, "Chunk size too large for action window size"
+    chunk_window_size = window_size - (pred_horizon - 1)
+
+    curr_step = jnp.arange(chunk_window_size)
+    action_offset = jnp.arange(pred_horizon)
+    chunk_indices = curr_step[:, None] + action_offset[None, :]
+    return actions[:, chunk_indices]
+
+
+def continuous_loss(pred_value, ground_truth_value, mask, loss_type="mse"):
+    """
+    Args:
+        pred_value: jnp.ndarray w/ shape (batch_dims...)
+        ground_truth_value: continuous values in jnp.ndarray w/ shape (batch_dims...)
+        mask: jnp.ndarray broadcastable to ground_truth
+    """
+    if loss_type == "mse":
+        loss = jnp.square(pred_value - ground_truth_value)
+    elif loss_type == "l1":
+        loss = jnp.abs(pred_value - ground_truth_value)
+
+    loss = masked_mean(loss, mask)
+
+    mse = jnp.square(pred_value - ground_truth_value)
+    mse = masked_mean(mse, mask)
+    return loss, {
+        "loss": loss,
+        "mse": mse,
+    }
+
+
+def discrete_loss(discrete_tokenizer, logits, ground_truth_value, mask):
+    """
+    Args:
+        discrete_tokenizer: BinTokenizer
+        logits: jnp.ndarray w/ shape (batch_dims..., vocab_size)
+        ground_truth_value: continuous values in jnp.ndarray w/ shape (batch_dims...)
+        mask: jnp.ndarray broadcastable to ground_truth
+    """
+    labels = discrete_tokenizer(ground_truth_value)
+    labels_one_hot = jax.nn.one_hot(labels, logits.shape[-1])
+
+    loss = -jnp.sum(logits * labels_one_hot, axis=-1)
+    loss = masked_mean(loss, mask)
+
+    # compute accuracy between predicted actions and target actions
+    pred_label = jnp.argmax(logits, axis=-1)
+    accuracy = pred_label == labels
+    accuracy = masked_mean(accuracy, mask)
+
+    # detokenize the predicted actions
+    pred_value = discrete_tokenizer.decode(pred_label)
+    mse = jnp.square(pred_value - ground_truth_value)
+    mse = masked_mean(mse, mask)
+    return loss, {
+        "loss": loss,
+        "mse": mse,
+        "accuracy": accuracy,
+    }
+
+
+class ContinuousActionHead(nn.Module):
+    """Predicts continuous actions instead of discretized actions.
+
+    Continuous actions are predicted, tanh squashed to [-max_action, max_action],
+    and then regressed using MSE error.
+
+    You may create an embedding by either mean-pooling across
+    tokens or using multi-head attention pooling (use_map). It is recommended
+    to use MAP when decoding from the observation token stream.
+    """
+
+    readout_key: str
+    use_map: bool
+    pred_horizon: int = 1
+    action_dim: int = 7
+    max_action: float = 5.0
+    loss_type: str = "mse"
+
+    def setup(self):
+        if self.use_map:
+            self.map_head = MAPHead()
+        self.mean_proj = nn.Dense(self.pred_horizon * self.action_dim)
+
+    def __call__(
+        self, transformer_outputs: Dict[str, TokenGroup], train=True
+    ) -> jax.Array:
+        """
+        Args:
+            embeddings: jnp.ndarray w/ shape (batch_size, horizon, n_tokens, embedding_size)
+        """
+        token_group = transformer_outputs[self.readout_key]
+        assert token_group.tokens.ndim == 4, (
+            f"Expected token_group.tokens to have shape (batch_size, horizon, num_tokens, embedding_size), "
+            f"but got shape {token_group.tokens.shape}"
+        )
+        if self.use_map:
+            embeddings = self.map_head(token_group, train=train)[:, :, 0]
+        else:
+            embeddings = token_group.tokens.mean(axis=-2)
+        # embeddings is (batch_size, horizon, embedding_size)
+
+        mean = self.mean_proj(embeddings)
+        mean = rearrange(
+            mean, "b h (p a) -> b h p a", p=self.pred_horizon, a=self.action_dim
+        )
+        mean = jnp.tanh(mean / self.max_action) * self.max_action
+        return mean
+
+    def loss(
+        self, transformer_outputs: Dict[str, TokenGroup], actions, pad_mask, train=True
+    ):
+        """
+        Trains the mean head with MSE and the logstd head with KL divergence.
+
+        Args:
+            embeddings: jnp.ndarray w/ shape (batch_size, horizon, num_tokens, embedding_size)
+            actions: jnp.ndarray w/ shape (batch_size, >= horizon + pred_horizon - 1, action_dim)
+            pad_mask: boolean array (batch, window_size) which is True if the timestep is not a padding timestep.
+
+        Returns:
+            loss: float
+            metrics: dict
+        """
+        # (batch, horizon, pred_horizon, action_dim)
+        mean = self.__call__(transformer_outputs, train=train)
+
+        horizon = mean.shape[1]
+        assert (
+            actions.shape[1] >= horizon + self.pred_horizon - 1
+        ), f"""
+            To predict actions for horizon {horizon} and future prediction horizon {self.pred_horizon},
+            the ground-truth actions must have at least {horizon + self.pred_horizon - 1} timesteps, but got shape {actions.shape}.
+
+            Did you make sure to set "additional_action_window_size" correctly in the data config?
+        """
+
+        actions_chunked = chunk_actions(actions, self.pred_horizon)
+        actions_chunked = actions_chunked[:, :horizon]
+
+        loss, metrics = continuous_loss(
+            mean, actions_chunked, pad_mask, loss_type="mse"
+        )
+        # Sum over action dimension instead of averaging
+        metrics["loss"] = metrics["loss"] * self.action_dim
+        metrics["mse"] = metrics["mse"] * self.action_dim
+        return loss, metrics
+
+    def predict_action(
+        self,
+        transformer_outputs: Dict[str, TokenGroup],
+        train: bool = True,
+        argmax: bool = False,
+        sample_shape: tuple = (),
+        rng: Optional[PRNGKey] = None,
+        temperature: float = 1.0,
+    ) -> jax.Array:
+        # Outputs the predicted actions for the final
+        # unfolding the pred_horizon dim, and projecting to the vocab size
+        # (batch, tokens_per_action, token_embedding_size)
+        mean = self.__call__(transformer_outputs, train=train)
+        mean = mean[:, -1]
+        logstd = jnp.full_like(mean, -10.0)
+
+        if argmax:
+            action = mean
+        else:
+            dist = distrax.MultivariateNormalDiag(mean, jnp.exp(logstd) * temperature)
+            action = dist.sample(seed=rng, sample_shape=sample_shape)
+        return action
+
+
 class BasicActionHead(nn.Module):
     """
     A basic action decoding head that predicts discretized actions using
@@ -178,21 +364,6 @@ class BasicActionHead(nn.Module):
                 jnp.int32
             )
         return self.action_tokenizer.decode(action_tokens)
-
-    def _chunk_actions(self, actions):
-        """
-        Chunk actions into `pred_horizon` size chunks.
-        The resulting actions have shape (batch, window_size, pred_horizon, action_dim)
-        """
-        window_size = actions.shape[1]
-        chunk_indices = jnp.broadcast_to(
-            jnp.arange(self.pred_horizon), [window_size, self.pred_horizon]
-        ) + jnp.broadcast_to(
-            jnp.arange(window_size)[:, None],
-            [window_size, self.pred_horizon],
-        )
-        chunk_indices = jnp.minimum(chunk_indices, window_size - 1)
-        return actions[:, chunk_indices]
 
 
 class TokenPerDimActionHead(BasicActionHead):
