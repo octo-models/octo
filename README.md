@@ -43,11 +43,15 @@ please reach out to [pertsch@berkeley.edu](mailto:pertsch@berkeley.edu) or downl
 
 ### Finetuning ORCA Policies
 
-To finetune foundational ORCA policies, you can follow the example command below. You can modify hyperparameters like dataset, batch size etc. in [experiments/dibya/finetune_config.py](finetune_config.py).
+To finetune foundational ORCA policies, you can follow the example command below. You can modify hyperparameters like dataset, batch size etc. in [finetune_config.py](finetune_config.py).
 
 ```
 python finetune.py --config=your_finetune_config.py:mode=head_only --config.pretrained_path=...
 ```
+We offer three finetuning modes depending on the parts of the model that are kept frozen: ```head_only```, ```head_mlp_only``` and ```full``` to finetune the full model. Besides, one can specify the task type to finetune with ```image_conditioned```, ```language_conditioned``` or ```multimodal``` for both. For example, to finetune the full transformer with multimodal inputs use:
+```--config=your_finetune_config.py:mode=full,multimodal```
+
+In order to finetune the model to new observation or action spaces, one needs to define this in the config file. We provide an example for finetuning for joint control on the Aloha setup here.
 
 ### Base Policy Training
 
@@ -70,15 +74,29 @@ python train.py --config config.py:vit_s --name=orca --config.dataset_kwargs.oxe
 | Visualization | [visualization_lib.py](orca/utils/visualization_lib.py) | Utilities for offline qualitative & quantitative eval.                    |
 | Sim Evaluation | [sim_eval.sh](orca/scripts/sim_eval.sh) | Script to run model evaluation.                    |
 
-## Run Evaluation in Simulation
+## Evaluation
 
-To run evaluation on a trained model, you can use the following command:
-```bash
-# requires pybullet and kinpy to be installed
-bash scripts/sim_eval.sh
+To evaluate policies on a robot, first wrap your robot controller in a Gym environment. As an example, see
+[widowx_env.py](examples/widowx_eval/widowx_env.py) which wraps the robot controller used for the
+WidowX robot in BridgeData.
+
+The `step` and `reset` functions of the Gym environment should return observations with the images, depth images, and/or
+proprioceptive information that the policy expects as input. Specifically, the returned observations should be dictionaries
+of the form:
+```
+obs = {
+    "image_0": ...,
+    "image_1": ...,
+    ...
+    "depth_0": ...,
+    "depth_1": ...,
+    ...
+    "proprio": ...,
+}
 ```
 
-This will spawn a `pybullet` environment with a WidowX robot. Since this environment is not used in training, this is purely for testing the pipeline.
+Then, write a script that creates your Gym environment, loads the pretrained model, and passes both into the
+`run_eval_loop` function from [orca/utils/run_eval.py](orca/utils/run_eval.py). As an example, see [eval_widowx.py](examples/widowx_eval/eval.py). A command to run this script can be found in [eval.sh](examples/widowx_eval/eval.sh). **VERY IMPORTANT**: make sure to wrap the Gym environment for your robot in the [UnnormalizeActionProprio](orca/utils/gym_wrappers.py) wrapper to unnormalize/normalize the actions and proprio so that they match what the policy was trained on.
 
 ## Contributing
 Experimental things and training/eval scripts should go in `experiments/<your_name>`. To make any changes to files outside of your experiments directory, please open a pull request.
