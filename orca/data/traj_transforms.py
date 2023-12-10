@@ -13,8 +13,12 @@ def chunk_act_obs(
 ) -> dict:
     """Chunks actions and observations into the given window_size.
 
-    "observation" keys are given a new axis (at index 1) of size `window_size`. "action" is given a new axis
-    (at index 1) of size `window_size + additional_action_window_size`.
+    "observation" keys are given a new axis (at index 1) of size `window_size` containing `window_size - 1`
+    observations from the past and the current observation. "action" is given a new axis (at index 1) of size
+    `window_size + additional_action_window_size` containing `window_size - 1` actions from the past, the
+    current action, and `additional_action_window_size` actions from the future. "pad_mask" is added to
+    "observation" and indicates whether an observation should be considered padding (i.e. if it would have
+    come from a timestep before the start of the trajectory).
     """
     traj_len = tf.shape(traj["action"])[0]
     chunk_indices = tf.broadcast_to(
