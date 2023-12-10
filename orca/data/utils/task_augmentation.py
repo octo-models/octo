@@ -2,62 +2,59 @@
 Contains basic logic for randomly zero-ing out keys in the task specification.
 """
 
-from fnmatch import fnmatch
-from typing import Any, Dict, List, Tuple
-
 import tensorflow as tf
 
 from orca.data.utils.data_utils import to_padding
 
 
 def delete_task_conditioning(
-    traj: Dict[str, Any],
-    delete_key_groups_probs: List[Tuple[List[str], float]],
+    traj: dict,
+    keep_image_prob: float,
 ):
     """
-    Randomly chooses one group, and deletes all the keys in the task dictionary matching this pattern.
+    Randomly drops out either the goal images or the language instruction. Only does something if both of
+    these are present.
 
     Args:
-        traj: A dictionary containing trajectory data. should have a "task" key.
-        delete_key_groups_probs: A list of tuples, where each tuple contains a list of patterns and their probability.
+        traj: A dictionary containing trajectory data. Should have a "task" key.
+        keep_image_prob: The probability of keeping the goal images. The probability of keeping the language
+            instruction is 1 - keep_image_prob.
     """
-    if tf.math.reduce_all(traj["task"]["language_instruction"] == ""):
+    if "language_instruction" not in traj["task"]:
         return traj
 
-    task = traj["task"]
-    new_task = task.copy()
+    image_keys = {
+        key
+        for key in traj["task"].keys()
+        if key.startswith("image_") or key.startswith("depth_")
+    }
+    if not image_keys:
+        return traj
 
-    delete_probs = [prob for _, prob in delete_key_groups_probs]
-    delete_group_idx = tf.random.categorical(tf.math.log([delete_probs]), 1)[0, 0]
+    traj_len = tf.shape(traj["action"])[0]
+    should_keep_images = tf.random.uniform([traj_len]) < keep_image_prob
+    should_keep_images |= ~traj["task"]["pad_mask_dict"]["language_instruction"]
 
-    image_keys = [key for key in task.keys() if "image" in key]
+    for key in image_keys | {"language_instruction"}:
+        should_keep = should_keep_images if key in image_keys else ~should_keep_images
+        # pad out the key
+        traj["task"][key] = tf.where(
+            should_keep,
+            traj["task"][key],
+            to_padding(traj["task"][key]),
+        )
+        # zero out the pad mask dict for the key
+        traj["task"]["pad_mask_dict"][key] = tf.where(
+            should_keep,
+            traj["task"]["pad_mask_dict"][key],
+            tf.zeros_like(traj["task"]["pad_mask_dict"][key]),
+        )
 
-    for i, (delete_key_patterns, _) in enumerate(delete_key_groups_probs):
-        matching_keys = [
-            key
-            for key in task.keys()
-            if any(fnmatch(key, pattern) for pattern in delete_key_patterns)
-        ]
+    # when no goal images are present, the goal timestep becomes the final timestep
+    traj["task"]["timestep"] = tf.where(
+        should_keep_images,
+        traj["task"]["timestep"],
+        traj_len - 1,
+    )
 
-        # When no goal images are present, the goal timestep becomes the final timestep
-        if all([image_key in matching_keys for image_key in image_keys]):
-            new_task["goal_timestep"] = tf.where(
-                i == delete_group_idx,
-                task["end_timestep"],
-                task["goal_timestep"],
-            )
-
-        for key in matching_keys:
-            new_task[key] = tf.where(
-                i == delete_group_idx,
-                to_padding(task[key]),
-                task[key],
-            )
-            new_task["pad_mask_dict"][key] = tf.where(
-                i == delete_group_idx,
-                tf.zeros_like(task["pad_mask_dict"][key]),
-                new_task["pad_mask_dict"][key],
-            )
-
-    traj["task"] = new_task
     return traj

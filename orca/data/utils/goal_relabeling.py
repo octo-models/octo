@@ -1,8 +1,11 @@
 """
 Contains simple goal relabeling logic for BC use-cases where rewards and next_observations are not required.
+Each function should add entries to the "task" dict.
 """
 
 import tensorflow as tf
+
+from orca.data.utils.data_utils import tree_merge
 
 
 def uniform(traj: dict) -> dict:
@@ -18,24 +21,9 @@ def uniform(traj: dict) -> dict:
     # sometimes there are floating-point errors that cause an out-of-bounds
     goal_idxs = tf.minimum(goal_idxs, traj_len - 1)
 
-    traj["task"] = tf.nest.map_structure(
-        lambda x: tf.gather(x, goal_idxs),
-        traj["observation"],
-    )
-    traj["task"]["goal_timestep"] = goal_idxs
-    traj["task"]["end_timestep"] = tf.fill([traj_len], traj_len - 1)
-
-    return traj
-
-
-def no_image_conditioning(traj: dict) -> dict:
-    """Relabels with empty goal images."""
-    traj_len = tf.shape(tf.nest.flatten(traj["observation"])[0])[0]
-    traj["task"] = tf.nest.map_structure(
-        lambda x: tf.zeros_like(x),
-        traj["observation"],
-    )
-    traj["task"]["goal_timestep"] = tf.fill([traj_len], traj_len - 1)
-    traj["task"]["end_timestep"] = tf.fill([traj_len], traj_len - 1)
+    # adds keys to "task" mirroring "observation" keys (must do a tree merge to combine "pad_mask_dict" from
+    # "observation" and "task" properly)
+    goal = tf.nest.map_structure(lambda x: tf.gather(x, goal_idxs), traj["observation"])
+    traj["task"] = tree_merge(traj["task"], goal)
 
     return traj

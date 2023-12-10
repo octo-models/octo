@@ -20,6 +20,18 @@ def tree_map(fn: Callable, tree: dict) -> dict:
     }
 
 
+def tree_merge(*trees: dict) -> dict:
+    """Merges a list of nested dictionaries, with later dictionaries overriding earlier ones."""
+    merged = {}
+    for tree in trees:
+        for k, v in tree.items():
+            if isinstance(v, dict):
+                merged[k] = tree_merge(merged.get(k, {}), v)
+            else:
+                merged[k] = v
+    return merged
+
+
 class NormalizationType(str, Enum):
     """Defines supported normalization schemes for action and proprio."""
 
