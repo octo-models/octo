@@ -49,6 +49,9 @@ def chunk_actions(actions, pred_horizon):
     ]
 
     """
+    assert (
+        actions.ndim == 3
+    ), f"Expected actions to have shape (batch, window_size, action_dim), but got shape {actions.shape}"
     window_size = actions.shape[1]
     assert window_size >= pred_horizon, "Chunk size too large for action window size"
     chunk_window_size = window_size - (pred_horizon - 1)
