@@ -3,6 +3,8 @@ import copy
 from config import get_config as get_base_config
 from config import update_config, wrap
 
+from orca.model.config_utils import create_module_config
+
 
 def get_config(config_string=None):
     base_config = get_base_config(config_string)
@@ -12,6 +14,40 @@ def get_config(config_string=None):
     # Field reference can't be updated with update_config
     base_config["window_size"] = 2
     base_config["num_steps"] = 300000
+
+    #
+    # Changes to the model:
+    #
+
+    encoder = create_module_config("SmallStem16")
+
+    base_config["model"]["observation_tokenizers"] = {
+        "workspace": create_module_config(
+            "ImageTokenizer",
+            obs_stack_keys=["image_0"],
+            task_stack_keys=["image_0"],
+            task_film_keys=[],
+            encoder=encoder,
+        ),
+        "wrist": create_module_config(
+            "ImageTokenizer",
+            obs_stack_keys=["image_1"],
+            task_stack_keys=["image_1"],
+            task_film_keys=[],
+            encoder=encoder,
+        ),
+    }
+    base_config["model"]["task_tokenizers"] = {
+        "language": create_module_config(
+            "LanguageTokenizer",
+            encoder="t5-base",
+            finetune_encoder=False,
+        ),
+    }
+
+    #
+    # Changes to data-loading
+    #
 
     # different augmentations for wrist and workspace
     workspace_augment_kwargs = dict(
@@ -68,37 +104,6 @@ def get_config(config_string=None):
             shuffle_buffer_size=500000,
             balance_weights=True,
         ),
-        model={
-            "observation_tokenizers": {
-                "workspace": {
-                    "cls_name": "image_tokenizer",
-                    "kwargs": dict(
-                        obs_stack_keys=["image_0"],
-                        task_stack_keys=["image_0"],
-                        task_film_keys=[],
-                        encoder="small-stem-16",
-                    ),
-                },
-                "wrist": {
-                    "cls_name": "image_tokenizer",
-                    "kwargs": dict(
-                        obs_stack_keys=["image_1"],
-                        task_stack_keys=["image_1"],
-                        task_film_keys=[],
-                        encoder="small-stem-16",
-                    ),
-                },
-            },
-            "task_tokenizers": {
-                "language": {
-                    "cls_name": "language_tokenizer",
-                    "kwargs": dict(
-                        encoder="t5-base",
-                        finetune_encoder=False,
-                    ),
-                },
-            },
-        },
         text_processor="hf_tokenizer",
         text_processor_kwargs=dict(
             tokenizer_name="t5-base",
