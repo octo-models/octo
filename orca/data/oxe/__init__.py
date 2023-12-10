@@ -53,6 +53,9 @@ def make_oxe_dataset_kwargs_and_weights(
             )
             continue
 
+        # with EEF_POS actions, only the last action dimension is absolute
+        dataset_kwargs["absolute_action_mask"] = [False] * 6 + [True]
+
         # adjust loaded features in kwargs
         dataset_kwargs["image_obs_keys"] = {
             k: v

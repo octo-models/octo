@@ -204,6 +204,7 @@ def make_dataset_from_rlds(
     language_key: Optional[str] = None,
     action_proprio_normalization_type: NormalizationType = NormalizationType.NORMAL,
     dataset_statistics: Optional[Union[dict, str]] = None,
+    absolute_action_mask: Optional[Sequence[bool]] = None,
     num_parallel_reads: int = tf.data.AUTOTUNE,
     num_parallel_calls: int = tf.data.AUTOTUNE,
 ) -> Tuple[dl.DLataset, dict]:
@@ -253,6 +254,12 @@ def make_dataset_from_rlds(
             "std" keys. If `action_proprio_normalization_type` is "bounds", this should contain "min" and "max"
             keys. May also provide "num_transitions" and "num_trajectories" keys for downstream usage (e.g., for
             `make_interleaved_dataset`). If not provided, the statistics will be computed on the fly.
+        absolute_action_mask (Sequence[bool], optional): By default, all action dimensions are assumed to be
+            relative. This is important for when `additional_action_window_size > 0`: actions that are taken
+            from beyond the end of the trajectory (or beyond the goal timestep when goal relabeling is used)
+            need to be made "neutral" to indicate that the task has been completed. For relative actions,
+            "neutral" means zero, but for absolute actions, "neutral" means repeating the last valid action.
+            This mask, if provided, indicates which action dimensions are absolute.
         num_parallel_reads (int): number of parallel read workers. Default to AUTOTUNE.
         num_parallel_calls (int): number of parallel calls for traj_map operations. Default to AUTOTUNE.
     Returns:
@@ -322,12 +329,25 @@ def make_dataset_from_rlds(
                 )
             task["language_instruction"] = traj.pop(language_key)
 
-        return {
+        traj = {
             "observation": new_obs,
             "task": task,
             "action": tf.cast(traj["action"], tf.float32),
             "dataset_name": tf.repeat(name, traj_len),
         }
+
+        if absolute_action_mask is not None:
+            if len(absolute_action_mask) != traj["action"].shape[-1]:
+                raise ValueError(
+                    f"Length of absolute_action_mask ({len(absolute_action_mask)}) "
+                    f"does not match action dimension ({traj['action'].shape[-1]})."
+                )
+            traj["absolute_action_mask"] = tf.tile(
+                tf.convert_to_tensor(absolute_action_mask, dtype=tf.bool)[None],
+                [traj_len, 1],
+            )
+
+        return traj
 
     builder = tfds.builder(name, data_dir=data_dir)
 

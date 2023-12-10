@@ -3,6 +3,8 @@ Contains trajectory transforms used in the orca data pipeline. Trajectory transf
 that represents a single trajectory, meaning each tensor has the same leading dimension (the trajectory
 length).
 """
+import logging
+
 import tensorflow as tf
 
 
@@ -21,6 +23,7 @@ def chunk_act_obs(
     come from a timestep before the start of the trajectory).
     """
     traj_len = tf.shape(traj["action"])[0]
+    action_dim = traj["action"].shape[-1]
     chunk_indices = tf.broadcast_to(
         tf.range(-window_size + 1, 1), [traj_len, window_size]
     ) + tf.broadcast_to(tf.range(traj_len)[:, None], [traj_len, window_size])
@@ -52,12 +55,26 @@ def chunk_act_obs(
     # indicates whether an entire observation is padding
     traj["observation"]["pad_mask"] = chunk_indices >= 0
 
-    # Actions past the goal timestep become no-ops
+    # if no absolute_action_mask was provided, assume all actions are relative
+    if "absolute_action_mask" not in traj and additional_action_window_size > 0:
+        logging.warning(
+            "additional_action_window_size > 0 but no absolute_action_mask was provided. "
+            "Assuming all actions are relative for the purpose of making neutral actions."
+        )
+    absolute_action_mask = traj.get(
+        "absolute_action_mask", tf.zeros([traj_len, action_dim], dtype=tf.bool)
+    )
+    neutral_actions = tf.where(
+        absolute_action_mask[:, None, :],
+        traj["action"],  # absolute actions are repeated (already done during chunking)
+        tf.zeros_like(traj["action"]),  # relative actions are zeroed
+    )
+
+    # actions past the goal timestep become neutral
     action_past_goal = action_chunk_indices > goal_timestep[:, None]
-    # zero_actions = make_neutral_actions(traj["action"], action_encoding)
-    # traj["action"] = tf.where(
-    #     action_past_goal[:, :, None], zero_actions, traj["action"]
-    # )
+    traj["action"] = tf.where(
+        action_past_goal[:, :, None], neutral_actions, traj["action"]
+    )
     return traj
 
 
