@@ -267,16 +267,6 @@ def make_dataset_from_rlds(
         - action                        # action vector
         - dataset_name                  # name of the dataset
     """
-    builder = tfds.builder(name, data_dir=data_dir)
-    if "val" not in builder.info.splits:
-        split = "train[:95%]" if train else "train[95%:]"
-    else:
-        split = "train" if train else "val"
-
-    dataset = dl.DLataset.from_rlds(
-        builder, split=split, shuffle=shuffle, num_parallel_reads=num_parallel_reads
-    )
-
     REQUIRED_KEYS = {"observation", "action"}
     if language_key is not None:
         REQUIRED_KEYS.add(language_key)
@@ -339,21 +329,37 @@ def make_dataset_from_rlds(
             "dataset_name": tf.repeat(name, traj_len),
         }
 
+    builder = tfds.builder(name, data_dir=data_dir)
+
     # load or compute dataset statistics
     if isinstance(dataset_statistics, str):
         with tf.io.gfile.GFile(dataset_statistics, "r") as f:
             dataset_statistics = json.load(f)
     elif dataset_statistics is None:
+        full_dataset = dl.DLataset.from_rlds(
+            builder, split="all", shuffle=False, num_parallel_reads=num_parallel_reads
+        ).traj_map(restructure, num_parallel_calls)
         # tries to load from cache, otherwise computes on the fly
         dataset_statistics = get_dataset_statistics(
-            builder,
-            restructure,
+            full_dataset,
             hash_dependencies=(
+                str(builder.info),
                 str(state_obs_keys),
                 inspect.getsource(standardize_fn) if standardize_fn is not None else "",
             ),
+            save_dir=builder.data_dir,
         )
     dataset_statistics = tree_map(np.array, dataset_statistics)
+
+    # construct the dataset
+    if "val" not in builder.info.splits:
+        split = "train[:95%]" if train else "train[95%:]"
+    else:
+        split = "train" if train else "val"
+
+    dataset = dl.DLataset.from_rlds(
+        builder, split=split, shuffle=shuffle, num_parallel_reads=num_parallel_reads
+    )
 
     dataset = dataset.traj_map(restructure, num_parallel_calls)
     dataset = dataset.traj_map(

@@ -1,15 +1,13 @@
 from enum import Enum
 import hashlib
-import inspect
 import json
 import logging
 import os
-from typing import Any, Callable, Dict, List, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import dlimp as dl
 import numpy as np
 import tensorflow as tf
-from tensorflow_datasets.core.dataset_builder import DatasetBuilder
 import tqdm
 
 
@@ -79,34 +77,33 @@ def pprint_data_mixture(
 
 
 def get_dataset_statistics(
-    builder: DatasetBuilder,
-    restructure_fn: Callable[[dict], dict],
+    dataset: dl.DLataset,
     hash_dependencies: Tuple[str, ...],
+    save_dir: Optional[str] = None,
 ) -> dict:
     """Either computes the statistics of a dataset or loads them from a cache file if this function has been
-    called before with the same arguments. Currently, the statistics include the min/max/mean/std of the
-    actions and proprio as well as the number of transitions and trajectories in the dataset.
+    called before with the same `hash_dependencies`. Currently, the statistics include the min/max/mean/std of
+    the actions and proprio as well as the number of transitions and trajectories in the dataset.
     """
-    # compute a hash of the dataset info, restructure function source code, and any additional dependencies
     unique_hash = hashlib.sha256(
-        "".join(
-            (str(builder.info), inspect.getsource(restructure_fn), *hash_dependencies)
-        ).encode(),
+        "".join(hash_dependencies).encode("utf-8"),
         usedforsecurity=False,
     ).hexdigest()
-    path = tf.io.gfile.join(
-        builder.info.data_dir, f"dataset_statistics_{unique_hash}.json"
-    )
-    # fallback local path for when data_dir is not writable
+
+    # fallback local path for when data_dir is not writable or not provided
     local_path = os.path.expanduser(
         os.path.join(
             "~",
             ".cache",
             "orca",
-            builder.name,
             f"dataset_statistics_{unique_hash}.json",
         )
     )
+
+    if save_dir is not None:
+        path = tf.io.gfile.join(save_dir, f"dataset_statistics_{unique_hash}.json")
+    else:
+        path = local_path
 
     # check if cache file exists and load
     if tf.io.gfile.exists(path):
@@ -121,21 +118,22 @@ def get_dataset_statistics(
             metadata = json.load(f)
         return metadata
 
-    dataset = (
-        dl.DLataset.from_rlds(builder, split="train", shuffle=False)
-        .traj_map(restructure_fn)
-        .traj_map(
-            lambda traj: {
-                "action": traj["action"],
-                "proprio": traj["observation"]["proprio"]
-                if "proprio" in traj["observation"]
-                else tf.zeros_like(traj["action"]),
-            }
-        )
+    dataset = dataset.traj_map(
+        lambda traj: {
+            "action": traj["action"],
+            "proprio": traj["observation"]["proprio"]
+            if "proprio" in traj["observation"]
+            else tf.zeros_like(traj["action"]),
+        }
     )
+
+    cardinality = dataset.cardinality().numpy()
+    if cardinality == tf.data.INFINITE_CARDINALITY:
+        raise ValueError("Cannot compute dataset statistics for infinite datasets.")
+
     logging.info(
-        f"Computing dataset statistics for {builder.name}. This may take awhile, "
-        "but should only need to happen once."
+        "Computing dataset statistics. This may take awhile, but should only need to happen "
+        "once for each dataset."
     )
     actions = []
     proprios = []
@@ -143,7 +141,7 @@ def get_dataset_statistics(
     num_trajectories = 0
     for traj in tqdm.tqdm(
         dataset.iterator(),
-        total=builder.info.splits["train"].num_examples,
+        total=cardinality if cardinality != tf.data.UNKNOWN_CARDINALITY else None,
     ):
         actions.append(traj["action"])
         proprios.append(traj["proprio"])
