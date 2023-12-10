@@ -33,6 +33,8 @@ def apply_trajectory_transforms(
     skip_unlabeled: bool = False,
     max_action: Optional[float] = None,
     max_proprio: Optional[float] = None,
+    task_augment_strategy: Optional[str] = None,
+    task_augment_kwargs: dict = {},
     num_parallel_calls: int = tf.data.AUTOTUNE,
 ) -> dl.DLataset:
     """Applies common transforms that happen at a trajectory level. Such transforms are usually some sort of
@@ -59,11 +61,15 @@ def apply_trajectory_transforms(
             of *any* transition has an absolute value larger than this will be skipped.
         max_proprio: (float, optional): If provided, trajectories in which *any* proprio dimension
             of *any* transition has an absolute value larger than this will be skipped.
+        task_augment_strategy (str, optional): The task augmentation strategy to use, or None for no task
+            augmentation. See `task_augmentation.py`.
+        task_augment_kwargs (dict, optional): Additional keyword arguments to pass to the task augmentation
+            function.
         num_parallel_calls (int, optional): number of parallel calls for map operations. Default to AUTOTUNE.
     """
-    if skip_unlabeled and "language_instruction" in dataset.element_spec:
+    if skip_unlabeled and "language_instruction" in dataset.element_spec["task"]:
         dataset = dataset.filter(
-            lambda x: tf.math.reduce_any(x["language_instruction"] != "")
+            lambda x: tf.math.reduce_any(x["task"]["language_instruction"] != "")
         )
 
     if max_action is not None:
@@ -78,10 +84,10 @@ def apply_trajectory_transforms(
             )
         )
 
-    # marks which observations are padding
+    # marks which entires of the observation and task dicts are padding
     dataset = dataset.traj_map(traj_transforms.add_pad_mask_dict, num_parallel_calls)
 
-    # adds the "task" key
+    # updates the "task" dict
     if goal_relabeling_strategy is not None:
         dataset = dataset.traj_map(
             partial(
@@ -91,21 +97,18 @@ def apply_trajectory_transforms(
             num_parallel_calls,
         )
 
-    if "language_instruction" in dataset.element_spec:
+    # must run task augmentation before chunking, in case it changes goal timesteps
+    if train and task_augment_strategy is not None:
+        # perform task augmentation (e.g., dropping keys)
+        dataset = dataset.traj_map(
+            partial(
+                getattr(task_augmentation, task_augment_strategy),
+                **task_augment_kwargs,
+            ),
+            num_parallel_calls,
+        )
 
-        def process_language_instruction(traj):
-            # move the "language_instruction" key into the "task" dict
-            if "task" not in traj:
-                traj["task"] = {}
-            traj["task"]["language_instruction"] = traj.pop("language_instruction")
-            # mark whether the language instruction is padding
-            traj["task"]["pad_mask_dict"]["language_instruction"] = (
-                tf.strings.length(traj["task"]["language_instruction"]) != 0
-            )
-            return traj
-
-        dataset = dataset.traj_map(process_language_instruction, num_parallel_calls)
-
+    # chunks actions and observations
     dataset = dataset.traj_map(
         partial(
             traj_transforms.chunk_act_obs,
@@ -131,8 +134,6 @@ def apply_frame_transforms(
     image_augment_kwargs: Union[dict, Mapping[str, dict]] = {},
     resize_size: Union[Tuple[int, int], Mapping[str, Tuple[int, int]]] = {},
     depth_resize_size: Union[Tuple[int, int], Mapping[str, Tuple[int, int]]] = {},
-    task_augment_strategy: Optional[str] = None,
-    task_augment_kwargs: dict = {},
     num_parallel_calls: int = tf.data.AUTOTUNE,
 ) -> dl.DLataset:
     """Applies common transforms that happen at a frame level. These transforms are usually more
@@ -152,10 +153,6 @@ def apply_frame_transforms(
             keys (so pass an empty dict to skip resizing for all images).
         depth_resize_size (Tuple[int, int]|Mapping[str, Tuple[int, int]]): Same as resize_size, but for depth
             images.
-        task_augmentation_strategy (str, optional): The task augmentation strategy to use, or None for no task
-            augmentation. See `task_augmentation.py`.
-        task_augmentation_kwargs (dict, optional): Additional keyword arguments to pass to the task
-            augmentation function.
         num_parallel_calls (int): number of parallel calls for frame_map operations. Default to AUTOTUNE.
     """
 
@@ -163,33 +160,17 @@ def apply_frame_transforms(
     # it to the chunked "observation" dict as well as the non-chunked "task" dict
     def apply_obs_transform(fn: Callable[[dict], dict], frame):
         # task is not chunked -- apply fn directly
-        if "task" in frame:
-            frame["task"] = fn(frame["task"])
+        frame["task"] = fn(frame["task"])
         # observation is chunked -- apply fn along first axis
         frame["observation"] = dl.vmap(fn)(frame["observation"])
         return frame
 
-    if train and task_augment_strategy is not None:
-        # perform task augmentation (e.g., dropping keys)
-        dataset = dataset.frame_map(
-            partial(
-                getattr(task_augmentation, task_augment_strategy),
-                **task_augment_kwargs,
-            ),
-            num_parallel_calls,
-        )
-
-    # decode images (and depth images)
-    dataset = dataset.frame_map(
-        partial(apply_obs_transform, obs_transforms.decode_images), num_parallel_calls
-    )
-
-    # resize images (and depth images)
+    # decode + resize images (and depth images)
     dataset = dataset.frame_map(
         partial(
             apply_obs_transform,
             partial(
-                obs_transforms.resize,
+                obs_transforms.decode_and_resize,
                 resize_size=resize_size,
                 depth_resize_size=depth_resize_size,
             ),
@@ -220,6 +201,7 @@ def make_dataset_from_rlds(
     image_obs_keys: Mapping[str, Optional[str]] = {},
     depth_obs_keys: Mapping[str, Optional[str]] = {},
     state_obs_keys: Sequence[Optional[str]] = (),
+    language_key: Optional[str] = None,
     action_proprio_normalization_type: NormalizationType = NormalizationType.NORMAL,
     dataset_statistics: Optional[Union[dict, str]] = None,
     num_parallel_reads: int = tf.data.AUTOTUNE,
@@ -244,6 +226,9 @@ def make_dataset_from_rlds(
     will be placed in the "proprio" key of the "observation" dict. A single padding element (zero) will be
     inserted for each None entry.
 
+    The dataset will also include a "task" dict. If `language_key` is provided, then the "task" dict will
+    contain the key "language_instruction", extracted from `traj[language_key]`.
+
     Args:
         name (str): The name of the RLDS dataset (usually "name" or "name:version").
         data_dir (str): The path to the data directory.
@@ -259,6 +244,8 @@ def make_dataset_from_rlds(
         state_obs_keys (Sequence[str|None]): List of 1-dimensional proprioception keys to be extracted from
             the "observation" dict, concatenated, and mapped to "proprio". Inserts 1 element of padding (zero) for
             each None entry.
+        language_key (str, optional): If provided, the "task" dict will contain the key
+            "language_instruction", extracted from `traj[language_key]`.
         action_proprio_normalization_type (str, optional): The type of normalization to perform on the action,
             proprio, or both. Can be "normal" (mean 0, std 1) or "bounds" (normalized to [-1, 1]).
         dataset_statistics: (dict|str, optional): dict (or path to JSON file) that contains dataset statistics
@@ -274,8 +261,11 @@ def make_dataset_from_rlds(
             - image_{name1, name2, ...} # RGB image observations
             - depth_{name1, name2, ...} # depth image observations
             - proprio                   # 1-dimensional array of proprioceptive observations
+            - timestep                  # timestep of each frame
+        - task:
+            - language_instruction      # language instruction, present if `language_key` is provided
         - action                        # action vector
-        - language_instruction          # string language instruction (optional)
+        - dataset_name                  # name of the dataset
     """
     builder = tfds.builder(name, data_dir=data_dir)
     if "val" not in builder.info.splits:
@@ -287,25 +277,20 @@ def make_dataset_from_rlds(
         builder, split=split, shuffle=shuffle, num_parallel_reads=num_parallel_reads
     )
 
-    def restructure(traj):
-        standard_keys = {
-            "observation",
-            "action",
-        }
+    REQUIRED_KEYS = {"observation", "action"}
+    if language_key is not None:
+        REQUIRED_KEYS.add(language_key)
 
+    def restructure(traj):
         # apply a standardization function, if provided
         if standardize_fn is not None:
             traj = standardize_fn(traj)
 
-        if not all(k in traj for k in standard_keys):
+        if not all(k in traj for k in REQUIRED_KEYS):
             raise ValueError(
-                f"Trajectory is missing keys: {standard_keys - set(traj.keys())}. "
+                f"Trajectory is missing keys: {REQUIRED_KEYS - set(traj.keys())}. "
                 "Did you write a `standardize_fn`?"
             )
-
-        # filter out keys that are not needed
-        allowed_keys = standard_keys | {"language_instruction"}
-        traj = {k: v for k, v in traj.items() if k in allowed_keys}
 
         # extracts images, depth images and proprio from the "observation" dict
         traj_len = tf.shape(traj["action"])[0]
@@ -337,13 +322,22 @@ def make_dataset_from_rlds(
         # add timestep info
         new_obs["timestep"] = tf.range(traj_len)
 
-        traj["action"] = tf.cast(traj["action"], tf.float32)
-        traj["observation"] = new_obs
+        # extracts `language_key` into the "task" dict
+        task = {}
+        if language_key is not None:
+            if traj[language_key].dtype != tf.string:
+                raise ValueError(
+                    f"Language key {language_key} has dtype {traj[language_key].dtype}, "
+                    "but it must be tf.string."
+                )
+            task["language_instruction"] = traj.pop(language_key)
 
-        # add name of dataset
-        traj["dataset_name"] = tf.repeat(name, traj_len)
-
-        return traj
+        return {
+            "observation": new_obs,
+            "task": task,
+            "action": tf.cast(traj["action"], tf.float32),
+            "dataset_name": tf.repeat(name, traj_len),
+        }
 
     # load or compute dataset statistics
     if isinstance(dataset_statistics, str):

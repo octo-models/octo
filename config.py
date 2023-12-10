@@ -111,10 +111,7 @@ def get_dataset_config(modality="multimodal", window_size=1):
         task_augmentation = dict(
             task_augment_strategy="delete_task_conditioning",
             task_augment_kwargs=dict(
-                delete_key_groups_probs=[
-                    (["image_*"], 0.5),
-                    (["language_instruction"], 0.5),
-                ],
+                keep_image_prob=0.5,
             ),
         )
     else:
@@ -132,12 +129,14 @@ def get_dataset_config(modality="multimodal", window_size=1):
         # common_dataset_kwargs override specific kwargs from dataset_kwargs_list
         "common_dataset_kwargs": dict(
             action_proprio_normalization_type=normalization_type,
+            language_key="language_instruction",
         ),
         "traj_transform_kwargs": dict(
             window_size=window_size,
             additional_action_window_size=0,
             goal_relabeling_strategy="uniform",
             subsample_length=100,
+            **task_augmentation,
         ),
         "frame_transform_kwargs": dict(
             resize_size=(256, 256),
@@ -156,7 +155,6 @@ def get_dataset_config(modality="multimodal", window_size=1):
                 ],
             ),
             num_parallel_calls=200,
-            **task_augmentation,
         ),
         "traj_transform_threads": 48,  # shared between all datasets
         "traj_read_threads": 48,  # shared between all datasets

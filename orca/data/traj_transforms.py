@@ -11,10 +11,10 @@ def chunk_act_obs(
     window_size: int,
     additional_action_window_size: int = 0,
 ) -> dict:
-    """
-    Chunks actions and observations into the given window_size.
+    """Chunks actions and observations into the given window_size.
 
-    The "action" and "observation" keys are each given a new axis (at index 1) of size `window_size`.
+    "observation" keys are given a new axis (at index 1) of size `window_size`. "action" is given a new axis
+    (at index 1) of size `window_size + additional_action_window_size`.
     """
     traj_len = tf.shape(traj["action"])[0]
     chunk_indices = tf.broadcast_to(
@@ -31,10 +31,10 @@ def chunk_act_obs(
 
     floored_chunk_indices = tf.maximum(chunk_indices, 0)
 
-    if "task" in traj:
-        goal_timestep = traj["task"]["goal_timestep"]
+    if "timestep" in traj["task"]:
+        goal_timestep = traj["task"]["timestep"]
     else:
-        goal_timestep = tf.fill([traj_len - 1], traj_len, dtype=tf.int32)
+        goal_timestep = tf.fill([traj_len], traj_len - 1)
 
     floored_action_chunk_indices = tf.minimum(
         tf.maximum(action_chunk_indices, 0), goal_timestep[:, None]
@@ -67,16 +67,19 @@ def subsample(traj: dict, subsample_length: int) -> dict:
 
 
 def add_pad_mask_dict(traj: dict) -> dict:
-    """Adds a dictionary indicating which elements of the observation are padding.
+    """Adds a dictionary indicating which elements of the observation/task should be treated as padding.
 
-    traj["observation"]["pad_mask_dict"] = {k: traj["observation"][k] is not padding}
+    traj["observation"|"task"]["pad_mask_dict"] = {k: traj["observation"|"task"][k] is not padding}
     """
     traj_len = tf.shape(traj["action"])[0]
-    pad_masks = {}
-    for key in traj["observation"]:
-        if traj["observation"][key].dtype == tf.string:
-            pad_masks[key] = tf.strings.length(traj["observation"][key]) != 0
-        else:
-            pad_masks[key] = tf.ones([traj_len], dtype=tf.bool)
-    traj["observation"]["pad_mask_dict"] = pad_masks
+    for key in ["observation", "task"]:
+        pad_mask_dict = {}
+        for subkey in traj[key]:
+            if traj[key][subkey].dtype == tf.string:
+                # handles "language_instruction", "image_*", and "depth_*"
+                pad_mask_dict[subkey] = tf.strings.length(traj[key][subkey]) != 0
+            else:
+                # all other keys should not be treated as padding
+                pad_mask_dict[subkey] = tf.ones([traj_len], dtype=tf.bool)
+        traj[key]["pad_mask_dict"] = pad_mask_dict
     return traj

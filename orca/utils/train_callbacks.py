@@ -243,7 +243,7 @@ class ValidationCallback(Callback):
                     batch["task"], self.zero_text
                 )
             if "text_conditioned" in self.modes_to_evaluate:
-                all_tasks["text_conditioned"] = remove_images(batch["tasks"])
+                all_tasks["text_conditioned"] = remove_images(batch["task"])
 
             if "unconditioned" in self.modes_to_evaluate:
                 all_tasks["unconditioned"] = remove_text(

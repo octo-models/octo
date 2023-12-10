@@ -42,14 +42,14 @@ def get_config(config_string=None):
     del base_config["dataset_kwargs"]["frame_transform_kwargs"]["resize_size"]
     del base_config["dataset_kwargs"]["frame_transform_kwargs"]["image_augment_kwargs"]
 
-    base_config["dataset_kwargs"]["frame_transform_kwargs"]["resize_size"] = [
-        (256, 256),  # workspace (3rd person) camera is at 256x256
-        (128, 128),  # wrist camera is at 128x128
-    ]
-    base_config["dataset_kwargs"]["frame_transform_kwargs"]["image_augment_kwargs"] = [
-        workspace_augment_kwargs,
-        wrist_augment_kwargs,
-    ]
+    base_config["dataset_kwargs"]["frame_transform_kwargs"]["resize_size"] = {
+        "primary": (256, 256),  # workspace camera is at 256x256
+        "wrist": (128, 128),  # wrist camera is at 128x128
+    }
+    base_config["dataset_kwargs"]["frame_transform_kwargs"]["image_augment_kwargs"] = {
+        "primary": workspace_augment_kwargs,
+        "wrist": wrist_augment_kwargs,
+    }
 
     config = update_config(
         base_config,
@@ -70,8 +70,8 @@ def get_config(config_string=None):
                 "workspace": {
                     "cls_name": "image_tokenizer",
                     "kwargs": dict(
-                        obs_stack_keys=["image_0"],
-                        task_stack_keys=["image_0"],
+                        obs_stack_keys=["image_primary"],
+                        task_stack_keys=["image_primary"],
                         task_film_keys=[],
                         encoder="small-stem-16",
                     ),
@@ -79,8 +79,8 @@ def get_config(config_string=None):
                 "wrist": {
                     "cls_name": "image_tokenizer",
                     "kwargs": dict(
-                        obs_stack_keys=["image_1"],
-                        task_stack_keys=["image_1"],
+                        obs_stack_keys=["image_wrist"],
+                        task_stack_keys=["image_wrist"],
                         task_film_keys=[],
                         encoder="small-stem-16",
                     ),
