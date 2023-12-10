@@ -1,4 +1,21 @@
-# adapted from https://github.com/google-research/robotics_transformer/blob/master/transformer_network.py
+"""Action prediction modules that take in the transformer token outputs and predict actions.
+
+Each action head here does chunked action prediction: i.e. at every timestep,
+it tries to predict the next `pred_horizon` actions into the future from that timestep.
+Setting `pred_horizon=1` corresponds to the typical action prediction setup.
+
+The base structure of an action head is as follows:
+
+class ActionHead(nn.Module):
+    def loss(self, transformer_outputs, actions, pad_mask, train=True):
+        # Compute the loss and metrics for training the action head.
+        return loss, metrics
+
+    def predict_action(self, transformer_outputs, argmax=False, sample_shape=(), rng=None, temperature=1.0):
+        # Predict the action for the most recent timestep.
+        return predicted_action # jnp.ndarray w/ shape (*sample_shape, batch_size, pred_horizon, action_dim)
+
+"""
 from functools import partial
 from typing import Dict, Optional
 
