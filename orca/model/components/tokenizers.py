@@ -7,9 +7,9 @@ import jax
 import jax.numpy as jnp
 from jax.scipy.stats import norm
 
-from orca.model.components import encoders
 from orca.model.components.base import TokenGroup
 from orca.model.components.transformer import MAPHead
+from orca.model.config_utils import create_module_from_config, ModuleConfig
 
 EPS = 1e-6
 from dataclasses import field
@@ -81,15 +81,14 @@ class ImageTokenizer(nn.Module):
         task_film_keys (Sequence[str]): Which non-spatial task keys get passed into FiLM conditioning. Supports regex.
     """
 
-    encoder: str
-    encoder_kwargs: dict = field(default_factory=dict)
+    encoder: ModuleConfig
     use_token_learner: bool = False
     num_tokens: int = 8
     conditioning_type: str = "none"
     obs_stack_keys: Sequence[str] = ("image_.*", "depth_.*")
     task_stack_keys: Sequence[str] = tuple()
     task_film_keys: Sequence[str] = tuple()
-    proper_pad_mask: bool = False
+    proper_pad_mask: bool = True
 
     @nn.compact
     def __call__(
@@ -136,9 +135,10 @@ class ImageTokenizer(nn.Module):
             )
 
         # run visual encoder
-        image_tokens = encoders[self.encoder](**self.encoder_kwargs)(
-            enc_inputs, **encoder_input_kwargs
+        encoder_def = create_module_from_config(
+            self.encoder, default_library="orca.model.components.image_encoders"
         )
+        image_tokens = encoder_def(enc_inputs, **encoder_input_kwargs)
         image_tokens = jnp.reshape(image_tokens, (b, t, -1, image_tokens.shape[-1]))
 
         if self.use_token_learner:
@@ -169,7 +169,7 @@ class LanguageTokenizer(nn.Module):
 
     encoder: str = None
     finetune_encoder: bool = False
-    proper_pad_mask: bool = False
+    proper_pad_mask: bool = True
 
     def setup(self):
         if self.encoder is not None:
@@ -274,7 +274,7 @@ class LowdimObsTokenizer(BinTokenizer):
 
     obs_keys: Sequence[str] = tuple()
     discretize: bool = False
-    proper_pad_mask: bool = False
+    proper_pad_mask: bool = True
 
     def __call__(self, observations, *unused_args, **unused_kwargs):
         assert self.obs_keys, "Need to specify observation keys to tokenize."

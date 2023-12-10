@@ -4,6 +4,12 @@ import functools
 from ml_collections import ConfigDict
 from ml_collections.config_dict import FieldReference, placeholder
 
+from orca.model.config_utils import (
+    base_orca_model_config,
+    create_module_config,
+    kwargs_for_common_transformer_sizes,
+)
+
 
 def update_config(config, **kwargs):
     updates = ConfigDict(kwargs)
@@ -165,102 +171,35 @@ def get_dataset_config(modality="multimodal", window_size=1):
     }
 
 
-def get_transformer_kwargs(transformer_size):
-    assert transformer_size in ["dummy", "vanilla", "vit_s", "vit_b", "vit_l", "vit_h"]
-    default_params = {
-        "attention_dropout_rate": 0.0,
-        "add_position_embedding": False,
-    }
-
-    TRANSFORMER_SIZES = {
-        "dummy": dict(
-            num_layers=1,
-            mlp_dim=256,
-            num_attention_heads=2,
-            dropout_rate=0.1,
-        ),
-        "vanilla": dict(
-            num_layers=4,
-            mlp_dim=1024,
-            num_attention_heads=8,
-            dropout_rate=0.1,
-        ),
-        "vit_s": dict(
-            num_layers=12,
-            mlp_dim=1536,
-            num_attention_heads=6,
-            dropout_rate=0.0,
-        ),
-        "vit_b": dict(
-            num_layers=12,
-            mlp_dim=3072,
-            num_attention_heads=12,
-            dropout_rate=0.0,
-        ),
-        "vit_l": dict(
-            num_layers=24,
-            mlp_dim=4096,
-            num_attention_heads=16,
-            dropout_rate=0.1,
-        ),
-        "vit_h": dict(
-            num_layers=32,
-            mlp_dim=5120,
-            num_attention_heads=16,
-            dropout_rate=0.1,
-        ),
-    }
-
-    TOKEN_DIMS = {
-        "dummy": 256,
-        "vanilla": 256,
-        "vit_s": 384,
-        "vit_b": 768,
-        "vit_l": 1024,
-        "vit_h": 1280,
-    }
-    return dict(
-        token_embedding_size=TOKEN_DIMS[transformer_size],
-        transformer_kwargs={
-            **default_params,
-            **TRANSFORMER_SIZES[transformer_size],
-        },
-    )
-
-
 def get_model_config(transformer_size):
-    normalization_type = "normal"
-    base_tokenizer_kwargs = dict(
-        encoder="small-stem-16",
-        encoder_kwargs=dict(use_film=True),
-    )
+    """
+    Transformer_size is one of ["dummy", "vanilla", "vit_s", "vit_b", "vit_l", "vit_h"]
 
-    return {
-        **get_transformer_kwargs(transformer_size),
-        "proper_pad_mask": True,
-        "max_horizon": 10,
-        "readouts": dict(),
-        "heads": dict(
-            action=dict(
-                cls_name="mse_action_head",
-                kwargs=dict(
-                    pred_horizon=1,
-                    action_dim=7,
-                    readout_key="obs",
-                ),
-            )
-        ),
-        "observation_tokenizers": {
-            "image": {
-                "cls_name": "image_tokenizer",
-                "kwargs": dict(
-                    num_tokens=256,
-                    obs_stack_keys=["image_.*"],
-                    task_stack_keys=["image_.*"],
-                    task_film_keys=["language_instruction"],
-                    **base_tokenizer_kwargs,
-                ),
-            },
-        },
-        "task_tokenizers": dict(),
-    }
+    See orca.model.config_utils:kwargs_for_common_transformer_sizes for more details
+
+    This model stacks all the images from different cameras together, and passes it through
+    a small convolutional stem before entering the transformer.
+
+    The action head pools all the observation token embeddings, and passes it through a small MLP
+    before predicting the action using a MSE loss.
+    """
+    model_config = base_orca_model_config()
+    model_config.update(kwargs_for_common_transformer_sizes(transformer_size))
+
+    image_encoder = create_module_config("SmallStem16", use_film=True)
+
+    model_config["observation_tokenizers"]["image"] = create_module_config(
+        "ImageTokenizer",
+        num_tokens=256,
+        obs_stack_keys=["image_.*"],
+        task_stack_keys=["image_.*"],
+        task_film_keys=["language_instruction"],
+        encoder=image_encoder,
+    )
+    model_config["heads"]["action"] = create_module_config(
+        "MSEActionHead",
+        pred_horizon=1,
+        action_dim=7,
+        readout_key="obs",
+    )
+    return model_config
