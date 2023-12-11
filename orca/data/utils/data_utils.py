@@ -274,10 +274,13 @@ def invert_gripper_actions(actions: tf.Tensor):
     return 1 - actions
 
 
-def allocate_threads(n: int, weights: np.ndarray):
-    """Allocates an integer n across an array based on weights. The final array sums to n, but each element is
-    no less than 1.
+def allocate_threads(n: Optional[int], weights: np.ndarray):
+    """Allocates an integer number of threads across datasets based on weights. The final array sums to `n`,
+    but each element is no less than 1. If `n` is None, then every dataset is assigned a value of AUTOTUNE.
     """
+    if n is None:
+        return np.array([tf.data.AUTOTUNE] * len(weights))
+
     assert np.all(weights >= 0), "Weights must be non-negative"
     assert (
         len(weights) <= n

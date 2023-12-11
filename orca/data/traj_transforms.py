@@ -11,16 +11,16 @@ import tensorflow as tf
 def chunk_act_obs(
     traj: dict,
     window_size: int,
-    additional_action_window_size: int = 0,
+    future_action_window_size: int = 0,
 ) -> dict:
     """Chunks actions and observations into the given window_size.
 
     "observation" keys are given a new axis (at index 1) of size `window_size` containing `window_size - 1`
     observations from the past and the current observation. "action" is given a new axis (at index 1) of size
-    `window_size + additional_action_window_size` containing `window_size - 1` actions from the past, the
-    current action, and `additional_action_window_size` actions from the future. "pad_mask" is added to
-    "observation" and indicates whether an observation should be considered padding (i.e. if it would have
-    come from a timestep before the start of the trajectory).
+    `window_size + future_action_window_size` containing `window_size - 1` actions from the past, the current
+    action, and `future_action_window_size` actions from the future. "pad_mask" is added to "observation" and
+    indicates whether an observation should be considered padding (i.e. if it would have come from a timestep
+    before the start of the trajectory).
     """
     traj_len = tf.shape(traj["action"])[0]
     action_dim = traj["action"].shape[-1]
@@ -29,11 +29,11 @@ def chunk_act_obs(
     ) + tf.broadcast_to(tf.range(traj_len)[:, None], [traj_len, window_size])
 
     action_chunk_indices = tf.broadcast_to(
-        tf.range(-window_size + 1, 1 + additional_action_window_size),
-        [traj_len, window_size + additional_action_window_size],
+        tf.range(-window_size + 1, 1 + future_action_window_size),
+        [traj_len, window_size + future_action_window_size],
     ) + tf.broadcast_to(
         tf.range(traj_len)[:, None],
-        [traj_len, window_size + additional_action_window_size],
+        [traj_len, window_size + future_action_window_size],
     )
 
     floored_chunk_indices = tf.maximum(chunk_indices, 0)
@@ -56,9 +56,9 @@ def chunk_act_obs(
     traj["observation"]["pad_mask"] = chunk_indices >= 0
 
     # if no absolute_action_mask was provided, assume all actions are relative
-    if "absolute_action_mask" not in traj and additional_action_window_size > 0:
+    if "absolute_action_mask" not in traj and future_action_window_size > 0:
         logging.warning(
-            "additional_action_window_size > 0 but no absolute_action_mask was provided. "
+            "future_action_window_size > 0 but no absolute_action_mask was provided. "
             "Assuming all actions are relative for the purpose of making neutral actions."
         )
     absolute_action_mask = traj.get(
