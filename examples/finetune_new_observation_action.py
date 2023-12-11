@@ -13,8 +13,7 @@ import tqdm
 import wandb
 
 from orca.data.dataset import make_single_dataset
-from orca.data.utils.data_utils import ActionEncoding, StateEncoding
-from orca.data.utils.text_processing import text_processors
+from orca.data.oxe.oxe_dataset_configs import ActionEncoding, StateEncoding
 from orca.utils.jax_utils import initialize_compilation_cache
 from orca.utils.pretrained_utils import ORCAModel
 from orca.utils.train_callbacks import SaveCallback
