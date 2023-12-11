@@ -130,9 +130,6 @@ class OrcaTransformer(nn.Module):
         # Attention rules for the transformer
         #
 
-        all_prefix_groups = []
-        all_timestep_groups = []
-
         # Tasks attend to all other tasks, but not to observations or readouts
         task_attention_rules = {"task_*": AttentionRule.CAUSAL}
 
