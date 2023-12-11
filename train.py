@@ -23,7 +23,7 @@ import wandb
 
 import orca
 from orca.data.dataset import make_interleaved_dataset
-from orca.data.oxe.oxe_dataset_mixes import make_oxe_dataset_kwargs_and_weights
+from orca.data.oxe import make_oxe_dataset_kwargs_and_weights
 from orca.model import create_model_def
 from orca.spec import ModuleSpec
 from orca.utils import jax_utils

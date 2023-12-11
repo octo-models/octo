@@ -111,10 +111,7 @@ def get_dataset_config(window_size=1):
     task_augmentation = dict(
         task_augment_strategy="delete_task_conditioning",
         task_augment_kwargs=dict(
-            delete_key_groups_probs=[
-                (["image_*"], 0.5),
-                (["language_instruction"], 0.5),
-            ],
+            keep_image_prob=0.5,
         ),
     )
 
