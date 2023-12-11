@@ -2,7 +2,7 @@ import logging
 from typing import Dict
 
 from orca.model.orca_model import OrcaModel, OrcaTransformer
-from orca.spec import ModuleSpec
+from orca.utils.spec import ModuleSpec
 
 
 def base_orca_model_config():

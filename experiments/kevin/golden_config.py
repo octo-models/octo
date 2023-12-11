@@ -8,7 +8,7 @@ from orca.data.utils.text_processing import HFTokenizer
 from orca.model.components.hf_weight_loaders import hf_weights_loader
 from orca.model.components.tokenizers import ImageTokenizer, LanguageTokenizer
 from orca.model.components.vit_encoders import SmallStem16
-from orca.spec import ModuleSpec
+from orca.utils.spec import ModuleSpec
 
 
 def update_config(config, **kwargs):

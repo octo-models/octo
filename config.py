@@ -8,7 +8,7 @@ from orca.model.components.action_heads import MSEActionHead
 from orca.model.components.tokenizers import ImageTokenizer
 from orca.model.components.transformer import common_transformer_sizes
 from orca.model.components.vit_encoders import SmallStem16
-from orca.spec import ModuleSpec
+from orca.utils.spec import ModuleSpec
 
 
 def get_model_config(transformer_size):

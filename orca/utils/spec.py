@@ -4,19 +4,23 @@ from typing import Any, Dict, Tuple, TypedDict, Union
 
 
 class ModuleSpec(TypedDict):
-    """A JSON-serializable representation of a function or class with some default kwargs to pass to it.
-    Needed to cleanly serialize configs, and to override options on the command line with ml_collections.
+    """A JSON-serializable representation of a function or class with some default args and kwargs to pass to
+    it. Useful for specifying a particular class or function in a config file, while keeping it serializable
+    and overridable from the command line using ml_collections.
 
     Usage:
 
-        > spec = ModuleSpec.create("orca.model.components.transformer:Transformer", num_layers=3)
+        # Preferred way to create a spec:
         > from orca.model.components.transformer import Transformer
-        > spec = ModuleSpec.create(Transformer, num_layers=3) # Same as above.
+        > spec = ModuleSpec.create(Transformer, num_layers=3)
+        # Same as above using the fully qualified import string:
+        > spec = ModuleSpec.create("orca.model.components.transformer:Transformer", num_layers=3)
 
+        # Usage:
         > ModuleSpec.instantiate(spec) == partial(Transformer, num_layers=3)
 
-    Note: ModuleSpec is just an alias for a dictionary (for type-checking), not a real class. So from your
-    code's perspective, it is just a dictionary.
+    Note: ModuleSpec is just an alias for a dictionary (that is strongly typed), not a real class. So from
+    your code's perspective, it is just a dictionary.
 
     module (str): The module the callable is located in
     name (str): The name of the callable in the module
@@ -31,32 +35,42 @@ class ModuleSpec(TypedDict):
 
     @staticmethod
     def create(callable_or_full_name: Union[str, callable], *args, **kwargs) -> "ModuleSpec":  # type: ignore
-        """Create a module spec from a class or import string.
+        """Create a module spec from a callable or import string.
 
         Args:
-            callable_or_full_name (str or object): Either the object or a fully qualified import string
+            callable_or_full_name (str or object): Either the object itself or a fully qualified import string
                 (e.g. "orca.model.components.transformer:Transformer")
-        kwargs (dict, optional): Passed into callable.
+        args (tuple, optional): Passed into callable upon instantiation.
+        kwargs (dict, optional): Passed into callable upon instantiation.
         """
         if isinstance(callable_or_full_name, str):
+            assert callable_or_full_name.count(":") == 1, (
+                "If passing in a string, it must be a fully qualified import string "
+                "(e.g. 'orca.model.components.transformer:Transformer')"
+            )
             module, name = callable_or_full_name.split(":")
         else:
-            module, name = _infer_cls_name(callable_or_full_name)
+            module, name = _infer_full_name(callable_or_full_name)
 
         return ModuleSpec(module=module, name=name, args=args, kwargs=kwargs)
 
     @staticmethod
     def instantiate(spec: "ModuleSpec"):  # type: ignore
+        if set(spec.keys()) != {"module", "name", "args", "kwargs"}:
+            raise ValueError(
+                f"Expected ModuleSpec, but got {spec}. "
+                "ModuleSpec must have keys 'module', 'name', 'args', and 'kwargs'."
+            )
         cls = _import_from_string(spec["module"], spec["name"])
         return partial(cls, *spec["args"], **spec["kwargs"])
 
 
-def _infer_cls_name(o: object):
+def _infer_full_name(o: object):
     if hasattr(o, "__module__") and hasattr(o, "__name__"):
         return o.__module__, o.__name__
     else:
         raise ValueError(
-            f"Could not infer identifier for {o}."
+            f"Could not infer identifier for {o}. "
             "Please pass in a fully qualified import string instead "
             "e.g. 'orca.model.components.transformer:Transformer'"
         )
