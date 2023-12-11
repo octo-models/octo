@@ -15,9 +15,9 @@ from ml_collections import ConfigDict
 import numpy as np
 import optax
 
-from orca.config_utils import ModuleSpec, partial_from_spec
 from orca.data.utils.text_processing import TextProcessor
 from orca.model.components.hf_weight_loaders import WeightLoader
+from orca.spec import ModuleSpec
 from orca.utils import jax_utils
 from orca.utils.typing import Config, Data, Params, PRNGKey
 
@@ -52,9 +52,7 @@ def create_train_state(
 
     for loader in pretrained_loaders:
         if isinstance(loader, ModuleSpec):
-            loader = partial_from_spec(
-                loader, default_library="orca.model.components.hf_weight_loaders"
-            )
+            loader = ModuleSpec.instantiate(loader)
         params = loader(params)
 
     return TrainState.create(

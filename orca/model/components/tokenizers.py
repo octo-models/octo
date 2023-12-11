@@ -7,9 +7,9 @@ import jax
 import jax.numpy as jnp
 from jax.scipy.stats import norm
 
-from orca.config_utils import create_module_from_spec, ModuleSpec
 from orca.model.components.base import TokenGroup
 from orca.model.components.transformer import MAPHead
+from orca.spec import ModuleSpec
 
 EPS = 1e-6
 from dataclasses import field
@@ -135,9 +135,7 @@ class ImageTokenizer(nn.Module):
             )
 
         # run visual encoder
-        encoder_def = create_module_from_spec(
-            self.encoder, default_library="orca.model.components.image_encoders"
-        )
+        encoder_def = ModuleSpec.instantiate(self.encoder)()
         image_tokens = encoder_def(enc_inputs, **encoder_input_kwargs)
         image_tokens = jnp.reshape(image_tokens, (b, t, -1, image_tokens.shape[-1]))
 

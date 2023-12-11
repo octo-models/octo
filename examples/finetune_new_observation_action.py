@@ -12,12 +12,12 @@ import tensorflow as tf
 import tqdm
 import wandb
 
-from orca.config_utils import create_module_spec, ModuleSpec, update_module_spec
 from orca.data.dataset import make_single_dataset
 from orca.data.utils.data_utils import ActionEncoding, StateEncoding
 from orca.data.utils.text_processing import text_processors
 from orca.model.components.action_heads import L1ActionHead
 from orca.model.components.tokenizers import LowdimObsTokenizer
+from orca.spec import ModuleSpec
 from orca.utils.jax_utils import initialize_compilation_cache
 from orca.utils.pretrained_utils import ORCAModel
 from orca.utils.train_callbacks import SaveCallback
@@ -110,7 +110,7 @@ def main(_):
     config = ORCAModel.load_config(FLAGS.pretrained_path)
     del config["model"]["observation_tokenizers"]["wrist"]
     ###
-    config["model"]["observation_tokenizers"]["proprio"] = create_module_spec(
+    config["model"]["observation_tokenizers"]["proprio"] = ModuleSpec.create(
         LowdimObsTokenizer,
         n_bins=256,
         bin_type="normal",
@@ -119,7 +119,7 @@ def main(_):
         obs_keys=["proprio"],
     )
     # Fully override the old action head with a new one (for smaller changes, you can use update_module_config)
-    config["model"]["heads"]["action"] = create_module_spec(
+    config["model"]["heads"]["action"] = ModuleSpec.create(
         L1ActionHead,
         pred_horizon=50,
         action_dim=14,

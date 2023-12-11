@@ -22,10 +22,10 @@ import tqdm
 import wandb
 
 import orca
-from orca.config_utils import create_module_from_spec
 from orca.data.dataset import make_interleaved_dataset
 from orca.data.oxe.oxe_dataset_mixes import make_oxe_dataset_kwargs_and_weights, mixes
 from orca.model import create_model_def
+from orca.spec import ModuleSpec
 from orca.utils import jax_utils
 from orca.utils.train_callbacks import (
     RolloutVisualizationCallback,
@@ -138,10 +138,7 @@ def main(_):
     if FLAGS.config.text_processor is None:
         text_processor = None
     else:
-        text_processor = create_module_from_spec(
-            FLAGS.config.text_processor,
-            default_library="orca.data.utils.text_processing",
-        )
+        text_processor = ModuleSpec.instantiate(FLAGS.config.text_processor)()
 
     def process_batch(batch):
         batch = process_text(batch, text_processor)
