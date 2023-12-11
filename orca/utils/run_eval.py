@@ -16,7 +16,8 @@ import jax.numpy as jnp
 import numpy as np
 
 from orca.utils.eval_utils import load_jaxrlm_checkpoint, sample_actions, supply_rng
-from orca.utils.gym_wrappers import HistoryWrapper, RHCWrapper, TemporalEnsembleWrapper
+from orca.utils.gym_wrappers import HistoryWrapper, RHCWrapper
+from orca.utils.gym_wrappers import TemporalEnsembleWrapper  # noqa: F401
 from orca.utils.pretrained_utils import ORCAModel
 
 np.set_printoptions(suppress=True)

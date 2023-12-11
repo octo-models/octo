@@ -13,8 +13,7 @@ import tqdm
 import wandb
 
 from orca.data.dataset import make_single_dataset
-from orca.data.utils.data_utils import ActionEncoding, StateEncoding
-from orca.data.utils.text_processing import text_processors
+from orca.data.oxe.oxe_dataset_configs import ActionEncoding, StateEncoding
 from orca.model.components.action_heads import L1ActionHead
 from orca.model.components.tokenizers import LowdimObsTokenizer
 from orca.spec import ModuleSpec

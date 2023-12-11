@@ -23,7 +23,7 @@ import wandb
 
 import orca
 from orca.data.dataset import make_interleaved_dataset
-from orca.data.oxe.oxe_dataset_mixes import make_oxe_dataset_kwargs_and_weights, mixes
+from orca.data.oxe.oxe_dataset_mixes import make_oxe_dataset_kwargs_and_weights
 from orca.model import create_model_def
 from orca.spec import ModuleSpec
 from orca.utils import jax_utils
@@ -148,23 +148,13 @@ def main(_):
     # load datasets
     if "oxe_kwargs" in FLAGS.config.dataset_kwargs:
         # create dataset_kwargs_list from oxe_kwargs
-        oxe_kwargs = FLAGS.config.dataset_kwargs["oxe_kwargs"].to_dict()
-        del FLAGS.config.dataset_kwargs["oxe_kwargs"]
-        oxe_kwargs["data_mix"] = mixes[oxe_kwargs["data_mix"]]
         (
-            dataset_kwargs_list,
-            dataset_sampling_weights,
-        ) = make_oxe_dataset_kwargs_and_weights(**oxe_kwargs)
-        FLAGS.config.dataset_kwargs["dataset_kwargs_list"] = dataset_kwargs_list
-        FLAGS.config.dataset_kwargs["sample_weights"] = dataset_sampling_weights
-
-    # override each element of dataset_kwargs_list with common_dataset_kwargs
-    if "common_dataset_kwargs" in FLAGS.config.dataset_kwargs:
-        FLAGS.config.dataset_kwargs["dataset_kwargs_list"] = [
-            {**kwargs, **FLAGS.config.dataset_kwargs["common_dataset_kwargs"]}
-            for kwargs in FLAGS.config.dataset_kwargs["dataset_kwargs_list"]
-        ]
-        del FLAGS.config.dataset_kwargs["common_dataset_kwargs"]
+            FLAGS.config.dataset_kwargs["dataset_kwargs_list"],
+            FLAGS.config.dataset_kwargs["sample_weights"],
+        ) = make_oxe_dataset_kwargs_and_weights(
+            **FLAGS.config.dataset_kwargs["oxe_kwargs"]
+        )
+        del FLAGS.config.dataset_kwargs["oxe_kwargs"]
 
     train_data = make_interleaved_dataset(**FLAGS.config.dataset_kwargs, train=True)
 
@@ -203,7 +193,7 @@ def main(_):
     construct_rng = jax.random.PRNGKey(FLAGS.config.seed)
     model_init_args = (
         example_batch["observation"],
-        example_batch["tasks"],
+        example_batch["task"],
         example_batch["observation"]["pad_mask"],
     )
     print(
@@ -282,7 +272,7 @@ def main(_):
         model = model_def.bind({"params": params}, rngs={"dropout": rng})
         transformer_embeddings = model.orca_transformer(
             batch["observation"],
-            batch["tasks"],
+            batch["task"],
             batch["observation"]["pad_mask"],
             train=train,
         )

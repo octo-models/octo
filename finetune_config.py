@@ -1,8 +1,6 @@
-from config import update_config, wrap
+from config import wrap
 from ml_collections import ConfigDict
 from ml_collections.config_dict import FieldReference, placeholder
-
-from orca.data.utils.data_utils import ActionEncoding, StateEncoding
 
 
 @wrap
@@ -25,9 +23,10 @@ def get_config(
         "data_dir": "./tests/debug_dataset",
         "image_obs_keys": ["image_0", None],
         "state_obs_keys": ["state", None],
-        "state_encoding": StateEncoding.POS_EULER,
-        "action_encoding": ActionEncoding.EEF_POS,
         "action_proprio_normalization_type": "normal",
+        # standardize_fn is dynamically loaded from a file
+        # for example: "experiments/kevin/custom_standardization_transforms.py:aloha_dataset_transform"
+        "standardize_fn": "orca/data/oxe/oxe_standardization_transforms.py:bridge_dataset_transform",
         # If the default data loading speed is too slow, try these:
         # "num_parallel_reads": 8,  # for reading from disk / GCS
         # "num_parallel_calls": 16,  # for initial dataset construction

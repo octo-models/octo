@@ -1,15 +1,13 @@
-from enum import IntEnum
+from enum import Enum
 import hashlib
-import inspect
 import json
 import logging
 import os
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import dlimp as dl
 import numpy as np
 import tensorflow as tf
-from tensorflow_datasets.core.dataset_builder import DatasetBuilder
 import tqdm
 
 
@@ -20,74 +18,42 @@ def tree_map(fn: Callable, tree: dict) -> dict:
     }
 
 
-class StateEncoding(IntEnum):
-    """Defines supported proprio state encoding schemes for different datasets."""
-
-    NONE = -1  # no state provided
-    POS_EULER = 1  # EEF XYZ + roll-pitch-yaw + 1 x pad + gripper open/close
-    POS_QUAT = 2  # EEF XYZ + quaternion + gripper open/close
-    JOINT = 3  # 7 x joint angles (padding added if fewer) + gripper open/close
-    JOINT_BIMANUAL = 4  # 2 x [6 x joint angles + gripper open/close]
-
-
-class ActionEncoding(IntEnum):
-    """Defines supported action encoding schemes for different datasets."""
-
-    EEF_POS = 1  # EEF delta XYZ + roll-pitch-yaw + gripper open/close
-    JOINT_POS = 2  # 7 x joint delta position + gripper open/close
-    JOINT_POS_BIMANUAL = 3  # 2 x [6 x joint pos + gripper]
+def tree_merge(*trees: dict) -> dict:
+    """Merges a list of nested dictionaries, with later dictionaries overriding earlier ones."""
+    merged = {}
+    for tree in trees:
+        for k, v in tree.items():
+            if isinstance(v, dict):
+                merged[k] = tree_merge(merged.get(k, {}), v)
+            else:
+                merged[k] = v
+    return merged
 
 
-def state_encoding_length(state_encoding):
-    if state_encoding == StateEncoding.NONE:
-        return 0
-    # TODO: remove hack that POS_EULER pads 0 to match length
-    elif state_encoding in [
-        StateEncoding.POS_EULER,
-        StateEncoding.POS_QUAT,
-        StateEncoding.JOINT,
-    ]:
-        return 8
-    elif state_encoding in [StateEncoding.JOINT_BIMANUAL]:
-        return 14
+class NormalizationType(str, Enum):
+    """Defines supported normalization schemes for action and proprio."""
+
+    NORMAL = "normal"  # normalize to mean 0, std 1
+    BOUNDS = "bounds"  # normalize to [-1, 1]
+
+
+def to_padding(tensor: tf.Tensor) -> tf.Tensor:
+    if tf.debugging.is_numeric_tensor(tensor):
+        return tf.zeros_like(tensor)
+    elif tensor.dtype == tf.string:
+        return tf.fill(tf.shape(tensor), "")
     else:
-        raise ValueError(f"State encoding {state_encoding} not supported.")
+        raise ValueError(f"Cannot generate padding for tensor of type {tensor.dtype}.")
 
 
-def action_encoding_length(action_encoding):
-    if action_encoding in [ActionEncoding.EEF_POS]:
-        return 7
-    elif action_encoding in [ActionEncoding.JOINT_POS]:
-        return 8
-    elif action_encoding in [ActionEncoding.JOINT_POS_BIMANUAL]:
-        return 14
-    else:
-        raise ValueError(f"Action encoding {action_encoding} not supported.")
-
-
-def make_zero_actions(action, action_encoding):
+def make_neutral_actions(
+    action: tf.Tensor, absolute_action_mask: tf.Tensor
+) -> tf.Tensor:
+    """Returns "neutral" actions, meaning relative actions are zeroed and absolute actions are retained.
+    `absolute_action_mask` should be a 1D boolean mask that indicates which action dimensions are absolute.
     """
-    Returns neutral action for action encoding, matches shape of input action.
-    Zero-action 0s out all relative actions and retains value of absolute actions like gripper open/close.
-    """
-    assert action.shape[-1] == action_encoding_length(action_encoding), (
-        f"For action encoding {action_encoding} expected {action_encoding_length(action_encoding)}-dim action,"
-        f" but got {action.shape[-1]}-dim action."
-    )
-    if action_encoding == ActionEncoding.EEF_POS:
-        is_absolute_action = tf.range(action.shape[-1]) >= 6
-    elif action_encoding == ActionEncoding.JOINT_POS:
-        is_absolute_action = tf.range(action.shape[-1]) >= 7
-    elif action_encoding == ActionEncoding.JOINT_POS_BIMANUAL:
-        is_absolute_action = tf.math.logical_or(
-            tf.range(action.shape[-1]) == 6,
-            tf.range(action.shape[-1]) == 13,
-        )
-    else:
-        raise ValueError(f"Action encoding {action_encoding} not supported.")
-
     return tf.where(
-        is_absolute_action[None, None, :],
+        absolute_action_mask[(None,) * (action.ndim - 1)],
         action,
         tf.zeros_like(action),
     )
@@ -111,39 +77,33 @@ def pprint_data_mixture(
 
 
 def get_dataset_statistics(
-    builder: DatasetBuilder,
-    state_obs_keys: List[str],
-    restructure_fn: Callable,
-    transform_fn: Callable,
+    dataset: dl.DLataset,
+    hash_dependencies: Tuple[str, ...],
+    save_dir: Optional[str] = None,
 ) -> dict:
-    """Either computes the statistics of a dataset or loads them from a cache file if this function
-    has been called before with the same arguments. Currently, the statistics include the
-    min/max/mean/std of the actions and proprio as well as the number of transitions and
-    trajectories in the dataset.
+    """Either computes the statistics of a dataset or loads them from a cache file if this function has been
+    called before with the same `hash_dependencies`. Currently, the statistics include the min/max/mean/std of
+    the actions and proprio as well as the number of transitions and trajectories in the dataset.
     """
-    # compute a hash of the dataset info, state observation keys, and transform function
-    # to determine the name of the cache file
-    data_info_hash = hashlib.sha256(
-        (
-            str(builder.info)
-            + str(state_obs_keys)
-            + str(inspect.getsource(restructure_fn))
-            + str(inspect.getsource(transform_fn))
-        ).encode("utf-8")
+    unique_hash = hashlib.sha256(
+        "".join(hash_dependencies).encode("utf-8"),
+        usedforsecurity=False,
     ).hexdigest()
-    path = tf.io.gfile.join(
-        builder.info.data_dir, f"dataset_statistics_{data_info_hash}.json"
-    )
-    # fallback local path for when data_dir is not writable
+
+    # fallback local path for when data_dir is not writable or not provided
     local_path = os.path.expanduser(
         os.path.join(
             "~",
             ".cache",
             "orca",
-            builder.name,
-            f"dataset_statistics_{data_info_hash}.json",
+            f"dataset_statistics_{unique_hash}.json",
         )
     )
+
+    if save_dir is not None:
+        path = tf.io.gfile.join(save_dir, f"dataset_statistics_{unique_hash}.json")
+    else:
+        path = local_path
 
     # check if cache file exists and load
     if tf.io.gfile.exists(path):
@@ -158,25 +118,22 @@ def get_dataset_statistics(
             metadata = json.load(f)
         return metadata
 
-    if "val" not in builder.info.splits:
-        split = "train[:95%]"
-        expected_trajs = int(builder.info.splits["train"].num_examples * 0.95)
-    else:
-        split = "train"
-        expected_trajs = builder.info.splits["train"].num_examples
-    dataset = (
-        dl.DLataset.from_rlds(builder, split=split, shuffle=False)
-        .map(restructure_fn)
-        .map(
-            lambda traj: {
-                "action": traj["action"],
-                "proprio": traj["observation"]["proprio"],
-            }
-        )
+    dataset = dataset.traj_map(
+        lambda traj: {
+            "action": traj["action"],
+            "proprio": traj["observation"]["proprio"]
+            if "proprio" in traj["observation"]
+            else tf.zeros_like(traj["action"]),
+        }
     )
+
+    cardinality = dataset.cardinality().numpy()
+    if cardinality == tf.data.INFINITE_CARDINALITY:
+        raise ValueError("Cannot compute dataset statistics for infinite datasets.")
+
     logging.info(
-        f"Computing dataset statistics for {builder.name}. This may take awhile, "
-        "but should only need to happen once."
+        "Computing dataset statistics. This may take awhile, but should only need to happen "
+        "once for each dataset."
     )
     actions = []
     proprios = []
@@ -184,7 +141,7 @@ def get_dataset_statistics(
     num_trajectories = 0
     for traj in tqdm.tqdm(
         dataset.iterator(),
-        total=expected_trajs,
+        total=cardinality if cardinality != tf.data.UNKNOWN_CARDINALITY else None,
     ):
         actions.append(traj["action"])
         proprios.append(traj["proprio"])
@@ -224,13 +181,16 @@ def get_dataset_statistics(
     return metadata
 
 
-def normalize_action_and_proprio(traj, metadata, normalization_type):
+def normalize_action_and_proprio(
+    traj: dict, metadata: dict, normalization_type: NormalizationType
+):
+    """Normalizes the action and proprio fields of a trajectory using the given metadata."""
     # maps keys of `metadata` to corresponding keys in `traj`
     keys_to_normalize = {
         "action": "action",
         "proprio": "observation/proprio",
     }
-    if normalization_type == "normal":
+    if normalization_type == NormalizationType.NORMAL:
         # normalize to mean 0, std 1
         for key, traj_key in keys_to_normalize.items():
             traj = dl.transforms.selective_tree_map(
@@ -241,7 +201,7 @@ def normalize_action_and_proprio(traj, metadata, normalization_type):
             )
         return traj
 
-    if normalization_type == "bounds":
+    if normalization_type == NormalizationType.BOUNDS:
         # normalize to [-1, 1]
         for key, traj_key in keys_to_normalize.items():
             traj = dl.transforms.selective_tree_map(
@@ -264,15 +224,12 @@ def normalize_action_and_proprio(traj, metadata, normalization_type):
 def binarize_gripper_actions(actions: tf.Tensor) -> tf.Tensor:
     """Converts gripper actions from continous to binary values (0 and 1).
 
-    We exploit that fact that most of the time, the gripper is fully open (near
-    1.0) or fully closed (near 0.0). As it transitions between the two, it
-    sometimes passes through a few intermediate values. We relabel those
-    intermediate values based on the state that is reached _after_ those
-    intermediate values.
+    We exploit that fact that most of the time, the gripper is fully open (near 1.0) or fully closed (near
+    0.0). As it transitions between the two, it sometimes passes through a few intermediate values. We relabel
+    those intermediate values based on the state that is reached _after_ those intermediate values.
 
-    In the edge case that the trajectory ends with an intermediate value, we
-    give up on binarizing and relabel that chunk of intermediate values as
-    the last action in the trajectory.
+    In the edge case that the trajectory ends with an intermediate value, we give up on binarizing and relabel
+    that chunk of intermediate values as the last action in the trajectory.
 
     The scan implements the following code:
 
@@ -305,8 +262,8 @@ def binarize_gripper_actions(actions: tf.Tensor) -> tf.Tensor:
 
 
 def rel2abs_gripper_actions(actions: tf.Tensor):
-    """
-    Converts relative actions (-1 for closing, +1 for opening) to absolute gripper actions in range [0...1].
+    """Converts relative actions (-1 for closing, +1 for opening) to absolute gripper actions in range
+    [0...1].
     """
     abs_actions = tf.math.cumsum(actions, axis=0)
     abs_actions = tf.clip_by_value(abs_actions, 0, 1)
@@ -317,11 +274,13 @@ def invert_gripper_actions(actions: tf.Tensor):
     return 1 - actions
 
 
-def allocate_threads(n: int, weights: np.ndarray):
+def allocate_threads(n: Optional[int], weights: np.ndarray):
+    """Allocates an integer number of threads across datasets based on weights. The final array sums to `n`,
+    but each element is no less than 1. If `n` is None, then every dataset is assigned a value of AUTOTUNE.
     """
-    Allocates an integer n across an array based on weights. The final array sums to n, but each
-    element is no less than 1.
-    """
+    if n is None:
+        return np.array([tf.data.AUTOTUNE] * len(weights))
+
     assert np.all(weights >= 0), "Weights must be non-negative"
     assert (
         len(weights) <= n

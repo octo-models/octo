@@ -203,8 +203,8 @@ class TemporalEnsembleWrapper(gym.Wrapper):
         )
 
         # more recent predictions get exponentially *less* weight than older predictions
-        weights = np.exp(-self.exp_weight * np.arange(num_actions)) / num_actions
-
+        weights = np.exp(-self.exp_weight * np.arange(num_actions))
+        weights = weights / weights.sum()
         # compute the weighted average across all predictions for this timestep
         action = np.sum(weights[:, None] * curr_act_preds, axis=0)
 
