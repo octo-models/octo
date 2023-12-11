@@ -1,11 +1,30 @@
-# adapted from https://github.com/google-research/robotics_transformer/blob/master/transformer_network.py
-from typing import Dict, Optional
+"""Action prediction modules that take in the transformer token outputs and predict actions.
+
+Each action head here does chunked action prediction: i.e. at every timestep,
+it tries to predict the next `pred_horizon` actions into the future from that timestep.
+Setting `pred_horizon=1` corresponds to the typical action prediction setup.
+
+The base structure of an action head is as follows:
+
+class ActionHead(nn.Module):
+    def loss(self, transformer_outputs, actions, pad_mask, train=True):
+        # Compute the loss and metrics for training the action head.
+        return loss, metrics
+
+    def predict_action(self, transformer_outputs, argmax=False, sample_shape=(), rng=None, temperature=1.0):
+        # Predict the action for the most recent timestep.
+        return predicted_action # shape (*sample_shape, batch_size, pred_horizon, action_dim)
+
+"""
+from typing import Dict, Optional, Tuple
 
 import distrax
 from einops import rearrange
 import flax.linen as nn
 import jax
+from jax import Array
 import jax.numpy as jnp
+from jax.typing import ArrayLike
 
 from orca.model.components.base import TokenGroup
 from orca.model.components.tokenizers import BinTokenizer
@@ -18,249 +37,115 @@ def masked_mean(x, mask):
     return jnp.mean(x * mask) / jnp.clip(jnp.mean(mask), a_min=1e-5, a_max=None)
 
 
-class BasicActionHead(nn.Module):
+def chunk_actions(actions: ArrayLike, pred_horizon: int) -> Array:
+    """Chunk actions for predicting actions `pred_horizon` steps into the future.
+
+    The resulting actions have shape (batch, actions.shape[-2] - (pred_horizon - 1), pred_horizon, action_dim)
+
+    For example: chunk_actions([a_1, a_2, a_3, a_4, a_5], 3) ->
+        [
+            [a_1, a_2, a_3],
+            [a_2, a_3, a_4],
+            [a_3, a_4, a_5],
+        ]
+
     """
-    A basic action decoding head that predicts discretized actions using
-    an arbitrary group of token embeddings.
+    assert (
+        actions.ndim == 3
+    ), f"Expected actions to have shape (batch, window_size, action_dim), but got shape {actions.shape}"
+    window_size = actions.shape[1]
+    assert (
+        window_size >= pred_horizon
+    ), f"pred_horizon {pred_horizon} too large for window size {window_size}"
+    chunk_window_size = window_size - (pred_horizon - 1)
 
-    Pools all the token embeddings for a timestep together (either via mean pooling
-    or via multi-head attention pooling (specified by `use_map`). Then, predictins
-    logits for each action dimension and prediction horizon simultaneously
-    using a linear projection on a shared embedding.
+    curr_step = jnp.arange(chunk_window_size)
+    action_offset = jnp.arange(pred_horizon)
+    chunk_indices = curr_step[:, None] + action_offset[None, :]
+    return actions[:, chunk_indices]
 
-    Supports predicting for multiple timesteps at once.
+
+def continuous_loss(
+    pred_value: ArrayLike,
+    ground_truth_value: ArrayLike,
+    mask: ArrayLike,
+    loss_type: str = "mse",
+) -> Array:
+    """
+    Args:
+        pred_value: shape (batch_dims...)
+        ground_truth_value: continuous values w/ shape (batch_dims...)
+        mask: broadcastable to ground_truth
+    """
+    if loss_type == "mse":
+        loss = jnp.square(pred_value - ground_truth_value)
+    elif loss_type == "l1":
+        loss = jnp.abs(pred_value - ground_truth_value)
+    else:
+        raise ValueError(f"Invalid loss type: {loss_type}")
+
+    loss = masked_mean(loss, mask)
+
+    mse = jnp.square(pred_value - ground_truth_value)
+    mse = masked_mean(mse, mask)
+    return loss, {
+        "loss": loss,
+        "mse": mse,
+    }
+
+
+def discrete_loss(
+    discrete_tokenizer: BinTokenizer,
+    logits: ArrayLike,
+    ground_truth_value: ArrayLike,
+    mask: ArrayLike,
+) -> Array:
+    """
+    Args:
+        discrete_tokenizer: BinTokenizer to use on ground_truth_value
+        logits: shape (batch_dims..., vocab_size)
+        ground_truth_value: continuous values in w/ shape (batch_dims...)
+        mask: broadcastable to ground_truth_value
+    """
+    labels = discrete_tokenizer(ground_truth_value)
+    labels_one_hot = jax.nn.one_hot(labels, logits.shape[-1])
+
+    loss = -jnp.sum(logits * labels_one_hot, axis=-1)
+    loss = masked_mean(loss, mask)
+
+    # compute accuracy between predicted actions and target actions
+    pred_label = jnp.argmax(logits, axis=-1)
+    accuracy = pred_label == labels
+    accuracy = masked_mean(accuracy, mask)
+
+    # detokenize the predicted actions
+    pred_value = discrete_tokenizer.decode(pred_label)
+    mse = jnp.square(pred_value - ground_truth_value)
+    mse = masked_mean(mse, mask)
+    return loss, {
+        "loss": loss,
+        "mse": mse,
+        "accuracy": accuracy,
+    }
+
+
+class ContinuousActionHead(nn.Module):
+    """Predicts continuous actions (as opposed to discretized).
+
+    Continuous actions are predicted by tanh squashing the model output to [-max_action, max_action], and then
+    optimized using a standard regression loss.
+
+    You may create an embedding by either mean-pooling across tokens (use_map=False) or using multi-head
+    attention pooling (use_map=True). It is recommended to use MAP when decoding from the observation token
+    stream.
     """
 
+    readout_key: str
+    use_map: bool = False
     pred_horizon: int = 1
     action_dim: int = 7
-    vocab_size: int = 256
-    normalization_type: str = "bounds"
-    readout_key: Optional[str] = None
-    use_map: bool = False
-
-    def setup(self):
-        if self.use_map:
-            self.map_head = MAPHead()
-
-        self.vocab_proj = nn.Dense(
-            self.vocab_size * self.pred_horizon * self.action_dim,
-            kernel_init=jax.nn.initializers.zeros,
-            bias_init=jax.nn.initializers.constant(-1 * jnp.log(self.vocab_size)),
-        )
-        self.action_tokenizer = BinTokenizer(
-            n_bins=self.vocab_size,
-            bin_type="uniform"
-            if self.normalization_type == "bounds"
-            else self.normalization_type,
-        )
-
-    def __call__(
-        self, transformer_outputs: Dict[str, TokenGroup], train=True
-    ) -> jax.Array:
-        """
-        Args:
-            transformer_outputs: Dict[str, TokenGroup] the output of an OrcaTransformer
-        """
-        assert self.readout_key is not None
-        token_group = transformer_outputs[self.readout_key]
-        assert token_group.tokens.ndim == 4, (
-            f"Expected token_group.tokens to have shape (batch_size, horizon, num_tokens, embedding_size), "
-            f"but got shape {token_group.tokens.shape}"
-        )
-        if self.use_map:
-            embeddings = self.map_head(token_group, train=train)[:, :, 0]
-        else:
-            embeddings = token_group.tokens.mean(axis=-2)
-        # Now, embeddings is (batch_size, horizon, embedding_size)
-
-        # (batch_size, horizon,  pred_horizon * action_dim * vocab_size)
-        logits = self.vocab_proj(embeddings)
-        logits = rearrange(
-            logits,
-            "b h (p a d) -> b h p a d",
-            p=self.pred_horizon,
-            a=self.action_dim,
-            d=self.vocab_size,
-        )
-        return logits
-
-    def loss(
-        self, transformer_outputs: Dict[str, TokenGroup], actions, pad_mask, train=True
-    ):
-        """
-        Args:
-            embeddings: jnp.ndarray w/ shape (batch_size, horizon, num_tokens, embedding_size)
-            actions: jnp.ndarray w/ shape (batch_size, >= horizon + pred_horizon - 1, action_dim)
-            pad_mask: boolean array (batch, window_size) which is True if the timestep is not a padding timestep.
-
-        Returns:
-            loss: float
-            metrics: dict
-        """
-
-        # get the logits for all the actions by taking the action tokens of each timestep,
-        # unfolding the pred_horizon dim, and projecting to the vocab size
-
-        # (batch, horizon, pred_horizon, action_dim, token_embedding_size)
-        action_logits = self.__call__(transformer_outputs, train=train)
-
-        horizon = action_logits.shape[1]
-        assert (
-            actions.shape[1] >= horizon + self.pred_horizon - 1
-        ), f"""
-            To predict actions for horizon {horizon} and future prediction horizon {self.pred_horizon},
-            the ground-truth actions must have at least {horizon + self.pred_horizon - 1} timesteps, but got shape {actions.shape}.
-
-            Did you make sure to set "future_action_window_size" correctly in the data config?
-        """
-
-        # compute log probabilities for predicted actions
-        action_logprob = jax.nn.log_softmax(action_logits, axis=-1)
-
-        # chunk the target actions to match the predicted actions
-        actions_chunked = self._chunk_actions(actions)
-
-        # only use first horizon timesteps from the window
-        horizon = action_logprob.shape[1]
-        actions_chunked = actions_chunked[:, :horizon]
-
-        # tokenize the target actions and convert them to one hot vectors
-        action_labels = self.action_tokenizer(actions_chunked)
-        action_labels_one_hot = jax.nn.one_hot(action_labels, self.vocab_size)
-
-        # compute the CE loss using the log probabilities and target actions
-        action_loss = -jnp.sum(action_logprob * action_labels_one_hot, axis=-1)
-        # mask the loss with the pad mask to avoid supervising padding
-        action_loss = (action_loss * pad_mask[:, :, None, None]).mean()
-
-        # take the highest probability actions as the predicted actions
-        action_pred = jnp.argmax(action_logits, axis=-1)
-
-        # compute accuracy between predicted actions and target actions
-        accuracy = action_pred == action_labels
-        # mask the accuracy with the pad mask to remove the contribution of padding
-        accuracy = (accuracy * pad_mask[:, :, None, None]).mean()
-
-        # detokenize the predicted actions
-        action_values = self.action_tokenizer.decode(action_pred)
-        # compute the mean squared error between predicted actions and target actions
-        action_mse = jnp.square(actions_chunked - action_values).sum(axis=-1)
-        # mask the mse with the pad mask to remove the contribution of padding
-        action_mse = (action_mse * pad_mask[:, :, None]).mean()
-
-        return action_loss, {
-            "loss": action_loss,
-            "mse": action_mse,
-            "accuracy": accuracy,
-        }
-
-    def predict_action(
-        self,
-        transformer_outputs: Dict[str, TokenGroup],
-        train: bool = True,
-        argmax: bool = False,
-        sample_shape: tuple = (),
-        rng: Optional[PRNGKey] = None,
-        temperature: float = 1.0,
-    ) -> jax.Array:
-        # get the logits for the last action by taking the action tokens of the last timestep,
-        # unfolding the pred_horizon dim, and projecting to the vocab size
-        # (batch, tokens_per_action, token_embedding_size)
-
-        action_logits = self.__call__(transformer_outputs, train=train)
-        action_logits = action_logits[:, -1]
-
-        if argmax:
-            action_tokens = jnp.argmax(action_logits, axis=-1).astype(jnp.int32)
-        else:
-            dist = distrax.Categorical(logits=action_logits / temperature)
-            action_tokens = dist.sample(seed=rng, sample_shape=sample_shape).astype(
-                jnp.int32
-            )
-        return self.action_tokenizer.decode(action_tokens)
-
-    def _chunk_actions(self, actions):
-        """
-        Chunk actions into `pred_horizon` size chunks.
-        The resulting actions have shape (batch, window_size, pred_horizon, action_dim)
-        """
-        window_size = actions.shape[1]
-        chunk_indices = jnp.broadcast_to(
-            jnp.arange(self.pred_horizon), [window_size, self.pred_horizon]
-        ) + jnp.broadcast_to(
-            jnp.arange(window_size)[:, None],
-            [window_size, self.pred_horizon],
-        )
-        chunk_indices = jnp.minimum(chunk_indices, window_size - 1)
-        return actions[:, chunk_indices]
-
-
-class TokenPerDimActionHead(BasicActionHead):
-    """
-    Assumes that there is a separate embedding for each dimension of the action
-    and each future prediction horizon.
-
-    E.g. that the input embedding has shape (batch_size, horizon, pred_horizon * action_dim, embedding_size)
-
-    Supports predicting for multiple timesteps at once
-    """
-
-    def setup(self):
-        if self.use_map:
-            self.map_head = MAPHead(num_readouts=self.pred_horizon * self.action_dim)
-
-        self.vocab_proj = nn.Dense(
-            self.vocab_size,
-            kernel_init=jax.nn.initializers.zeros,
-            bias_init=jax.nn.initializers.constant(-1 * jnp.log(self.vocab_size)),
-        )
-        self.action_tokenizer = BinTokenizer(
-            n_bins=self.vocab_size,
-            bin_type="uniform"
-            if self.normalization_type == "bounds"
-            else self.normalization_type,
-        )
-
-    def __call__(
-        self, transformer_outputs: Dict[str, TokenGroup], train=True
-    ) -> jax.Array:
-        """
-        Args:
-            embeddings: jnp.ndarray w/ shape (batch_size, horizon, n_tokens, embedding_size)
-        """
-        assert self.readout_key is not None
-        token_group = transformer_outputs[self.readout_key]
-        assert token_group.tokens.ndim == 4, (
-            f"Expected token_group.tokens to have shape (batch_size, horizon, num_tokens, embedding_size), "
-            f"but got shape {token_group.tokens.shape}"
-        )
-        if self.use_map:
-            embeddings = self.map_head(token_group, train=train)
-        else:
-            embeddings = token_group.tokens
-            assert embeddings.shape[-2] == self.pred_horizon * self.action_dim
-
-        # Now, embeddings is (batch_size, horizon, pred_horizon * action_dim, embedding_size)
-        logits = self.vocab_proj(embeddings)
-        logits = rearrange(
-            logits, "b h (p a) d -> b h p a d", p=self.pred_horizon, a=self.action_dim
-        )
-        return logits
-
-
-class MSEActionHead(BasicActionHead):
-    """Predicts continuous actions instead of discretized actions.
-
-    Continuous actions are predicted, tanh squashed to [-max_action, max_action],
-    and then regressed using MSE error.
-
-    As in BasicActionHead, you may create an embedding by either mean-pooling across
-    tokens or using multi-head attention pooling (use_map). It is recommended
-    when decoding from the observation token stream to use MAP.
-    """
-
-    max_action: float = 5.0  # Handles OOD actions during training / eval
-    use_map: bool = True
+    max_action: float = 5.0
+    loss_type: str = "mse"
 
     def setup(self):
         if self.use_map:
@@ -268,23 +153,23 @@ class MSEActionHead(BasicActionHead):
         self.mean_proj = nn.Dense(self.pred_horizon * self.action_dim)
 
     def __call__(
-        self, transformer_outputs: Dict[str, TokenGroup], train=True
+        self, transformer_outputs: Dict[str, TokenGroup], train: bool = True
     ) -> jax.Array:
         """
-        Args:
-            embeddings: jnp.ndarray w/ shape (batch_size, horizon, n_tokens, embedding_size)
+        Returns:
+            mean: Predicted actions w/ shape (batch_size, window_size, pred_horizon, action_dim)
         """
-        assert self.readout_key is not None
         token_group = transformer_outputs[self.readout_key]
         assert token_group.tokens.ndim == 4, (
-            f"Expected token_group.tokens to have shape (batch_size, horizon, num_tokens, embedding_size), "
+            f"Expected token_group.tokens to have shape (batch_size, window_size, num_tokens, embedding_size), "
             f"but got shape {token_group.tokens.shape}"
         )
-        if self.use_map:
+        if self.use_map:  # Multi-head attention pooling
             embeddings = self.map_head(token_group, train=train)[:, :, 0]
-        else:
+        else:  # mean pooling
             embeddings = token_group.tokens.mean(axis=-2)
-        # Now, embeddings is (batch_size, horizon, embedding_size)
+        # Now, embeddings is (batch_size, window_size, embedding_size)
+
         mean = self.mean_proj(embeddings)
         mean = rearrange(
             mean, "b h (p a) -> b h p a", p=self.pred_horizon, a=self.action_dim
@@ -292,56 +177,176 @@ class MSEActionHead(BasicActionHead):
         mean = jnp.tanh(mean / self.max_action) * self.max_action
         return mean
 
-    def _objective(self, actions, pred_actions, pad_mask):
-        action_mse = jnp.square(actions - pred_actions).sum(axis=-1)
-        return masked_mean(action_mse, pad_mask[:, :, None])
-
     def loss(
-        self, transformer_outputs: Dict[str, TokenGroup], actions, pad_mask, train=True
-    ):
-        """
-        Trains the mean head with MSE and the logstd head with KL divergence.
+        self,
+        transformer_outputs: Dict[str, TokenGroup],
+        actions: ArrayLike,
+        pad_mask: ArrayLike,
+        train: bool = True,
+    ) -> Tuple[Array, Dict[str, Array]]:
+        """Computes the loss for the action regression objective.
 
         Args:
-            embeddings: jnp.ndarray w/ shape (batch_size, horizon, num_tokens, embedding_size)
-            actions: jnp.ndarray w/ shape (batch_size, >= horizon + pred_horizon - 1, action_dim)
-            pad_mask: boolean array (batch, window_size) which is True if the timestep is not a padding timestep.
+            transformer_ouputs: must contain self.readout_key with shape (batch_size, window_size, num_tokens,
+                embedding_size)
+            actions: shape (batch_size, >= window_size + pred_horizon - 1, action_dim)
+            pad_mask: boolean array (batch, window_size) which is True if the timestep is not a padding timestep
 
         Returns:
             loss: float
             metrics: dict
         """
-        # (batch, horizon, pred_horizon, action_dim)
-        mean = self.__call__(transformer_outputs, train=train)
+        # (batch, window_size, pred_horizon, action_dim)
+        mean = self(transformer_outputs, train=train)
 
-        horizon = mean.shape[1]
-        assert (
-            actions.shape[1] >= horizon + self.pred_horizon - 1
-        ), f"""
-            To predict actions for horizon {horizon} and future prediction horizon {self.pred_horizon},
-            the ground-truth actions must have at least {horizon + self.pred_horizon - 1} timesteps, but got shape {actions.shape}.
+        window_size = mean.shape[1]
+        _check_action_window_size(actions, window_size, self.pred_horizon)
+        actions_chunked = chunk_actions(actions, self.pred_horizon)
+        actions_chunked = actions_chunked[:, :window_size]
 
-            Did you make sure to set "future_action_window_size" correctly in the data config?
+        loss, metrics = continuous_loss(
+            mean, actions_chunked, pad_mask[:, :, None, None], loss_type="mse"
+        )
+        # Sum over action dimension instead of averaging
+        loss = loss * self.action_dim
+        metrics["loss"] = metrics["loss"] * self.action_dim
+        metrics["mse"] = metrics["mse"] * self.action_dim
+        return loss, metrics
+
+    def predict_action(
+        self,
+        transformer_outputs: Dict[str, TokenGroup],
+        train: bool = True,
+        *args,
+        sample_shape: tuple = (),
+        **kwargs,
+    ) -> jax.Array:
+        """Convenience methods for predicting actions for the final timestep in the window."""
+        # only get the last timestep in the window
+        # (batch, pred_horizon, action_dim)
+        mean = self(transformer_outputs, train=train)[:, -1]
+        return jnp.broadcast_to(mean, sample_shape + mean.shape)
+
+
+class DiscreteActionHead(nn.Module):
+    """
+    A basic action decoding head that predicts discretized actions using the transformer token embeddings.
+
+
+    self.token_per determines how many tokens are used to represent each action.
+        - If "" (an empty string): then a single token is responsible for producing the action logits
+            for all dimensions at all future prediction horizons.
+        - If "pred_horizon", then we use `self.pred_horizon` tokens, each responsible for producing the action logits
+            for all dimensions at the corresponding future prediction horizon.
+        - If "action_dim_and_pred_horizon", then we use `self.pred_horizon * self.action_dim` tokens, where
+            each token is responsible for the logits for the specific dim and timestep.
+
+    If multi-head attention pooling is used (use_map=True), then the correct number of tokens is automatically
+    created, otherwise readout_key must have exactly the right number of tokens.
+    """
+
+    readout_key: str
+    use_map: bool = False
+    token_per: str = "action_dim_and_pred_horizon"
+    pred_horizon: int = 1
+    action_dim: int = 7
+    vocab_size: int = 256
+    normalization_type: str = "uniform"
+
+    def setup(self):
+        total_output = self.pred_horizon * self.action_dim * self.vocab_size
+
+        if self.token_per == "":
+            self.n_tokens = 1
+            self.final_layer_size = total_output
+        elif self.token_per == "pred_horizon":
+            self.n_tokens = self.pred_horizon
+            self.final_layer_size = total_output // self.pred_horizon
+        elif self.token_per == "action_dim_and_pred_horizon":
+            self.n_tokens = self.pred_horizon * self.action_dim
+            self.final_layer_size = self.vocab_size
+        else:
+            raise ValueError(f"Invalid token_per: {self.token_per}")
+
+        if self.use_map:
+            self.map_head = MAPHead(num_readouts=self.n_tokens)
+
+        self.vocab_proj = nn.Dense(self.final_layer_size)
+        self.action_tokenizer = BinTokenizer(
+            n_bins=self.vocab_size,
+            bin_type=self.normalization_type,
+        )
+
+    def __call__(
+        self, transformer_outputs: Dict[str, TokenGroup], train: bool = True
+    ) -> jax.Array:
         """
-        # chunk the target actions to match the predicted actions
-        # only use first horizon timesteps from the window
-        actions = jnp.clip(actions, -self.max_action, self.max_action)
-        actions_chunked = self._chunk_actions(actions)
-        horizon = mean.shape[1]
-        actions_chunked = actions_chunked[:, :horizon]
+        Returns:
+            logits: array w/ shape (batch_size, window_size, pred_horizon, action_dim, vocab_size)
+        """
+        token_group = transformer_outputs[self.readout_key]
+        assert token_group.tokens.ndim == 4, (
+            f"Expected token_group.tokens to have shape (batch_size, window_size, num_tokens, embedding_size), "
+            f"but got shape {token_group.tokens.shape}"
+        )
+        if self.use_map:
+            embeddings = self.map_head(token_group, train=train)
+        else:
+            embeddings = token_group.tokens
+            assert (
+                embeddings.shape[-2] == self.n_tokens
+            ), f"Discrete action head expects {self.n_tokens} tokens"
 
-        action_loss = self._objective(actions_chunked, mean, pad_mask)
+        # Now, embeddings is (batch_size, window_size, n_tokens, embedding_size)
+        batch_size, window_size = embeddings.shape[:2]
 
-        # log mse and mse histogram
-        action_mse = jnp.square(actions_chunked - mean).sum(axis=-1)
-        action_mse_hist = (action_mse * pad_mask[:, :, None]).reshape(-1)
-        action_mse = masked_mean(action_mse, pad_mask[:, :, None])
+        logits = self.vocab_proj(embeddings)
+        logits = logits.reshape(
+            batch_size, window_size, self.pred_horizon, self.action_dim, self.vocab_size
+        )
+        return logits
 
-        return action_loss, {
-            "loss": action_loss,
-            "mse": action_mse,
-            "mse_hist": action_mse_hist,
-        }
+    def loss(
+        self,
+        transformer_outputs: Dict[str, TokenGroup],
+        actions: ArrayLike,
+        pad_mask: ArrayLike,
+        train: bool = True,
+    ):
+        """Computes the loss for the discretized action objective.
+
+        Args:
+            transformer_ouputs: must contain self.readout_key with shape (batch_size, window_size, num_tokens,
+                embedding_size)
+            actions: shape (batch_size, >= window_size + pred_horizon - 1, action_dim)
+            pad_mask: boolean array (batch, window_size) which is True if the timestep is not a padding timestep
+
+        Returns:
+            loss: float
+            metrics: dict
+        """
+        # get the logits for all the actions by taking the action tokens of each timestep,
+        # unfolding the pred_horizon dim, and projecting to the vocab size
+        # (batch, window_size, pred_horizon, action_dim, token_embedding_size)
+        action_logits = self(transformer_outputs, train=train)
+
+        window_size = action_logits.shape[1]
+        _check_action_window_size(actions, window_size, self.pred_horizon)
+
+        actions_chunked = chunk_actions(actions, self.pred_horizon)
+        actions_chunked = actions_chunked[:, :window_size]
+
+        loss, metrics = discrete_loss(
+            self.action_tokenizer,
+            action_logits,
+            actions_chunked,
+            pad_mask[:, :, None, None],
+        )
+
+        # For MSE, sum over action dimension instead of averaging
+        metrics["mse"] = metrics["mse"] * self.action_dim
+
+        return loss, metrics
 
     def predict_action(
         self,
@@ -352,30 +357,45 @@ class MSEActionHead(BasicActionHead):
         rng: Optional[PRNGKey] = None,
         temperature: float = 1.0,
     ) -> jax.Array:
-        # get the logits for the last action by taking the action tokens of the last timestep,
-        # unfolding the pred_horizon dim, and projecting to the vocab size
-        # (batch, tokens_per_action, token_embedding_size)
-        mean = self.__call__(transformer_outputs, train=train)
-        mean = mean[:, -1]
-        logstd = jnp.full_like(mean, -10.0)
+        """Convenience methods for predicting actions for the final timestep in the window."""
+        # only get the last timestep in the window
+        action_logits = self(transformer_outputs, train=train)[:, -1]
 
         if argmax:
-            action = mean
+            action_tokens = jnp.argmax(action_logits, axis=-1).astype(jnp.int32)
+            action_tokens = jnp.broadcast_to(
+                action_tokens, sample_shape + action_tokens.shape
+            )
         else:
-            dist = distrax.MultivariateNormalDiag(mean, jnp.exp(logstd) * temperature)
-            action = dist.sample(seed=rng, sample_shape=sample_shape)
-        return action
+            dist = distrax.Categorical(logits=action_logits / temperature)
+            action_tokens = dist.sample(seed=rng, sample_shape=sample_shape).astype(
+                jnp.int32
+            )
+        return self.action_tokenizer.decode(action_tokens)
 
 
-class L1ActionHead(MSEActionHead):
-    def _objective(self, actions, pred_actions, pad_mask):
-        action_l1 = jnp.abs(actions - pred_actions).sum(axis=-1)
-        return masked_mean(action_l1, pad_mask[:, :, None])
+def _check_action_window_size(actions, window_size, pred_horizon):
+    assert (
+        actions.shape[1] >= window_size + pred_horizon - 1
+    ), f"""
+        To predict actions for window_size {window_size} and future prediction horizon {pred_horizon},
+        the ground-truth actions must have at least {window_size + pred_horizon - 1} timesteps, but got shape {actions.shape}.
+
+        Did you make sure to set "future_action_window_size" correctly in the data config?
+    """
 
 
-ACTION_HEADS = {
-    "basic_action_head": BasicActionHead,
-    "token_per_dim_action_head": TokenPerDimActionHead,
-    "mse_action_head": MSEActionHead,
-    "l1_action_head": L1ActionHead,
-}
+class MSEActionHead(ContinuousActionHead):
+    max_action: float = 5.0
+    loss_type: str = "mse"
+    use_map: bool = True
+
+
+class L1ActionHead(ContinuousActionHead):
+    max_action: float = 5.0
+    loss_type: str = "l1"
+    use_map: bool = True
+
+
+class TokenPerDimActionHead(DiscreteActionHead):
+    token_per: str = "action_dim_and_pred_horizon"
