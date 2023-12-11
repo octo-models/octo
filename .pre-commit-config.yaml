@@ -7,6 +7,7 @@ repos:
       - id: check-yaml
       - id: check-ast
       - id: check-added-large-files
+        exclude: ^examples/
       - id: check-case-conflict
       - id: check-merge-conflict
       - id: end-of-file-fixer
