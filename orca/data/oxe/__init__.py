@@ -39,6 +39,10 @@ def make_oxe_dataset_kwargs(
     dataset_kwargs["absolute_action_mask"] = [False] * 6 + [True]
 
     # adjust loaded camera views
+    if missing_keys := (set(load_camera_views) - set(dataset_kwargs["image_obs_keys"])):
+        raise ValueError(
+            f"Cannot load {name} with views {missing_keys} since they are not available."
+        )
     dataset_kwargs["image_obs_keys"] = {
         k: v
         for k, v in dataset_kwargs["image_obs_keys"].items()
