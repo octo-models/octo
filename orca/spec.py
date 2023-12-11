@@ -1,18 +1,26 @@
-"""Utilities for making ORCAModel configs."""
-from copy import deepcopy
-from functools import partial, wraps
+from functools import partial
 import importlib
-import logging
 from typing import Any, Dict, Tuple, TypedDict, Union
-
-from ml_collections import ConfigDict
 
 
 class ModuleSpec(TypedDict):
-    """A dict specifying the name of a callable and the kwargs to pass to it.
+    """A JSON-serializable representation of a function or class with some default kwargs to pass to it.
+    Needed to cleanly serialize configs, and to override options on the command line with ml_collections.
+
+    Usage:
+
+        > spec = ModuleSpec.create("orca.model.components.transformer:Transformer", num_layers=3)
+        > from orca.model.components.transformer import Transformer
+        > spec = ModuleSpec.create(Transformer, num_layers=3) # Same as above.
+
+        > ModuleSpec.instantiate(spec) == partial(Transformer, num_layers=3)
+
+    Note: ModuleSpec is just an alias for a dictionary (for type-checking), not a real class. So from your
+    code's perspective, it is just a dictionary.
 
     module (str): The module the callable is located in
     name (str): The name of the callable in the module
+    args (tuple): The args to pass to the callable
     kwargs (dict): The kwargs to pass to the callable
     """
 
@@ -47,7 +55,11 @@ def _infer_cls_name(o: object):
     if hasattr(o, "__module__") and hasattr(o, "__name__"):
         return o.__module__, o.__name__
     else:
-        raise ValueError(f"Could not infer identifier for {o}")
+        raise ValueError(
+            f"Could not infer identifier for {o}."
+            "Please pass in a fully qualified import string instead "
+            "e.g. 'orca.model.components.transformer:Transformer'"
+        )
 
 
 def _import_from_string(module_string: str, name: str):

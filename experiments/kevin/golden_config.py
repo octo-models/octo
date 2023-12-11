@@ -1,9 +1,21 @@
 import copy
+from copy import deepcopy
 
 from config import get_config as get_base_config
-from config import update_config, wrap
+from ml_collections import ConfigDict
 
-from orca.config_utils import create_module_spec, update_config
+from orca.data.utils.text_processing import HFTokenizer
+from orca.model.components.hf_weight_loaders import hf_weights_loader
+from orca.model.components.tokenizers import ImageTokenizer, LanguageTokenizer
+from orca.model.components.vit_encoders import SmallStem16
+from orca.spec import ModuleSpec
+
+
+def update_config(config, **kwargs):
+    updates = ConfigDict(kwargs)
+    new_config = deepcopy(config)
+    new_config.update(updates)
+    return new_config
 
 
 def get_config(config_string=None):
@@ -19,18 +31,18 @@ def get_config(config_string=None):
     # Changes to the model:
     #
 
-    encoder = create_module_spec("SmallStem16")
+    encoder = ModuleSpec.create(SmallStem16)
 
     base_config["model"]["observation_tokenizers"] = {
-        "workspace": create_module_spec(
-            "ImageTokenizer",
+        "workspace": ModuleSpec.create(
+            ImageTokenizer,
             obs_stack_keys=["image_0"],
             task_stack_keys=["image_0"],
             task_film_keys=[],
             encoder=encoder,
         ),
-        "wrist": create_module_spec(
-            "ImageTokenizer",
+        "wrist": ModuleSpec.create(
+            ImageTokenizer,
             obs_stack_keys=["image_1"],
             task_stack_keys=["image_1"],
             task_film_keys=[],
@@ -38,8 +50,8 @@ def get_config(config_string=None):
         ),
     }
     base_config["model"]["task_tokenizers"] = {
-        "language": create_module_spec(
-            "LanguageTokenizer",
+        "language": ModuleSpec.create(
+            LanguageTokenizer,
             encoder="t5-base",
             finetune_encoder=False,
         ),
@@ -104,8 +116,8 @@ def get_config(config_string=None):
             shuffle_buffer_size=500000,
             balance_weights=True,
         ),
-        text_processor=create_module_spec(
-            "HFTokenizer",
+        text_processor=ModuleSpec.create(
+            HFTokenizer,
             tokenizer_name="t5-base",
             encode_with_model=False,
             tokenizer_kwargs={
@@ -116,10 +128,10 @@ def get_config(config_string=None):
             },
         ),
         pretrained_loaders=(
-            create_module_spec(
-                "hf_weights_loader",
+            ModuleSpec.create(
+                hf_weights_loader,
                 hf_model="t5-base",
-            )
+            ),
         ),
         eval_datasets=("bridge_dataset",),
     )

@@ -51,7 +51,7 @@ def create_train_state(
     ), "Are you forgetting to store some variables in the state? {}".format(ev.keys())
 
     for loader in pretrained_loaders:
-        if isinstance(loader, ModuleSpec):
+        if not callable(loader):  # Means that it is a ModuleSpec
             loader = ModuleSpec.instantiate(loader)
         params = loader(params)
 
