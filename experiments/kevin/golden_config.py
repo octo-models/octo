@@ -36,15 +36,15 @@ def get_config(config_string=None):
     base_config["model"]["observation_tokenizers"] = {
         "workspace": ModuleSpec.create(
             ImageTokenizer,
-            obs_stack_keys=["image_0"],
-            task_stack_keys=["image_0"],
+            obs_stack_keys=["image_primary"],
+            task_stack_keys=["image_primary"],
             task_film_keys=[],
             encoder=encoder,
         ),
         "wrist": ModuleSpec.create(
             ImageTokenizer,
-            obs_stack_keys=["image_1"],
-            task_stack_keys=["image_1"],
+            obs_stack_keys=["image_wrist"],
+            task_stack_keys=["image_wrist"],
             task_film_keys=[],
             encoder=encoder,
         ),
