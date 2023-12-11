@@ -1,5 +1,6 @@
 import datetime
 from functools import partial
+import imp
 import json
 import os
 
@@ -154,12 +155,21 @@ def main(_):
         del batch["dataset_name"]
         return batch
 
+    # load standardize_fn from `path/to/file.py:fn_name` format
+    if (
+        standardize_fn := FLAGS.config["dataset_kwargs"].get("standardize_fn", None)
+    ) is not None:
+        path, name = standardize_fn.split(":")
+        # imp is deprecated, but it's also what ml_collections uses
+        standardize_fn = getattr(imp.load_source("standardize_fn", path), name)
+        del FLAGS.config["dataset_kwargs"]["standardize_fn"]
+        FLAGS.config["dataset_kwargs"]["standardize_fn"] = standardize_fn
+
     dataset = make_single_dataset(
         FLAGS.config.dataset_kwargs,
         FLAGS.config.traj_transform_kwargs,
         FLAGS.config.frame_transform_kwargs,
         train=True,
-        frame_transform_threads=FLAGS.config.frame_transform_threads,
     )
     train_data_iter = (
         dataset.repeat()
@@ -267,7 +277,7 @@ def main(_):
         model = model_def.bind({"params": params}, rngs={"dropout": rng})
         transformer_embeddings = model.orca_transformer(
             batch["observation"],
-            batch["tasks"],
+            batch["task"],
             batch["observation"]["pad_mask"],
             train=train,
         )
