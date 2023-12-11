@@ -36,6 +36,7 @@ def get_config():
                     "data_dir": "./tests/debug_dataset",
                     "image_obs_keys": {"primary": "image_0"},
                     "state_obs_keys": ["state"],
+                    "language_key": "language_instruction",
                 },
             ],
             "frame_transform_kwargs": {

@@ -159,14 +159,6 @@ def main(_):
         )
         del FLAGS.config.dataset_kwargs["oxe_kwargs"]
 
-    # override each element of dataset_kwargs_list with common_dataset_kwargs
-    if "common_dataset_kwargs" in FLAGS.config.dataset_kwargs:
-        FLAGS.config.dataset_kwargs["dataset_kwargs_list"] = [
-            {**kwargs, **FLAGS.config.dataset_kwargs["common_dataset_kwargs"]}
-            for kwargs in FLAGS.config.dataset_kwargs["dataset_kwargs_list"]
-        ]
-        del FLAGS.config.dataset_kwargs["common_dataset_kwargs"]
-
     train_data = make_interleaved_dataset(**FLAGS.config.dataset_kwargs, train=True)
 
     # save dataset statistics
