@@ -14,6 +14,7 @@ import tensorflow as tf
 import tqdm
 import wandb
 
+from orca.config_utils import create_module_from_spec
 from orca.data.dataset import make_single_dataset
 from orca.data.utils.text_processing import text_processors
 from orca.utils.jax_utils import initialize_compilation_cache
@@ -145,8 +146,9 @@ def main(_):
     if config["text_processor"] is None:
         text_processor = None
     else:
-        text_processor = text_processors[config["text_processor"]](
-            **config["text_processor_kwargs"]
+        text_processor = create_module_from_spec(
+            config["text_processor"],
+            default_library="orca.data.utils.text_processing",
         )
 
     def process_batch(batch):

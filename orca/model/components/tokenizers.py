@@ -7,9 +7,9 @@ import jax
 import jax.numpy as jnp
 from jax.scipy.stats import norm
 
+from orca.config_utils import create_module_from_spec, ModuleSpec
 from orca.model.components.base import TokenGroup
 from orca.model.components.transformer import MAPHead
-from orca.model.config_utils import create_module_from_config, ModuleConfig
 
 EPS = 1e-6
 from dataclasses import field
@@ -81,7 +81,7 @@ class ImageTokenizer(nn.Module):
         task_film_keys (Sequence[str]): Which non-spatial task keys get passed into FiLM conditioning. Supports regex.
     """
 
-    encoder: ModuleConfig
+    encoder: ModuleSpec
     use_token_learner: bool = False
     num_tokens: int = 8
     conditioning_type: str = "none"
@@ -135,7 +135,7 @@ class ImageTokenizer(nn.Module):
             )
 
         # run visual encoder
-        encoder_def = create_module_from_config(
+        encoder_def = create_module_from_spec(
             self.encoder, default_library="orca.model.components.image_encoders"
         )
         image_tokens = encoder_def(enc_inputs, **encoder_input_kwargs)
