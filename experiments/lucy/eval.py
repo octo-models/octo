@@ -34,7 +34,7 @@ from aloha_wrapper import AlohaGymEnv
 from aloha_pro.aloha_scripts.sim_env import make_sim_env, sample_box_pose, sample_insertion_pose, BOX_POSE
 
 from orca.utils.gym_wrappers import HistoryWrapper, RHCWrapper, UnnormalizeActionProprio
-from orca.utils.pretrained_utils import PretrainedModel
+from orca.utils.pretrained_utils import ORCAModel
 
 np.set_printoptions(suppress=True)
 
@@ -141,7 +141,7 @@ def supply_rng(f, rng=jax.random.PRNGKey(0)):
 
 @partial(jax.jit, static_argnames="argmax")
 def sample_actions(
-    pretrained_model: PretrainedModel,
+    pretrained_model: ORCAModel,
     observations,
     tasks,
     rng,
@@ -167,7 +167,7 @@ def sample_actions(
 
 
 def load_checkpoint(weights_path, step):
-    model = PretrainedModel.load_pretrained(weights_path, step=int(step))
+    model = ORCAModel.load_pretrained(weights_path, step=int(step))
 
     policy_fn = supply_rng(
         partial(
@@ -212,7 +212,7 @@ def main(_):
 
     policy_name = list(policies.keys())[policy_idx]
     policy_fn, model = policies[policy_name]
-    model: PretrainedModel  # type hinting
+    model: ORCAModel  # type hinting
 
     # set up environment
     if FLAGS.is_sim:

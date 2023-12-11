@@ -60,7 +60,7 @@ class WidowXSimEnv(gym.Env):
                     dtype=np.uint8,
                 ),
                 "proprio": gym.spaces.Box(
-                    low=np.full((7,), -1.0), high=np.ones((7,)), dtype=np.float64
+                    low=np.full((8,), -1.0), high=np.ones((8,)), dtype=np.float64
                 ),
             }
         )
@@ -123,7 +123,7 @@ class WidowXSimEnv(gym.Env):
 
         # Get image and proprioceptive data
         observation = self.get_observation()
-        abs_action = observation["proprio"] + action
+        abs_action = observation["proprio"][:6] + action[:6]
         self.move_eef(abs_action[:6], reset=True)  # TODO: use position control
         self.move_gripper(action[-1])
 
@@ -219,11 +219,14 @@ class WidowXSimEnv(gym.Env):
         proprio_data = np.append(proprio_data, self.gripper_state())
         print("  current proprio: ", [round(p, 2) for p in proprio_data])
 
+        # add padding to proprio to match training
+        proprio = np.concatenate([proprio_data[:6], [0], proprio_data[-1:]])
+
         null_img = np.zeros_like(img_arr)
         observation = {
             "image_0": img_arr,
             "image_1": null_img,  # NOTE: image_1 is null
-            "proprio": proprio_data,
+            "proprio": proprio,
         }
         return observation
 

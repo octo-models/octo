@@ -3,7 +3,7 @@ from contextlib import contextmanager
 from fnmatch import fnmatch
 import logging
 import time
-from typing import Any, Callable, Mapping, Optional, Sequence, Union
+from typing import Any, Callable, List, Mapping, Optional, Sequence, Union
 
 import flax
 import flax.linen as nn
@@ -197,6 +197,8 @@ def create_lr_schedule(name: str, **kwargs):
             kwargs: init_value, peak_value, warmup_steps, decay_steps
         rsqrt: inverse square root decay with warmup, from the "Scaling Vision Transformers" paper.
             kwargs: init_value, peak_value, warmup_steps, timescale (optional, default 10000)
+        constant: constant learning rate with warmup.
+            kwargs: init_value, peak_value, warmup_steps
 
     Args:
         name: name of the schedule
@@ -218,11 +220,78 @@ def create_lr_schedule(name: str, **kwargs):
             ],
             [kwargs["warmup_steps"]],
         )
+    elif name == "constant":
+        return optax.join_schedules(
+            [
+                optax.linear_schedule(
+                    init_value=kwargs["init_value"],
+                    end_value=kwargs["peak_value"],
+                    transition_steps=kwargs["warmup_steps"],
+                ),
+                lambda step: kwargs["peak_value"],
+            ],
+            [kwargs["warmup_steps"]],
+        )
     else:
         raise ValueError(f"Unsupported lr schedule: {name}")
 
 
-def create_optimizer(params_or_params_shape: Params, **kwargs: dict):
+def freeze_weights(
+    tx: optax.GradientTransformation,
+    params_or_params_shape: Params,
+    frozen_keys: List[str],
+    return_partitions: bool = False,
+):
+    """
+    Freezes all weights in params_or_params_shape whose keys fnmatch the ones in frozen_keys.
+    Example usage:
+        tx = freeze_weights(tx, model.params, ["orca_transformer.*"])
+    """
+    logging.info(f"Freezing parameters that include the following keys: {frozen_keys}.")
+    partition_optimizers = {
+        "trainable": tx,
+        "frozen": optax.set_to_zero(),
+    }
+    # freeze anything that matches fnmatch patterns in `frozen_keys`
+    # path is a string of .-separated module names, e.g. ('orca_transformer.BlockTransformer_0...')
+    param_partitions = flax.traverse_util.path_aware_map(
+        lambda path, v: "frozen"
+        if any([fnmatch(".".join(path), key) for key in frozen_keys])
+        else "trainable",
+        params_or_params_shape,
+    )
+    tx = optax.multi_transform(partition_optimizers, param_partitions)
+
+    logging.debug("Frozen params:")
+    flax.traverse_util.path_aware_map(
+        lambda path, opt_status: logging.debug(".".join(path))
+        if opt_status == "frozen"
+        else None,
+        param_partitions,
+    )
+    total_params = sum(
+        jax.tree_util.tree_leaves(
+            jax.tree_map(lambda x: x.size, params_or_params_shape)
+        )
+    )
+    trainable_params = sum(
+        jax.tree_util.tree_leaves(
+            jax.tree_map(
+                lambda x, y: x.size if y == "trainable" else 0,
+                params_or_params_shape,
+                param_partitions,
+            )
+        )
+    )
+    logging.info(f"Num trainable params: {trainable_params:,}.")
+    logging.info(f"Num frozen params: {total_params - trainable_params:,}.")
+    logging.info("To see a detailed list of frozen params, set logging level to DEBUG.")
+    return (tx, param_partitions) if return_partitions else tx
+
+
+def create_optimizer(
+    params_or_params_shape: Params, **kwargs: dict
+) -> optax.GradientTransformation:
     """Creates optimizer for ORCA.
 
     kwargs are the kwargs for optax.adamw; if the "learning_rate" key is a dict, it is interpreted
@@ -258,51 +327,9 @@ def create_optimizer(params_or_params_shape: Params, **kwargs: dict):
         )
 
     if frozen_keys:
-        # define trainable and frozen parameter sets
-        logging.info(
-            f"Freezing parameters that include the following keys: {frozen_keys}."
+        tx, param_partitions = freeze_weights(
+            tx, params_or_params_shape, frozen_keys, return_partitions=True
         )
-        partition_optimizers = {
-            "trainable": tx,
-            "frozen": optax.set_to_zero(),
-        }
-        # freeze anything that matches fnmatch patterns in `frozen_keys`
-        # path is a string of .-separated module names, e.g. ('orca_transformer.BlockTransformer_0...')
-        param_partitions = flax.traverse_util.path_aware_map(
-            lambda path, v: "frozen"
-            if any([fnmatch(".".join(path), key) for key in frozen_keys])
-            else "trainable",
-            params_or_params_shape,
-        )
-        tx = optax.multi_transform(partition_optimizers, param_partitions)
-
-        logging.debug("Frozen params:")
-        flax.traverse_util.path_aware_map(
-            lambda path, opt_status: logging.debug(".".join(path))
-            if opt_status == "frozen"
-            else None,
-            param_partitions,
-        )
-        total_params = sum(
-            jax.tree_util.tree_leaves(
-                jax.tree_map(lambda x: x.size, params_or_params_shape)
-            )
-        )
-        trainable_params = sum(
-            jax.tree_util.tree_leaves(
-                jax.tree_map(
-                    lambda x, y: x.size if y == "trainable" else 0,
-                    params_or_params_shape,
-                    param_partitions,
-                )
-            )
-        )
-        logging.info(f"Num trainable params: {trainable_params:,}.")
-        logging.info(f"Num frozen params: {total_params - trainable_params:,}.")
-        logging.info(
-            "To see a detailed list of frozen params, set logging level to DEBUG."
-        )
-
         zero_frozen_params = lambda params: jax.tree_map(
             lambda x, y: x if y == "trainable" else jnp.zeros(()),
             params,
