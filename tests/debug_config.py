@@ -1,7 +1,15 @@
-from config import get_config as get_base_config
-from config import update_config
+from copy import deepcopy
 
-get_base_config = get_base_config.__wrapped__
+from config import get_config as get_base_config
+from ml_collections import ConfigDict
+
+
+def update_config(config: ConfigDict, **kwargs):
+    assert isinstance(config, ConfigDict)
+    updates = ConfigDict(kwargs)
+    new_config = deepcopy(config)
+    new_config.update(updates)
+    return new_config
 
 
 def get_config():

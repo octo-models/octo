@@ -18,6 +18,7 @@ import optax
 from orca.data.utils.text_processing import TextProcessor
 from orca.model.components.hf_weight_loaders import WeightLoader
 from orca.utils import jax_utils
+from orca.utils.spec import ModuleSpec
 from orca.utils.typing import Config, Data, Params, PRNGKey
 
 
@@ -31,7 +32,7 @@ def create_train_state(
     tx: optax.GradientTransformation,
     init_args: Sequence[Any] = (),
     init_kwargs: Mapping[str, Any] = dict(),
-    pretrained_loaders: Sequence[WeightLoader] = tuple(),
+    pretrained_loaders: Sequence[Union[WeightLoader, ModuleSpec]] = tuple(),
     init_method: Optional[Union[str, Callable]] = None,
 ) -> TrainState:
     """Utility to create a TrainState."""
@@ -50,6 +51,8 @@ def create_train_state(
     ), "Are you forgetting to store some variables in the state? {}".format(ev.keys())
 
     for loader in pretrained_loaders:
+        if not callable(loader):  # Means that it is a ModuleSpec
+            loader = ModuleSpec.instantiate(loader)
         params = loader(params)
 
     return TrainState.create(

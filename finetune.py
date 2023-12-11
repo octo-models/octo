@@ -16,9 +16,9 @@ import tqdm
 import wandb
 
 from orca.data.dataset import make_single_dataset
-from orca.data.utils.text_processing import text_processors
 from orca.utils.jax_utils import initialize_compilation_cache
 from orca.utils.pretrained_utils import ORCAModel
+from orca.utils.spec import ModuleSpec
 from orca.utils.train_callbacks import (
     RolloutVisualizationCallback,
     SaveCallback,
@@ -146,9 +146,7 @@ def main(_):
     if config["text_processor"] is None:
         text_processor = None
     else:
-        text_processor = text_processors[config["text_processor"]](
-            **config["text_processor_kwargs"]
-        )
+        text_processor = ModuleSpec.instantiate(config["text_processor"])()
 
     def process_batch(batch):
         batch = process_text(batch, text_processor)

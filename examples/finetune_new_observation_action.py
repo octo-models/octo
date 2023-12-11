@@ -14,8 +14,11 @@ import wandb
 
 from orca.data.dataset import make_single_dataset
 from orca.data.oxe.oxe_dataset_configs import ActionEncoding, StateEncoding
+from orca.model.components.action_heads import L1ActionHead
+from orca.model.components.tokenizers import LowdimObsTokenizer
 from orca.utils.jax_utils import initialize_compilation_cache
 from orca.utils.pretrained_utils import ORCAModel
+from orca.utils.spec import ModuleSpec
 from orca.utils.train_callbacks import SaveCallback
 from orca.utils.train_utils import (
     freeze_weights,
@@ -105,29 +108,21 @@ def main(_):
     # following Zhao et al. we use "action chunks" of length 50 and L1 loss for ALOHA
     config = ORCAModel.load_config(FLAGS.pretrained_path)
     del config["model"]["observation_tokenizers"]["wrist"]
-    config["model"]["observation_tokenizers"].update(
-        dict(
-            proprio=dict(
-                cls_name="lowdim_obs_tokenizer",
-                kwargs=dict(
-                    n_bins=256,
-                    bin_type="normal",
-                    low=-2.0,
-                    high=2.0,
-                    obs_keys=["proprio"],
-                ),
-            )
-        )
+    ###
+    config["model"]["observation_tokenizers"]["proprio"] = ModuleSpec.create(
+        LowdimObsTokenizer,
+        n_bins=256,
+        bin_type="normal",
+        low=-2.0,
+        high=2.0,
+        obs_keys=["proprio"],
     )
-    config["model"]["heads"]["action"] = dict(
-        cls_name="l1_action_head",
-        kwargs=dict(
-            pred_horizon=50,
-            action_dim=14,
-            vocab_size=256,
-            normalization_type="normal",
-            readout_key="obs",  # TODO: switch this to "action" once we add readout keys
-        ),
+    # Fully override the old action head with a new one (for smaller changes, you can use update_module_config)
+    config["model"]["heads"]["action"] = ModuleSpec.create(
+        L1ActionHead,
+        pred_horizon=50,
+        action_dim=14,
+        readout_key="obs",  # TODO: switch this to "action" once we add readout keys
     )
 
     # initialize weights for modified ORCA model, then merge in all applicable pre-trained weights

@@ -226,3 +226,73 @@ class Transformer(nn.Module):
         encoded = nn.LayerNorm(name="encoder_norm")(x)
 
         return encoded
+
+
+def common_transformer_sizes(transformer_size: str) -> (int, dict):
+    """
+    Args:
+        transformer_size (str): The size of the transformer. One of "dummy", "vanilla", "vit_s", "vit_b", "vit_l", "vit_h"
+
+    Returns:
+            token_embedding_size (int): The size of the token embeddings
+            transformer_kwargs (dict): The kwargs to pass to the transformer
+
+    """
+    assert transformer_size in ["dummy", "vanilla", "vit_s", "vit_b", "vit_l", "vit_h"]
+    default_params = {
+        "attention_dropout_rate": 0.0,
+        "add_position_embedding": False,
+    }
+
+    TRANSFORMER_SIZES = {
+        "dummy": dict(
+            num_layers=1,
+            mlp_dim=256,
+            num_attention_heads=2,
+            dropout_rate=0.1,
+        ),
+        "vanilla": dict(
+            num_layers=4,
+            mlp_dim=1024,
+            num_attention_heads=8,
+            dropout_rate=0.1,
+        ),
+        "vit_s": dict(
+            num_layers=12,
+            mlp_dim=1536,
+            num_attention_heads=6,
+            dropout_rate=0.0,
+        ),
+        "vit_b": dict(
+            num_layers=12,
+            mlp_dim=3072,
+            num_attention_heads=12,
+            dropout_rate=0.0,
+        ),
+        "vit_l": dict(
+            num_layers=24,
+            mlp_dim=4096,
+            num_attention_heads=16,
+            dropout_rate=0.1,
+        ),
+        "vit_h": dict(
+            num_layers=32,
+            mlp_dim=5120,
+            num_attention_heads=16,
+            dropout_rate=0.1,
+        ),
+    }
+
+    TOKEN_DIMS = {
+        "dummy": 256,
+        "vanilla": 256,
+        "vit_s": 384,
+        "vit_b": 768,
+        "vit_l": 1024,
+        "vit_h": 1280,
+    }
+
+    return TOKEN_DIMS[transformer_size], {
+        **default_params,
+        **TRANSFORMER_SIZES[transformer_size],
+    }
