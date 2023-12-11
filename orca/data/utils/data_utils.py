@@ -193,27 +193,38 @@ def normalize_action_and_proprio(
     if normalization_type == NormalizationType.NORMAL:
         # normalize to mean 0, std 1
         for key, traj_key in keys_to_normalize.items():
+            mask = metadata[key].get(
+                "mask", tf.ones_like(metadata[key]["mean"], dtype=tf.bool)
+            )
             traj = dl.transforms.selective_tree_map(
                 traj,
                 match=lambda k, _: k == traj_key,
-                map_fn=lambda x: (x - metadata[key]["mean"])
-                / (metadata[key]["std"] + 1e-8),
+                map_fn=lambda x: tf.where(
+                    mask, (x - metadata[key]["mean"]) / (metadata[key]["std"] + 1e-8), x
+                ),
             )
         return traj
 
     if normalization_type == NormalizationType.BOUNDS:
         # normalize to [-1, 1]
         for key, traj_key in keys_to_normalize.items():
+            mask = metadata[key].get(
+                "mask", tf.ones_like(metadata[key]["min"], dtype=tf.bool)
+            )
             traj = dl.transforms.selective_tree_map(
                 traj,
                 match=lambda k, _: k == traj_key,
-                map_fn=lambda x: tf.clip_by_value(
-                    2
-                    * (x - metadata[key]["min"])
-                    / (metadata[key]["max"] - metadata[key]["min"] + 1e-8)
-                    - 1,
-                    -1,
-                    1,
+                map_fn=lambda x: tf.where(
+                    mask,
+                    tf.clip_by_value(
+                        2
+                        * (x - metadata[key]["min"])
+                        / (metadata[key]["max"] - metadata[key]["min"] + 1e-8)
+                        - 1,
+                        -1,
+                        1,
+                    ),
+                    x,
                 ),
             )
         return traj
