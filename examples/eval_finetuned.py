@@ -19,7 +19,6 @@ import numpy as np
 import wandb
 
 sys.path.append("/nfs/nfs2/users/karl/code/act")
-from envs.aloha_sim_env import AlohaGymEnv
 
 from orca.utils.gym_wrappers import HistoryWrapper, RHCWrapper, UnnormalizeActionProprio
 from orca.utils.pretrained_utils import ORCAModel
