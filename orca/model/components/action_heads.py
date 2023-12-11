@@ -189,6 +189,7 @@ class ContinuousActionHead(nn.Module):
             mean, actions_chunked, pad_mask[:, :, None, None], loss_type="mse"
         )
         # Sum over action dimension instead of averaging
+        loss = loss * self.action_dim
         metrics["loss"] = metrics["loss"] * self.action_dim
         metrics["mse"] = metrics["mse"] * self.action_dim
         return loss, metrics
