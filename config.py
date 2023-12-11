@@ -126,11 +126,6 @@ def get_dataset_config(modality="multimodal", window_size=1):
             load_camera_views=("primary", "wrist"),
             load_depth=False,
         ),
-        # common_dataset_kwargs override specific kwargs from dataset_kwargs_list
-        "common_dataset_kwargs": dict(
-            action_proprio_normalization_type=normalization_type,
-            language_key="language_instruction",
-        ),
         "traj_transform_kwargs": dict(
             window_size=window_size,
             future_action_window_size=0,
