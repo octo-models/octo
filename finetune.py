@@ -18,7 +18,7 @@ import wandb
 from orca.data.dataset import make_single_dataset
 from orca.data.utils.text_processing import text_processors
 from orca.utils.jax_utils import initialize_compilation_cache
-from orca.utils.pretrained_utils import PretrainedModel
+from orca.utils.pretrained_utils import ORCAModel
 from orca.utils.train_callbacks import (
     RolloutVisualizationCallback,
     SaveCallback,
@@ -29,6 +29,7 @@ from orca.utils.train_utils import (
     check_config_diff,
     create_optimizer,
     format_name_with_config,
+    merge_params,
     process_text,
     Timer,
     TrainState,
@@ -120,7 +121,7 @@ def main(_):
     #
     #########
 
-    orig_config = PretrainedModel.load_config(FLAGS.config.pretrained_path)
+    orig_config = ORCAModel.load_config(FLAGS.config.pretrained_path)
     flat_config = flax.traverse_util.flatten_dict(
         orig_config.to_dict(), keep_empty_nodes=True
     )
@@ -186,14 +187,16 @@ def main(_):
     #
     #########
 
-    model = PretrainedModel.load_pretrained(
+    pretrained_model = ORCAModel.load_pretrained(
         FLAGS.config.pretrained_path,
-        config=config,
-        example_batch=example_batch,
-        text_processor=text_processor,
         step=FLAGS.config.pretrained_step,
     )
+    model = ORCAModel.from_config(config, example_batch, text_processor)
+    merged_params = merge_params(model.params, pretrained_model.params)
+    model = model.replace(params=merged_params)
+    del pretrained_model
     model_def = model.model_def
+
     #########
     #
     # Setup Optimizer and Train State

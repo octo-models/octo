@@ -3,8 +3,12 @@ import logging
 import os
 from pathlib import Path
 
+import flax
 import jax
+import jax.numpy as jnp
 import tensorflow as tf
+
+from orca.utils.pretrained_utils import ORCAModel
 
 
 def supply_rng(f, rng=jax.random.PRNGKey(0)):
@@ -18,25 +22,25 @@ def supply_rng(f, rng=jax.random.PRNGKey(0)):
 
 @partial(jax.jit, static_argnames="argmax")
 def sample_actions(
+    pretrained_model: ORCAModel,
     observations,
-    goals,
-    state,
+    tasks,
     rng,
     argmax=False,
     temperature=1.0,
 ):
-    # add batch dim
+    # add batch dim to observations
     observations = jax.tree_map(lambda x: x[None], observations)
-    goals = jax.tree_map(lambda x: x[None], goals)
-    actions = state.apply_fn(
-        {"params": state.params},
+    logging.warning(
+        "observations: %s", flax.core.pretty_repr(jax.tree_map(jnp.shape, observations))
+    )
+    logging.warning("tasks: %s", flax.core.pretty_repr(jax.tree_map(jnp.shape, tasks)))
+    actions = pretrained_model.sample_actions(
         observations,
-        goals,
-        train=False,
-        argmax=argmax,
+        tasks,
         rng=rng,
+        argmax=argmax,
         temperature=temperature,
-        method="predict_action",
     )
     # remove batch dim
     return actions[0]

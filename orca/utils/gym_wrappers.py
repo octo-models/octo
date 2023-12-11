@@ -1,8 +1,12 @@
 from collections import deque
+import logging
+from typing import Optional, Sequence, Tuple, Union
 
 import gym
 import gym.spaces
+import jax
 import numpy as np
+import tensorflow as tf
 
 
 def stack_and_pad(history: list, num_obs: int):
@@ -44,6 +48,57 @@ def space_stack(space: gym.Space, repeat: int):
 
 def listdict2dictlist(LD):
     return {k: [dic[k] for dic in LD] for k in LD[0]}
+
+
+def add_orca_env_wrappers(
+    env: gym.Env, config: dict, dataset_statistics: dict, **kwargs
+):
+    """Adds env wrappers for action normalization, multi-action
+    future prediction, image resizing, and history stacking.
+
+    Uses defaults from model config, but all can be overridden through kwargs.
+
+    Arguments:
+        env: gym Env
+        config: PretrainedModel.config
+        dataset_statistics: from PretrainedModel.load_dataset_statistics
+        # Additional (optional) kwargs
+        normalization_type: str for UnnormalizeActionProprio
+        exec_horizon: int for RHCWrapper
+        resize_size: None or tuple or list of tuples for ResizeImageWrapper
+        horizon: int for HistoryWrapper
+    """
+    normalization_type = kwargs.get(
+        "normalization_type",
+        config["dataset_kwargs"]["common_dataset_kwargs"][
+            "action_proprio_normalization_type"
+        ],
+    )
+
+    logging.info(
+        "Unnormalizing proprio and actions w/ statistics: ", dataset_statistics
+    )
+    env = UnnormalizeActionProprio(env, dataset_statistics, normalization_type)
+    exec_horizon = kwargs.get(
+        "exec_horizon", config["model"]["heads"]["action"]["kwargs"]["pred_horizon"]
+    )
+
+    logging.info("Running receding horizon control with exec_horizon: ", exec_horizon)
+    env = RHCWrapper(env, exec_horizon)
+    resize_size = kwargs.get(
+        "resize_size",
+        config["dataset_kwargs"]["frame_transform_kwargs"]["resize_size"],
+    )
+
+    logging.info("Resizing images w/ parameters", resize_size)
+    env = ResizeImageWrapper(env, resize_size)
+
+    horizon = kwargs.get("horizon", config["window_size"])
+    logging.info("Adding history of size: ", horizon)
+    env = HistoryWrapper(env, horizon)
+
+    logging.info("New observation space: ", env.observation_space)
+    return env
 
 
 class HistoryWrapper(gym.Wrapper):
@@ -148,12 +203,52 @@ class TemporalEnsembleWrapper(gym.Wrapper):
         )
 
         # more recent predictions get exponentially *less* weight than older predictions
-        weights = np.exp(-self.exp_weight * np.arange(num_actions)) / num_actions
-
+        weights = np.exp(-self.exp_weight * np.arange(num_actions))
+        weights = weights / weights.sum()
         # compute the weighted average across all predictions for this timestep
         action = np.sum(weights[:, None] * curr_act_preds, axis=0)
 
         return self.env.step(action)
+
+
+class ResizeImageWrapper(gym.ObservationWrapper):
+    def __init__(
+        self,
+        env: gym.Env,
+        resize_size: Optional[Union[Tuple, Sequence[Tuple]]],
+    ):
+        super().__init__(env)
+        assert isinstance(
+            self.observation_space, gym.spaces.Dict
+        ), "Only Dict observation spaces are supported."
+        spaces = self.observation_space.spaces
+
+        if resize_size is None:
+            self.keys_to_resize = {}
+        elif isinstance(self.resize_size, tuple):
+            self.keys_to_resize = {k: resize_size for k in spaces if "image_" in k}
+        else:
+            self.keys_to_resize = {
+                f"image_{i}": resize_size[i] for i in range(len(resize_size))
+            }
+        logging.info(f"Resizing images: {self.keys_to_resize}")
+        for k, size in self.keys_to_resize.items():
+            spaces[k] = gym.spaces.Box(
+                low=0,
+                high=255,
+                shape=size + (3,),
+                dtype=np.uint8,
+            )
+        self.observation_space = gym.spaces.Dict(spaces)
+
+    def observation(self, observation):
+        for k, size in self.keys_to_resize.items():
+            image = tf.image.resize(
+                observation[k], size=size, method="lanczos3", antialias=True
+            )
+            image = tf.cast(tf.clip_by_value(tf.round(image), 0, 255), tf.uint8).numpy()
+            observation[k] = image
+        return observation
 
 
 class UnnormalizeActionProprio(gym.ActionWrapper, gym.ObservationWrapper):
@@ -162,9 +257,16 @@ class UnnormalizeActionProprio(gym.ActionWrapper, gym.ObservationWrapper):
     """
 
     def __init__(
-        self, env: gym.Env, action_proprio_metadata: dict, normalization_type: str
+        self,
+        env: gym.Env,
+        action_proprio_metadata: dict,
+        normalization_type: str,
     ):
-        self.action_proprio_metadata = action_proprio_metadata
+        self.action_proprio_metadata = jax.tree_map(
+            lambda x: np.array(x),
+            action_proprio_metadata,
+            is_leaf=lambda x: isinstance(x, list),
+        )
         self.normalization_type = normalization_type
         super().__init__(env)
 

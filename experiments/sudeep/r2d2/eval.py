@@ -13,7 +13,7 @@ import jax
 import jax.numpy as jnp
 from functools import partial
 
-from orca.utils.pretrained_utils import PretrainedModel
+from orca.utils.pretrained_utils import ORCAModel
 from orca.data.utils.data_utils import StateEncoding
 import optax
 
@@ -103,7 +103,7 @@ def _null_obs():
 
 @partial(jax.jit, static_argnames="argmax")
 def sample_actions(
-    pretrained_model: PretrainedModel,
+    pretrained_model: ORCAModel,
     observations,
     tasks,
     mean,
@@ -131,8 +131,8 @@ def sample_actions(
 
 
 def load_checkpoint(weights_path, config_path, metadata_path, example_batch_path):
-    model = PretrainedModel.load_pretrained(
-        weights_path, config_path, example_batch_path
+    model = ORCAModel.load_pretrained(
+        weights_path
     )
 
     with open(metadata_path, "r") as f:
