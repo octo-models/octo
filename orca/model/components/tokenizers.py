@@ -12,7 +12,6 @@ from orca.model.components.transformer import MAPHead
 from orca.spec import ModuleSpec
 
 EPS = 1e-6
-from dataclasses import field
 
 
 def generate_proper_pad_mask(

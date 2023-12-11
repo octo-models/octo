@@ -1,5 +1,5 @@
 import logging
-from typing import Any, Dict
+from typing import Dict
 
 from orca.model.orca_model import OrcaModel, OrcaTransformer
 from orca.spec import ModuleSpec
