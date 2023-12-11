@@ -1,11 +1,24 @@
 """Utilities for making ORCAModel configs."""
-from functools import partial
+from copy import deepcopy
+from functools import partial, wraps
 import importlib
 import logging
 from typing import Any, Dict, TypedDict, Union
 
+from ml_collections import ConfigDict
 
-class ModuleConfig(TypedDict):
+__all__ = [
+    "ModuleSpec",
+    "base_orca_model_config",
+    "create_module_from_spec",
+    "partial_from_spec",
+    "create_module_spec",
+    "update_module_spec",
+    "kwargs_for_common_transformer_sizes",
+]
+
+
+class ModuleSpec(TypedDict):
     """A dict specifying the name of the module class (to find it) and the kwargs to pass to it.
 
     cls_name (str): Specifies which class the module is (can be an absolute identifier e.g. `orca.model.components.tokenizers:Resnet18`, or a relative identifier e.g. `Resnet18`)
@@ -28,7 +41,7 @@ def base_orca_model_config():
     }
 
 
-def create_module_from_config(config: ModuleConfig, default_library: str = None):
+def create_module_from_spec(spec: ModuleSpec, default_library: str = None):
     """Looks for the referenced object, and calls it with the kwargs provided.
 
     If cls_name is a full identifier, e.g. "orca.model.components.tokenizers:Resnet18",
@@ -36,12 +49,18 @@ def create_module_from_config(config: ModuleConfig, default_library: str = None)
 
     Otherwise, we will import the default_library, and look for the object there.
     """
-    cls = import_from_string(config["cls_name"], default_library=default_library)
-    return cls(**config["kwargs"])
+    cls = _import_from_string(spec["cls_name"], default_library=default_library)
+    return cls(**spec["kwargs"])
 
 
-def create_module_config(cls_or_cls_name: Union[str, object], **kwargs) -> ModuleConfig:
-    """Create a new tokenizer config.
+def partial_from_spec(spec: ModuleSpec, default_library: str = None):
+    """Same as `create_module_from_spec`, but returns a partial instead of creating the object."""
+    cls = _import_from_string(spec["cls_name"], default_library=default_library)
+    return partial(cls, **spec["kwargs"])
+
+
+def create_module_spec(cls_or_cls_name: Union[str, object], **kwargs) -> ModuleSpec:
+    """Create a new spec.
 
     Args:
         cls_or_cls_name (str or object): The class or import string of the module
@@ -66,20 +85,20 @@ def resolve_cls_name(cls_or_cls_name):
             raise ValueError()
 
 
-def update_module_config(config: ModuleConfig, cls_or_cls_name=None, **kwargs):
-    """Update a module config in-place.
+def update_module_spec(spec: ModuleSpec, cls_or_cls_name=None, **kwargs):
+    """Update a module spec in-place.
 
     Args:
-        config (dict): Config of a module
-        cls_or_cls_name (str or object): The class or import string of the tokenizer
-        kwargs (dict, optional): The kwargs to pass to the tokenizer. Defaults to None. Must be JSON serializable.
+        spec (dict): Spec of a module
+        cls_or_cls_name (str or object): The class or import string of the new module
+        kwargs (dict, optional): Any kwargs here will be added (and potentially overwrite existing ones)
     """
     if cls_or_cls_name is not None:
-        config["cls_name"] = resolve_cls_name(cls_or_cls_name)
-    config["kwargs"].update(kwargs)
+        spec["cls_name"] = resolve_cls_name(cls_or_cls_name)
+    spec["kwargs"].update(kwargs)
 
 
-def import_from_string(import_string: str, default_library: str = None):
+def _import_from_string(import_string: str, default_library: str = None):
     if ":" in import_string:
         library, name = import_string.split(":")
     else:
@@ -158,3 +177,37 @@ def kwargs_for_common_transformer_sizes(transformer_size):
             **TRANSFORMER_SIZES[transformer_size],
         },
     )
+
+
+def wrap_for_commandline(f):
+    """Simple wrapper to enable passing config strings to `get_config`
+
+    Usage:
+
+    python train.py --config=config.py:vit_s,multimodal
+    python train.py --config=config.py:transformer_size=vit_s
+    """
+
+    @wraps(f)
+    def wrapped_f(config_string=None):
+        if config_string is None:
+            return f()
+        elements = config_string.split(",")
+        args, kwargs = [], {}
+        for e in elements:
+            if "=" in e:
+                k, v = e.split("=")
+                kwargs[k] = v
+            else:
+                args.append(e)
+        return f(*args, **kwargs)
+
+    return wrapped_f
+
+
+def update_config(config: ConfigDict, **kwargs):
+    assert isinstance(config, ConfigDict)
+    updates = ConfigDict(kwargs)
+    new_config = deepcopy(config)
+    new_config.update(updates)
+    return new_config

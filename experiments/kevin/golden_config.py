@@ -3,7 +3,7 @@ import copy
 from config import get_config as get_base_config
 from config import update_config, wrap
 
-from orca.model.config_utils import create_module_config
+from orca.config_utils import create_module_spec, update_config
 
 
 def get_config(config_string=None):
@@ -19,17 +19,17 @@ def get_config(config_string=None):
     # Changes to the model:
     #
 
-    encoder = create_module_config("SmallStem16")
+    encoder = create_module_spec("SmallStem16")
 
     base_config["model"]["observation_tokenizers"] = {
-        "workspace": create_module_config(
+        "workspace": create_module_spec(
             "ImageTokenizer",
             obs_stack_keys=["image_0"],
             task_stack_keys=["image_0"],
             task_film_keys=[],
             encoder=encoder,
         ),
-        "wrist": create_module_config(
+        "wrist": create_module_spec(
             "ImageTokenizer",
             obs_stack_keys=["image_1"],
             task_stack_keys=["image_1"],
@@ -38,7 +38,7 @@ def get_config(config_string=None):
         ),
     }
     base_config["model"]["task_tokenizers"] = {
-        "language": create_module_config(
+        "language": create_module_spec(
             "LanguageTokenizer",
             encoder="t5-base",
             finetune_encoder=False,
@@ -104,8 +104,8 @@ def get_config(config_string=None):
             shuffle_buffer_size=500000,
             balance_weights=True,
         ),
-        text_processor="hf_tokenizer",
-        text_processor_kwargs=dict(
+        text_processor=create_module_spec(
+            "HFTokenizer",
             tokenizer_name="t5-base",
             encode_with_model=False,
             tokenizer_kwargs={
@@ -115,9 +115,13 @@ def get_config(config_string=None):
                 "return_tensors": "np",
             },
         ),
-        pretrained_loaders=["from_huggingface"],
-        pretrained_loader_kwargs=[dict(hf_model="t5-base")],
-        eval_datasets=["bridge_dataset"],
+        pretrained_loaders=(
+            create_module_spec(
+                "hf_weights_loader",
+                hf_model="t5-base",
+            )
+        ),
+        eval_datasets=("bridge_dataset",),
     )
 
     return config

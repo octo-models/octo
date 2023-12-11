@@ -4,47 +4,49 @@ import functools
 from ml_collections import ConfigDict
 from ml_collections.config_dict import FieldReference, placeholder
 
-from orca.model.config_utils import (
+from orca.config_utils import (
     base_orca_model_config,
-    create_module_config,
+    create_module_spec,
     kwargs_for_common_transformer_sizes,
+    wrap_for_commandline,
 )
 
 
-def update_config(config, **kwargs):
-    updates = ConfigDict(kwargs)
-    new_config = deepcopy(config)
-    new_config.update(updates)
-    return new_config
-
-
-def wrap(f):
-    """Simple wrapper to enable passing config strings to `get_config`
-
-    Usage:
-
-    python train.py --config=config.py:vit_s,multimodal
-    python train.py --config=config.py:transformer_size=vit_s
+def get_model_config(transformer_size):
     """
+    Transformer_size is one of ["dummy", "vanilla", "vit_s", "vit_b", "vit_l", "vit_h"]
 
-    @functools.wraps(f)
-    def wrapped_f(config_string=None):
-        if config_string is None:
-            return f()
-        elements = config_string.split(",")
-        args, kwargs = [], {}
-        for e in elements:
-            if "=" in e:
-                k, v = e.split("=")
-                kwargs[k] = v
-            else:
-                args.append(e)
-        return f(*args, **kwargs)
+    See orca.model.config_utils:kwargs_for_common_transformer_sizes for more details
 
-    return wrapped_f
+    This model stacks all the images from different cameras together, and passes it through
+    a small convolutional stem before entering the transformer.
+
+    The action head pools all the observation token embeddings, and passes it through a small MLP
+    before predicting the action using a MSE loss.
+    """
+    model_config = base_orca_model_config()
+    model_config.update(kwargs_for_common_transformer_sizes(transformer_size))
+
+    image_encoder = create_module_spec("SmallStem16", use_film=True)
+
+    model_config["observation_tokenizers"]["image"] = create_module_spec(
+        "ImageTokenizer",
+        num_tokens=256,
+        obs_stack_keys=["image_.*"],
+        task_stack_keys=["image_.*"],
+        task_film_keys=["language_instruction"],
+        encoder=image_encoder,
+    )
+    model_config["heads"]["action"] = create_module_spec(
+        "MSEActionHead",
+        pred_horizon=1,
+        action_dim=7,
+        readout_key="obs",
+    )
+    return model_config
 
 
-@wrap
+@wrap_for_commandline
 def get_config(
     transformer_size="vit_s",
     modality="multimodal",
@@ -89,10 +91,8 @@ def get_config(
                 samples_per_state=8,
             ),
             resume_path=placeholder(str),
-            text_processor="muse_embedding",
-            text_processor_kwargs=dict(),
+            text_processor=create_module_spec("MuseEmbedding"),
             pretrained_loaders=tuple(),
-            pretrained_loader_kwargs=tuple(),
             wandb=dict(
                 project="orca",
                 group=placeholder(str),
@@ -169,37 +169,3 @@ def get_dataset_config(modality="multimodal", window_size=1):
         "batch_size": 1024,
         "balance_weights": True,
     }
-
-
-def get_model_config(transformer_size):
-    """
-    Transformer_size is one of ["dummy", "vanilla", "vit_s", "vit_b", "vit_l", "vit_h"]
-
-    See orca.model.config_utils:kwargs_for_common_transformer_sizes for more details
-
-    This model stacks all the images from different cameras together, and passes it through
-    a small convolutional stem before entering the transformer.
-
-    The action head pools all the observation token embeddings, and passes it through a small MLP
-    before predicting the action using a MSE loss.
-    """
-    model_config = base_orca_model_config()
-    model_config.update(kwargs_for_common_transformer_sizes(transformer_size))
-
-    image_encoder = create_module_config("SmallStem16", use_film=True)
-
-    model_config["observation_tokenizers"]["image"] = create_module_config(
-        "ImageTokenizer",
-        num_tokens=256,
-        obs_stack_keys=["image_.*"],
-        task_stack_keys=["image_.*"],
-        task_film_keys=["language_instruction"],
-        encoder=image_encoder,
-    )
-    model_config["heads"]["action"] = create_module_config(
-        "MSEActionHead",
-        pred_horizon=1,
-        action_dim=7,
-        readout_key="obs",
-    )
-    return model_config

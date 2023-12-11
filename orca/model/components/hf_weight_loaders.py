@@ -81,13 +81,3 @@ def resnet18_IN_SimCLR_loader(params, checkpoint=None):
     assert replaced, "Failed to load weights"
     print("loaded resnet18_IN_SimCLR")
     return params
-
-
-# index for weight loaders
-# these are called to replace parameters after they are initialized from scratch
-weights_loaders = {
-    "clip": clip_weights_loader,
-    "distilbert": ft.partial(hf_weights_loader, hf_model="distilbert-base-uncased"),
-    "resnet18-IN-SimCLR": resnet18_IN_SimCLR_loader,
-    "from_huggingface": hf_weights_loader,
-}
