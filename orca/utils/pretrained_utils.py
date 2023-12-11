@@ -1,7 +1,6 @@
 from functools import partial
 import json
 import logging
-import os
 from typing import Any, Optional
 
 import flax
@@ -86,7 +85,7 @@ class ORCAModel:
                 lambda example: jnp.zeros(
                     (batch_size, *example.shape[1:]), dtype=example.dtype
                 ),
-                self.example_batch["tasks"],
+                self.example_batch["task"],
             )
 
         if texts is None:
@@ -95,7 +94,7 @@ class ORCAModel:
         if self.text_processor is not None:
             tasks["language_instruction"] = self.text_processor.encode(texts)
 
-        _verify_shapes(tasks, self.example_batch["tasks"], starting_dim=1)
+        _verify_shapes(tasks, self.example_batch["task"], starting_dim=1)
         return tasks
 
     def run_transformer(self, observations, tasks, pad_mask, train=False):
@@ -104,13 +103,13 @@ class ORCAModel:
             observations: dictionary of arrays of shape (batch_size, window_size, *shape).
                 Shape must be consistent with self.example_batch["observation"]
             tasks: dict of tasks of shape (batch_size, *shape)
-                Shape must be consistent with self.example_batch["tasks"]
+                Shape must be consistent with self.example_batch["task"]
             pad_mask: (batch_size, window_size) Boolean mask that is False when the timestep corresponds to padding
             train: whether to run in train mode
             *args, **kwargs: Additional arguments for transformer or model.apply
         """
         _verify_shapes(observations, self.example_batch["observation"], starting_dim=2)
-        _verify_shapes(tasks, self.example_batch["tasks"], starting_dim=1)
+        _verify_shapes(tasks, self.example_batch["task"], starting_dim=1)
 
         return self.orca_transformer(observations, tasks, pad_mask, train=train)
 
@@ -184,6 +183,9 @@ class ORCAModel:
         example_batch_path = tf.io.gfile.join(checkpoint_path, "example_batch.msgpack")
         with tf.io.gfile.GFile(example_batch_path, "rb") as f:
             example_batch = flax.serialization.msgpack_restore(f.read())
+        # shim for migrating from "tasks" to "task"
+        if "tasks" in example_batch:
+            example_batch["task"] = example_batch.pop("tasks")
 
         logging.debug(
             "Using example batch with structure: %s",
@@ -199,7 +201,7 @@ class ORCAModel:
             partial(model_def.init, train=False),
             rng,
             example_batch["observation"],
-            example_batch["tasks"],
+            example_batch["task"],
             example_batch["observation"]["pad_mask"],
         )["params"]
         all_steps = orbax.checkpoint.utils.checkpoint_steps(checkpoint_path)
@@ -256,7 +258,7 @@ class ORCAModel:
             return model_def.init(
                 jax.random.PRNGKey(0),
                 example_batch["observation"],
-                example_batch["tasks"],
+                example_batch["task"],
                 example_batch["observation"]["pad_mask"],
                 train=False,
             )

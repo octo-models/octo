@@ -1,9 +1,7 @@
-from copy import deepcopy
-import functools
-
 from ml_collections import ConfigDict
 from ml_collections.config_dict import FieldReference, placeholder
 
+from orca.data.utils.data_utils import NormalizationType
 from orca.data.utils.text_processing import MuseEmbedding
 from orca.model import base_orca_model_config
 from orca.model.components.action_heads import MSEActionHead
@@ -109,7 +107,7 @@ def get_config(
 
 
 def get_dataset_config(window_size=1):
-    normalization_type = "normal"
+    normalization_type = NormalizationType.NORMAL
     task_augmentation = dict(
         task_augment_strategy="delete_task_conditioning",
         task_augment_kwargs=dict(
@@ -126,19 +124,15 @@ def get_dataset_config(window_size=1):
             data_mix=placeholder(str),
             # for v4 TPUs: "gs://rail-orca-central2/resize_336_336"
             data_dir=placeholder(str),
-            n_third_person_cameras=1,
-            n_wrist_cameras=0,
+            load_camera_views=("primary", "wrist"),
             load_depth=False,
-        ),
-        # common_dataset_kwargs override specific kwargs from dataset_kwargs_list
-        "common_dataset_kwargs": dict(
-            action_proprio_normalization_type=normalization_type,
         ),
         "traj_transform_kwargs": dict(
             window_size=window_size,
-            additional_action_window_size=0,
+            future_action_window_size=0,
             goal_relabeling_strategy="uniform",
             subsample_length=100,
+            **task_augmentation,
         ),
         "frame_transform_kwargs": dict(
             resize_size=(256, 256),
@@ -156,11 +150,10 @@ def get_dataset_config(window_size=1):
                     "random_hue",
                 ],
             ),
-            **task_augmentation,
+            num_parallel_calls=200,
         ),
         "traj_transform_threads": 48,  # shared between all datasets
         "traj_read_threads": 48,  # shared between all datasets
-        "frame_transform_threads": 200,  # not shared between datasets
         "shuffle_buffer_size": 100000,  # shared between all datasets
         "batch_size": 1024,
         "balance_weights": True,

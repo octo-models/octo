@@ -42,13 +42,17 @@ def get_config():
                 {
                     "name": "bridge_dataset",
                     "data_dir": "./tests/debug_dataset",
-                    "image_obs_keys": ["image_0"],
+                    "image_obs_keys": {"primary": "image_0"},
                     "state_obs_keys": ["state"],
+                    "language_key": "language_instruction",
                 },
             ],
+            "frame_transform_kwargs": {
+                "resize_size": (128, 128),
+                "num_parallel_calls": 4,
+            },
             "traj_transform_threads": 1,  # shared between all datasets
             "traj_read_threads": 1,  # shared between all datasets
-            "frame_transform_threads": 4,  # not shared between datasets
             "batch_size": 64,
             "sample_weights": None,
             "shuffle_buffer_size": 1000,

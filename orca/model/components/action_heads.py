@@ -111,7 +111,7 @@ class BasicActionHead(nn.Module):
             To predict actions for horizon {horizon} and future prediction horizon {self.pred_horizon},
             the ground-truth actions must have at least {horizon + self.pred_horizon - 1} timesteps, but got shape {actions.shape}.
 
-            Did you make sure to set "additional_action_window_size" correctly in the data config?
+            Did you make sure to set "future_action_window_size" correctly in the data config?
         """
 
         # compute log probabilities for predicted actions
@@ -321,7 +321,7 @@ class MSEActionHead(BasicActionHead):
             To predict actions for horizon {horizon} and future prediction horizon {self.pred_horizon},
             the ground-truth actions must have at least {horizon + self.pred_horizon - 1} timesteps, but got shape {actions.shape}.
 
-            Did you make sure to set "additional_action_window_size" correctly in the data config?
+            Did you make sure to set "future_action_window_size" correctly in the data config?
         """
         # chunk the target actions to match the predicted actions
         # only use first horizon timesteps from the window

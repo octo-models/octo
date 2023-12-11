@@ -424,12 +424,12 @@ def process_text(batch: Data, text_processor: Optional[TextProcessor]) -> Data:
 
     If the text processor is None, removes language entirely from the tasks.
     Expects batch to be a nested dictionary, where
-        batch["tasks"]["language_instruction"] is a sequence of byte strings
+        batch["task"]["language_instruction"] is a sequence of byte strings
     """
     if text_processor is None:
-        batch["tasks"].pop("language_instruction")
+        batch["task"].pop("language_instruction")
     else:
-        batch["tasks"]["language_instruction"] = text_processor.encode(
-            [s.decode("utf-8") for s in batch["tasks"]["language_instruction"]]
+        batch["task"]["language_instruction"] = text_processor.encode(
+            [s.decode("utf-8") for s in batch["task"]["language_instruction"]]
         )
     return batch

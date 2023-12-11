@@ -6,11 +6,8 @@ ignore=W503,
        E203,
        E731,
        E722,
-       F401,
        F841,
        E402,
        E741,
        E501,
        C406,
-per-file-ignores =
-     orca/data/dataset_transforms.py: F405

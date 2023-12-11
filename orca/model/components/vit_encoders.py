@@ -13,7 +13,6 @@ from flax import linen as nn
 import jax.numpy as jnp
 
 from orca.model.components.film_conditioning_layer import FilmConditioning
-from orca.model.components.transformer import Transformer
 
 T = TypeVar("T")
 
