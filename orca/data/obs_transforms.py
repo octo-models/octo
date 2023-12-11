@@ -2,9 +2,9 @@
 Contains observation-level transforms used in the orca data pipeline. These transforms operate on the
 "observation" dictionary, and are applied at a per-frame level.
 """
-import logging
 from typing import Mapping, Tuple, Union
 
+from absl import logging
 import dlimp as dl
 import tensorflow as tf
 
