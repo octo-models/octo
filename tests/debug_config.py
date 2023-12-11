@@ -1,7 +1,8 @@
 from copy import deepcopy
 
 from config import get_config as get_base_config
-from config import update_config
+
+from orca.config_utils import update_config
 
 get_base_config = get_base_config.__wrapped__
 
