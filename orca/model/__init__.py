@@ -1,8 +1,20 @@
 import logging
 from typing import Any, Dict
 
-from orca.config_utils import create_module_from_spec, ModuleSpec
 from orca.model.orca_model import OrcaModel, OrcaTransformer
+from orca.spec import ModuleSpec
+
+
+def base_orca_model_config():
+    return {
+        "observation_tokenizers": {},  # Dict[str, ModuleSpec], see orca.model.components.tokenizers for our standard tokenizers
+        "task_tokenizers": {},  # Dict[str, ModuleSpec], see orca.model.components.tokenizers for our standard tokenizers
+        "heads": {},  # Dict[str, ModuleSpec], see orca.model.components.heads for our standard heads
+        "readouts": {},  # Dict[str, int]
+        "token_embedding_size": 256,  # int
+        "transformer_kwargs": {},  # See orca.model.components.transformer.Transformer for kwargs (basically, scaling)
+        "max_horizon": 10,  # Sets the size of positional embeddings, and provides an upper limit on the maximum horizon of the model
+    }
 
 
 def create_model_def(
@@ -28,22 +40,13 @@ def create_model_def(
     logging.warn("Proper pad mask is set to True by default now.")
 
     observation_tokenizer_defs = {
-        k: create_module_from_spec(
-            spec, default_library="orca.model.components.tokenizers"
-        )
-        for k, spec in observation_tokenizers.items()
+        k: ModuleSpec.instantiate(spec)() for k, spec in observation_tokenizers.items()
     }
     task_tokenizer_defs = {
-        k: create_module_from_spec(
-            spec, default_library="orca.model.components.tokenizers"
-        )
-        for k, spec in task_tokenizers.items()
+        k: ModuleSpec.instantiate(spec)() for k, spec in task_tokenizers.items()
     }
 
-    head_defs = {
-        k: create_module_from_spec(spec, default_library="orca.model.components.heads")
-        for k, spec in heads.items()
-    }
+    head_defs = {k: ModuleSpec.instantiate(spec)() for k, spec in heads.items()}
 
     model_def = OrcaTransformer(
         observation_tokenizers=observation_tokenizer_defs,

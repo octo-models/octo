@@ -1,10 +1,15 @@
 from copy import deepcopy
 
 from config import get_config as get_base_config
+from ml_collections import ConfigDict
 
-from orca.config_utils import update_config
 
-get_base_config = get_base_config.__wrapped__
+def update_config(config: ConfigDict, **kwargs):
+    assert isinstance(config, ConfigDict)
+    updates = ConfigDict(kwargs)
+    new_config = deepcopy(config)
+    new_config.update(updates)
+    return new_config
 
 
 def get_config():

@@ -4,19 +4,18 @@ import functools
 from ml_collections import ConfigDict
 from ml_collections.config_dict import FieldReference, placeholder
 
-from orca.config_utils import (
-    base_orca_model_config,
-    create_module_spec,
-    kwargs_for_common_transformer_sizes,
-    wrap_for_commandline,
-)
+from orca.data.utils.text_processing import MuseEmbedding
+from orca.model import base_orca_model_config
+from orca.model.components.action_heads import MSEActionHead
+from orca.model.components.tokenizers import ImageTokenizer
+from orca.model.components.transformer import common_transformer_sizes
+from orca.model.components.vit_encoders import SmallStem16
+from orca.spec import ModuleSpec
 
 
 def get_model_config(transformer_size):
     """
     Transformer_size is one of ["dummy", "vanilla", "vit_s", "vit_b", "vit_l", "vit_h"]
-
-    See orca.model.config_utils:kwargs_for_common_transformer_sizes for more details
 
     This model stacks all the images from different cameras together, and passes it through
     a small convolutional stem before entering the transformer.
@@ -25,20 +24,22 @@ def get_model_config(transformer_size):
     before predicting the action using a MSE loss.
     """
     model_config = base_orca_model_config()
-    model_config.update(kwargs_for_common_transformer_sizes(transformer_size))
+    token_embedding_size, transformer_kwargs = common_transformer_sizes(
+        transformer_size
+    )
+    model_config["token_embedding_size"] = token_embedding_size
+    model_config["transformer_kwargs"] = transformer_kwargs
 
-    image_encoder = create_module_spec("SmallStem16", use_film=True)
-
-    model_config["observation_tokenizers"]["image"] = create_module_spec(
-        "ImageTokenizer",
+    model_config["observation_tokenizers"]["image"] = ModuleSpec.create(
+        ImageTokenizer,
         num_tokens=256,
         obs_stack_keys=["image_.*"],
         task_stack_keys=["image_.*"],
         task_film_keys=["language_instruction"],
-        encoder=image_encoder,
+        encoder=ModuleSpec.create(SmallStem16, use_film=True),
     )
-    model_config["heads"]["action"] = create_module_spec(
-        "MSEActionHead",
+    model_config["heads"]["action"] = ModuleSpec.create(
+        MSEActionHead,
         pred_horizon=1,
         action_dim=7,
         readout_key="obs",
@@ -46,10 +47,8 @@ def get_model_config(transformer_size):
     return model_config
 
 
-@wrap_for_commandline
 def get_config(
     transformer_size="vit_s",
-    modality="multimodal",
 ):
     print("Creating config with: ", locals())
     num_steps = FieldReference(default=int(2e6))
@@ -61,7 +60,7 @@ def get_config(
             save_dir=placeholder(str),
             model=get_model_config(transformer_size),
             window_size=window_size,
-            dataset_kwargs=get_dataset_config(modality, window_size),
+            dataset_kwargs=get_dataset_config(window_size),
             optimizer=dict(
                 learning_rate=dict(
                     name="rsqrt",
@@ -91,7 +90,7 @@ def get_config(
                 samples_per_state=8,
             ),
             resume_path=placeholder(str),
-            text_processor=create_module_spec("MuseEmbedding"),
+            text_processor=ModuleSpec.create(MuseEmbedding),
             pretrained_loaders=tuple(),
             wandb=dict(
                 project="orca",
@@ -109,20 +108,17 @@ def get_config(
     )
 
 
-def get_dataset_config(modality="multimodal", window_size=1):
+def get_dataset_config(window_size=1):
     normalization_type = "normal"
-    if modality == "multimodal":
-        task_augmentation = dict(
-            task_augment_strategy="delete_task_conditioning",
-            task_augment_kwargs=dict(
-                delete_key_groups_probs=[
-                    (["image_*"], 0.5),
-                    (["language_instruction"], 0.5),
-                ],
-            ),
-        )
-    else:
-        raise ValueError(f"Unknown modality {modality}")
+    task_augmentation = dict(
+        task_augment_strategy="delete_task_conditioning",
+        task_augment_kwargs=dict(
+            delete_key_groups_probs=[
+                (["image_*"], 0.5),
+                (["language_instruction"], 0.5),
+            ],
+        ),
+    )
 
     return {
         # oxe_kwargs will generate dataset_kwargs_list and sampling weights

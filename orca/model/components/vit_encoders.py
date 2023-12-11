@@ -266,15 +266,13 @@ class ViTResnet(nn.Module):
         return x
 
 
-SmallStem16 = ft.partial(
-    SmallStem,
-    patch_size=16,
-)
+class SmallStem16(SmallStem):
+    patch_size: int = 16
 
-SmallStem32 = ft.partial(
-    SmallStem,
-    patch_size=32,
-)
+
+class SmallStem32(SmallStem):
+    patch_size: int = 32
+
 
 vit_encoder_configs = {
     "patchify-32-film": ft.partial(
