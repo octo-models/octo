@@ -1,4 +1,3 @@
-import functools as ft
 from functools import partial
 from typing import Any, Callable, Sequence, Tuple
 
@@ -197,7 +196,7 @@ class ResNetEncoder(nn.Module):
     conv: ModuleDef = nn.Conv
     norm: str = "group"
     add_spatial_coordinates: bool = False
-    pooling_method: str = "avg"
+    pooling_method: str = "none"
     use_spatial_softmax: bool = False
     softmax_temperature: float = 1.0
     use_multiplicative_cond: bool = False
@@ -304,59 +303,8 @@ class ResNetEncoder(nn.Module):
         return x
 
 
-resnetv1_configs = {
-    "resnetv1-18": ft.partial(
-        ResNetEncoder, stage_sizes=(2, 2, 2, 2), block_cls=ResNetBlock
-    ),
-    "resnetv1-34": ft.partial(
-        ResNetEncoder, stage_sizes=(3, 4, 6, 3), block_cls=ResNetBlock
-    ),
-    "resnetv1-50": ft.partial(
-        ResNetEncoder, stage_sizes=[3, 4, 6, 3], block_cls=BottleneckResNetBlock
-    ),
-    "resnetv1-18-deeper": ft.partial(
-        ResNetEncoder, stage_sizes=(3, 3, 3, 3), block_cls=ResNetBlock
-    ),
-    "resnetv1-18-deepest": ft.partial(
-        ResNetEncoder, stage_sizes=(4, 4, 4, 4), block_cls=ResNetBlock
-    ),
-    "resnetv1-18-bridge": ft.partial(
-        ResNetEncoder,
-        stage_sizes=(2, 2, 2, 2),
-        block_cls=ResNetBlock,
-        num_spatial_blocks=8,
-    ),
-    "resnetv1-18-bridge-film": ft.partial(
-        ResNetEncoder,
-        stage_sizes=(2, 2, 2, 2),
-        block_cls=ResNetBlock,
-        num_spatial_blocks=8,
-        use_film=True,
-    ),
-    "resnetv1-34-bridge": ft.partial(
-        ResNetEncoder,
-        stage_sizes=(3, 4, 6, 3),
-        block_cls=ResNetBlock,
-        num_spatial_blocks=8,
-    ),
-    "resnetv1-34-bridge-film": ft.partial(
-        ResNetEncoder,
-        stage_sizes=(3, 4, 6, 3),
-        block_cls=ResNetBlock,
-        num_spatial_blocks=8,
-        use_film=True,
-    ),
-    "resnetv1-50-bridge": ft.partial(
-        ResNetEncoder,
-        stage_sizes=(3, 4, 6, 3),
-        block_cls=BottleneckResNetBlock,
-        num_spatial_blocks=8,
-    ),
-    "resnetv1-50-bridge-film": ft.partial(
-        ResNetEncoder,
-        stage_sizes=(3, 4, 6, 3),
-        block_cls=BottleneckResNetBlock,
-        num_spatial_blocks=8,
-        use_film=True,
-    ),
-}
+ResNet18 = partial(ResNetEncoder, block_cls=ResNetBlock, stage_sizes=(2, 2, 2, 2))
+ResNet34 = partial(ResNetEncoder, block_cls=ResNetBlock, stage_sizes=(3, 4, 6, 3))
+ResNet50 = partial(
+    ResNetEncoder, block_cls=BottleneckResNetBlock, stage_sizes=(3, 4, 6, 3)
+)

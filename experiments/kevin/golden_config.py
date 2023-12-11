@@ -1,5 +1,21 @@
+import copy
+from copy import deepcopy
+
 from config import get_config as get_base_config
-from config import update_config, wrap
+from ml_collections import ConfigDict
+
+from orca.data.utils.text_processing import HFTokenizer
+from orca.model.components.hf_weight_loaders import hf_weights_loader
+from orca.model.components.tokenizers import ImageTokenizer, LanguageTokenizer
+from orca.model.components.vit_encoders import SmallStem16
+from orca.utils.spec import ModuleSpec
+
+
+def update_config(config, **kwargs):
+    updates = ConfigDict(kwargs)
+    new_config = deepcopy(config)
+    new_config.update(updates)
+    return new_config
 
 
 def get_config(config_string=None):
@@ -10,6 +26,40 @@ def get_config(config_string=None):
     # Field reference can't be updated with update_config
     base_config["window_size"] = 2
     base_config["num_steps"] = 300000
+
+    #
+    # Changes to the model:
+    #
+
+    encoder = ModuleSpec.create(SmallStem16)
+
+    base_config["model"]["observation_tokenizers"] = {
+        "workspace": ModuleSpec.create(
+            ImageTokenizer,
+            obs_stack_keys=["image_primary"],
+            task_stack_keys=["image_primary"],
+            task_film_keys=[],
+            encoder=encoder,
+        ),
+        "wrist": ModuleSpec.create(
+            ImageTokenizer,
+            obs_stack_keys=["image_wrist"],
+            task_stack_keys=["image_wrist"],
+            task_film_keys=[],
+            encoder=encoder,
+        ),
+    }
+    base_config["model"]["task_tokenizers"] = {
+        "language": ModuleSpec.create(
+            LanguageTokenizer,
+            encoder="t5-base",
+            finetune_encoder=False,
+        ),
+    }
+
+    #
+    # Changes to data-loading
+    #
 
     # different augmentations for wrist and workspace
     workspace_augment_kwargs = dict(
@@ -65,39 +115,8 @@ def get_config(config_string=None):
             shuffle_buffer_size=500000,
             balance_weights=True,
         ),
-        model={
-            "observation_tokenizers": {
-                "workspace": {
-                    "cls_name": "image_tokenizer",
-                    "kwargs": dict(
-                        obs_stack_keys=["image_primary"],
-                        task_stack_keys=["image_primary"],
-                        task_film_keys=[],
-                        encoder="small-stem-16",
-                    ),
-                },
-                "wrist": {
-                    "cls_name": "image_tokenizer",
-                    "kwargs": dict(
-                        obs_stack_keys=["image_wrist"],
-                        task_stack_keys=["image_wrist"],
-                        task_film_keys=[],
-                        encoder="small-stem-16",
-                    ),
-                },
-            },
-            "task_tokenizers": {
-                "language": {
-                    "cls_name": "language_tokenizer",
-                    "kwargs": dict(
-                        encoder="t5-base",
-                        finetune_encoder=False,
-                    ),
-                },
-            },
-        },
-        text_processor="hf_tokenizer",
-        text_processor_kwargs=dict(
+        text_processor=ModuleSpec.create(
+            HFTokenizer,
             tokenizer_name="t5-base",
             encode_with_model=False,
             tokenizer_kwargs={
@@ -107,9 +126,13 @@ def get_config(config_string=None):
                 "return_tensors": "np",
             },
         ),
-        pretrained_loaders=["from_huggingface"],
-        pretrained_loader_kwargs=[dict(hf_model="t5-base")],
-        eval_datasets=["bridge_dataset"],
+        pretrained_loaders=(
+            ModuleSpec.create(
+                hf_weights_loader,
+                hf_model="t5-base",
+            ),
+        ),
+        eval_datasets=("bridge_dataset",),
     )
 
     return config

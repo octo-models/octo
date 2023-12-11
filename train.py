@@ -24,10 +24,9 @@ import wandb
 import orca
 from orca.data.dataset import make_interleaved_dataset
 from orca.data.oxe import make_oxe_dataset_kwargs_and_weights
-from orca.data.utils.text_processing import text_processors
 from orca.model import create_model_def
-from orca.model.components.hf_weight_loaders import weights_loaders
 from orca.utils import jax_utils
+from orca.utils.spec import ModuleSpec
 from orca.utils.train_callbacks import (
     RolloutVisualizationCallback,
     SaveCallback,
@@ -139,9 +138,7 @@ def main(_):
     if FLAGS.config.text_processor is None:
         text_processor = None
     else:
-        text_processor = text_processors[FLAGS.config.text_processor](
-            **FLAGS.config.text_processor_kwargs
-        )
+        text_processor = ModuleSpec.instantiate(FLAGS.config.text_processor)()
 
     def process_batch(batch):
         batch = process_text(batch, text_processor)
@@ -190,21 +187,7 @@ def main(_):
     )
 
     # set up model, optimizer, loss
-    model_def = create_model_def(
-        **FLAGS.config.model.to_dict(),
-    )
-
-    # pretrained weights to load
-    pretrained_loader_kwargs = FLAGS.config.pretrained_loader_kwargs or [
-        dict() for _ in FLAGS.config.pretrained_loaders
-    ]
-    assert len(pretrained_loader_kwargs) == len(
-        FLAGS.config.pretrained_loaders
-    ), "supply one kwarg dict for each loader!"
-    pretrained_loaders = [
-        partial(weights_loaders[w], **kwargs)
-        for w, kwargs in zip(FLAGS.config.pretrained_loaders, pretrained_loader_kwargs)
-    ]
+    model_def = create_model_def(**FLAGS.config.model.to_dict())
 
     # ensure construct rng is same on every host
     construct_rng = jax.random.PRNGKey(FLAGS.config.seed)
@@ -238,7 +221,7 @@ def main(_):
         tx,
         init_args=model_init_args,
         init_kwargs=dict(train=False),
-        pretrained_loaders=pretrained_loaders,
+        pretrained_loaders=FLAGS.config.pretrained_loaders,
     )
 
     example_batch = multihost_utils.process_allgather(example_batch)
