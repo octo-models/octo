@@ -1,4 +1,3 @@
-import functools as ft
 from functools import partial
 from typing import Any, Callable, Sequence, Tuple
 
