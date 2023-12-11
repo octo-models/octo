@@ -133,7 +133,7 @@ def get_dataset_config(modality="multimodal", window_size=1):
         ),
         "traj_transform_kwargs": dict(
             window_size=window_size,
-            additional_action_window_size=0,
+            future_action_window_size=0,
             goal_relabeling_strategy="uniform",
             subsample_length=100,
             **task_augmentation,

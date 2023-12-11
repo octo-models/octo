@@ -1,7 +1,7 @@
 from functools import partial
 import inspect
 import json
-from typing import Callable, List, Mapping, Optional, Sequence, Tuple, Union
+from typing import Callable, Mapping, Optional, Sequence, Tuple, Union
 
 from absl import logging
 import dlimp as dl
@@ -28,7 +28,7 @@ def apply_trajectory_transforms(
     goal_relabeling_strategy: Optional[str] = None,
     goal_relabeling_kwargs: dict = {},
     window_size: int = 1,
-    additional_action_window_size: int = 0,
+    future_action_window_size: int = 0,
     subsample_length: Optional[int] = None,
     skip_unlabeled: bool = False,
     max_action: Optional[float] = None,
@@ -52,10 +52,10 @@ def apply_trajectory_transforms(
             no goal relabeling. See `goal_relabeling.py`.
         goal_relabeling_kwargs (dict, optional): Additional keyword arguments to pass to the goal relabeling function.
         window_size (int, optional): The length of the snippets that trajectories are chunked into.
-        additional_action_window_size (int, optional): The number of additional actions beyond window_size to include
+        future_action_window_size (int, optional): The number of future actions beyond window_size to include
             in the chunked actions.
-        subsample_length (int, optional): If provided, trajectories longer than this will be
-            subsampled to this length (after goal relabeling).
+        subsample_length (int, optional): If provided, trajectories longer than this will be subsampled to
+            this length (after goal relabeling and chunking).
         skip_unlabeled (bool, optional): Whether to skip trajectories with no language labels.
         max_action: (float, optional): If provided, trajectories in which *any* action dimension
             of *any* transition has an absolute value larger than this will be skipped.
@@ -67,7 +67,11 @@ def apply_trajectory_transforms(
             function.
         num_parallel_calls (int, optional): number of parallel calls for map operations. Default to AUTOTUNE.
     """
-    if skip_unlabeled and "language_instruction" in dataset.element_spec["task"]:
+    if skip_unlabeled:
+        if "language_instruction" not in dataset.element_spec["task"]:
+            raise ValueError(
+                "skip_unlabeled=True but dataset does not have language labels."
+            )
         dataset = dataset.filter(
             lambda x: tf.math.reduce_any(x["task"]["language_instruction"] != "")
         )
@@ -108,12 +112,13 @@ def apply_trajectory_transforms(
             num_parallel_calls,
         )
 
-    # chunks actions and observations
+    # chunks observations and actions, giving them a new axis at index 1 of size `window_size` and
+    # `window_size + future_action_window_size`, respectively
     dataset = dataset.traj_map(
         partial(
             traj_transforms.chunk_act_obs,
             window_size=window_size,
-            additional_action_window_size=additional_action_window_size,
+            future_action_window_size=future_action_window_size,
         ),
         num_parallel_calls,
     )
@@ -158,7 +163,7 @@ def apply_frame_transforms(
 
     # convenience wrapper that takes a function that operates on a non-chunked "observation" dict and applies
     # it to the chunked "observation" dict as well as the non-chunked "task" dict
-    def apply_obs_transform(fn: Callable[[dict], dict], frame):
+    def apply_obs_transform(fn: Callable[[dict], dict], frame: dict) -> dict:
         # task is not chunked -- apply fn directly
         frame["task"] = fn(frame["task"])
         # observation is chunked -- apply fn along first axis
@@ -180,7 +185,7 @@ def apply_frame_transforms(
 
     if train:
         # augment all images with the same seed, skipping padding images
-        def aug(frame):
+        def aug(frame: dict):
             seed = tf.random.uniform([2], maxval=tf.dtypes.int32.max, dtype=tf.int32)
             aug_fn = partial(
                 obs_transforms.augment, seed=seed, augment_kwargs=image_augment_kwargs
@@ -195,6 +200,7 @@ def apply_frame_transforms(
 def make_dataset_from_rlds(
     name: str,
     data_dir: str,
+    *,
     train: bool,
     standardize_fn: Optional[Callable[[dict], dict]] = None,
     shuffle: bool = True,
@@ -233,9 +239,11 @@ def make_dataset_from_rlds(
     Args:
         name (str): The name of the RLDS dataset (usually "name" or "name:version").
         data_dir (str): The path to the data directory.
-        train (bool): Whether to use the training or validation set.
-        shuffle (bool, optional): Whether to shuffle the file read order (does NOT fully shuffle directories,
+        train (bool): Whether to use the training or validation split.
+        shuffle (bool, optional): Whether to shuffle the file read order (does NOT fully shuffle the dataset,
             since one file usually contains many trajectories!).
+        standardize_fn (Callable[[dict], dict], optional): A function that, if provided, will be the first
+            thing applied to each trajectory.
         image_obs_keys (Mapping[str, str|None]): Mapping from {new: old} indicating which RGB images to
             extract from the "observation" dict. `new_obs = {f"image_{new}": old_obs[old] for new, old in
             image_obs_keys.items()}`. If a value of `old` is None, inserts a padding image instead (empty
@@ -255,7 +263,7 @@ def make_dataset_from_rlds(
             keys. May also provide "num_transitions" and "num_trajectories" keys for downstream usage (e.g., for
             `make_interleaved_dataset`). If not provided, the statistics will be computed on the fly.
         absolute_action_mask (Sequence[bool], optional): By default, all action dimensions are assumed to be
-            relative. This is important for when `additional_action_window_size > 0`: actions that are taken
+            relative. This is important for when `future_action_window_size > 0`: actions that are taken
             from beyond the end of the trajectory (or beyond the goal timestep when goal relabeling is used)
             need to be made "neutral" to indicate that the task has been completed. For relative actions,
             "neutral" means zero, but for absolute actions, "neutral" means repeating the last valid action.
@@ -396,17 +404,18 @@ def make_dataset_from_rlds(
 
 def make_single_dataset(
     dataset_kwargs: dict,
-    traj_transform_kwargs: dict,
-    frame_transform_kwargs: dict,
+    *,
     train: bool,
+    traj_transform_kwargs: dict = {},
+    frame_transform_kwargs: dict = {},
 ) -> dl.DLataset:
     """Creates a single dataset from kwargs. Returns a dataset of trajectories.
 
     Args:
         dataset_kwargs: kwargs passed to `make_dataset_from_rlds` that are dataset-specific.
+        train: whether this is a training or validation dataset.
         traj_transform_kwargs: kwargs passed to 'apply_trajectory_transforms'.
         frame_transform_kwargs: kwargs passed to 'get_frame_transforms'.
-        train: whether this is a training or validation dataset.
     """
     dataset, dataset_statistics = make_dataset_from_rlds(
         **dataset_kwargs,
@@ -424,41 +433,47 @@ def make_single_dataset(
 
 
 def make_interleaved_dataset(
-    *,
     dataset_kwargs_list: Sequence[dict],
-    traj_transform_kwargs: dict,
-    frame_transform_kwargs: dict,
+    sample_weights: Optional[Sequence[float]] = None,
+    *,
     train: bool,
-    sample_weights: Optional[List[float]],
-    balance_weights: bool,
     shuffle_buffer_size: int,
     batch_size: int,
-    traj_transform_threads: Optional[int],
-    traj_read_threads: Optional[int],
+    traj_transform_kwargs: dict = {},
+    frame_transform_kwargs: dict = {},
+    balance_weights: bool = False,
+    traj_transform_threads: Optional[int] = None,
+    traj_read_threads: Optional[int] = None,
 ) -> dl.DLataset:
     """Creates an interleaved dataset from list of dataset kwargs. Returns a dataset of batched frames.
 
     Args:
         dataset_kwargs_list: list of kwargs, each element of which is passed to `make_dataset_from_rlds`.
-            "num_parallel_calls" and "num_parallel_reads" are ignored.
-        traj_transform_kwargs: kwargs passed to 'apply_trajectory_transforms'. "num_parallel_calls" is ignored.
-        frame_transform_kwargs: kwargs passed to 'get_frame_transforms'.
-        train: whether this is a training or validation dataset.
+            "num_parallel_calls" and "num_parallel_reads" are overidden using `traj_transform_threads` and
+            `traj_read_threads`, respectively.
         sample_weights: sampling weights for each dataset in list. If None, defaults to uniform.
+        train: whether this is a training or validation dataset.
+        shuffle_buffer_size: size of the dataset shuffle buffer (in number of frames).
+        batch_size: batch size.
+        traj_transform_kwargs: kwargs passed to `apply_trajectory_transforms`. "num_parallel_calls" is
+            overidden using `traj_transform_threads`.
+        frame_transform_kwargs: kwargs passed to `apply_frame_transforms`.
         balance_weights: if True, the sample weights are multiplied by the number of frames in each dataset.
             This makes it so that, if all the sample weights are equal, one full iteration through the interleaved
             dataset will correspond to one full iteration through each individual dataset (only in expectation,
             since in practice the sampling is random).
-        shuffle_buffer_size: size of the dataset shuffle buffer (in number of frames).
-        batch_size: batch size.
         traj_transform_threads: total number of parallel calls for trajectory transforms, distributed across
             datasets according to their sampling weights. If None, defaults to AUTOTUNE for every dataset.
         traj_read_threads: total number of parallel read workers for trajectory transforms, distributed across
             datasets according to their sampling weights. If None, defaults to AUTOTUNE for every dataset.
     """
+    # default to uniform sampling
     if not sample_weights:
         sample_weights = [1.0] * len(dataset_kwargs_list)
-    assert len(sample_weights) == len(dataset_kwargs_list)
+    if len(sample_weights) != len(dataset_kwargs_list):
+        raise ValueError(
+            f"sample_weights must be None or have length {len(dataset_kwargs_list)}."
+        )
 
     # go through datasets once to get sizes
     dataset_sizes = []
@@ -475,14 +490,8 @@ def make_interleaved_dataset(
     pprint_data_mixture(dataset_kwargs_list, sample_weights)
 
     # allocate threads based on weights
-    if traj_transform_threads is None:
-        threads_per_dataset = [tf.data.AUTOTUNE] * len(dataset_kwargs_list)
-    else:
-        threads_per_dataset = allocate_threads(traj_transform_threads, sample_weights)
-    if traj_read_threads is None:
-        reads_per_dataset = [tf.data.AUTOTUNE] * len(dataset_kwargs_list)
-    else:
-        reads_per_dataset = allocate_threads(traj_read_threads, sample_weights)
+    threads_per_dataset = allocate_threads(traj_transform_threads, sample_weights)
+    reads_per_dataset = allocate_threads(traj_read_threads, sample_weights)
 
     logging.info("Threads per dataset: %s", threads_per_dataset)
     logging.info("Reads per dataset: %s", reads_per_dataset)
@@ -510,7 +519,7 @@ def make_interleaved_dataset(
         ).flatten(num_parallel_calls=threads)
         datasets.append(dataset)
 
-    # interleave at the transition level and then shuffle
+    # interleave at the frame level and then shuffle
     dataset: dl.DLataset = dl.DLataset.sample_from_datasets(
         datasets, sample_weights
     ).shuffle(shuffle_buffer_size)

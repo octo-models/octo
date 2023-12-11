@@ -3,12 +3,15 @@ Contains observation-level transforms used in the orca data pipeline. These tran
 "observation" dictionary, and are applied at a per-frame level.
 """
 import logging
+from typing import Mapping, Tuple, Union
 
 import dlimp as dl
 import tensorflow as tf
 
 
-def augment(obs: dict, seed, augment_kwargs) -> dict:
+def augment(
+    obs: dict, seed: tf.Tensor, augment_kwargs: Union[dict, Mapping[str, dict]]
+) -> dict:
     """Augments images, skipping padding images."""
     image_names = {key[6:] for key in obs if key.startswith("image_")}
 
@@ -30,13 +33,17 @@ def augment(obs: dict, seed, augment_kwargs) -> dict:
                 **kwargs,
                 seed=seed + i,  # augment each image differently
             ),
-            lambda: obs[f"image_{name}"],
+            lambda: obs[f"image_{name}"],  # skip padding images
         )
 
     return obs
 
 
-def decode_and_resize(obs: dict, resize_size, depth_resize_size) -> dict:
+def decode_and_resize(
+    obs: dict,
+    resize_size: Union[Tuple[int, int], Mapping[str, Tuple[int, int]]],
+    depth_resize_size: Union[Tuple[int, int], Mapping[str, Tuple[int, int]]],
+) -> dict:
     """Decodes images and depth images, and then optionally resizes them."""
     # just gets the part after "image_" or "depth_"
     image_names = {key[6:] for key in obs if key.startswith("image_")}
