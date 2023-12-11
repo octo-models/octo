@@ -17,8 +17,8 @@ import optax
 
 from orca.data.utils.text_processing import TextProcessor
 from orca.model.components.hf_weight_loaders import WeightLoader
-from orca.spec import ModuleSpec
 from orca.utils import jax_utils
+from orca.utils.spec import ModuleSpec
 from orca.utils.typing import Config, Data, Params, PRNGKey
 
 

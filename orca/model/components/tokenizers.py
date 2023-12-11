@@ -9,7 +9,7 @@ from jax.scipy.stats import norm
 
 from orca.model.components.base import TokenGroup
 from orca.model.components.transformer import MAPHead
-from orca.spec import ModuleSpec
+from orca.utils.spec import ModuleSpec
 
 EPS = 1e-6
 
