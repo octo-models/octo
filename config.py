@@ -1,9 +1,7 @@
 from ml_collections import ConfigDict
 from ml_collections.config_dict import FieldReference, placeholder
 
-from orca.data.utils.data_utils import NormalizationType
 from orca.data.utils.text_processing import MuseEmbedding
-from orca.model import base_orca_model_config
 from orca.model.components.action_heads import MSEActionHead
 from orca.model.components.tokenizers import ImageTokenizer
 from orca.model.components.transformer import common_transformer_sizes
@@ -21,28 +19,34 @@ def get_model_config(transformer_size):
     The action head pools all the observation token embeddings, and passes it through a small MLP
     before predicting the action using a MSE loss.
     """
-    model_config = base_orca_model_config()
     token_embedding_size, transformer_kwargs = common_transformer_sizes(
         transformer_size
     )
-    model_config["token_embedding_size"] = token_embedding_size
-    model_config["transformer_kwargs"] = transformer_kwargs
-
-    model_config["observation_tokenizers"]["image"] = ModuleSpec.create(
-        ImageTokenizer,
-        num_tokens=256,
-        obs_stack_keys=["image_.*"],
-        task_stack_keys=["image_.*"],
-        task_film_keys=["language_instruction"],
-        encoder=ModuleSpec.create(SmallStem16, use_film=True),
+    return dict(
+        observation_tokenizers=dict(
+            image=ModuleSpec.create(
+                ImageTokenizer,
+                num_tokens=256,
+                obs_stack_keys=["image_.*"],
+                task_stack_keys=["image_.*"],
+                task_film_keys=["language_instruction"],
+                encoder=ModuleSpec.create(SmallStem16, use_film=True),
+            ),
+        ),
+        task_tokenizers=dict(),
+        heads=dict(
+            action=ModuleSpec.create(
+                MSEActionHead,
+                pred_horizon=1,
+                action_dim=7,
+                readout_key="obs",
+            ),
+        ),
+        readouts=dict(),
+        token_embedding_size=token_embedding_size,
+        transformer_kwargs=transformer_kwargs,
+        max_horizon=10,
     )
-    model_config["heads"]["action"] = ModuleSpec.create(
-        MSEActionHead,
-        pred_horizon=1,
-        action_dim=7,
-        readout_key="obs",
-    )
-    return model_config
 
 
 def get_config(
@@ -107,7 +111,6 @@ def get_config(
 
 
 def get_dataset_config(window_size=1):
-    normalization_type = NormalizationType.NORMAL
     task_augmentation = dict(
         task_augment_strategy="delete_task_conditioning",
         task_augment_kwargs=dict(
