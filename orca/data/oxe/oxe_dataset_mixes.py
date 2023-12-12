@@ -1,13 +1,5 @@
 """Defines dataset mixtures and weights for the Open X-Embodiment Datasets."""
-import copy
-from typing import Any, Dict, List, Tuple
 
-import numpy as np
-import tensorflow_datasets as tfds
-import tqdm
-
-from orca.data.oxe import oxe_dataset_configs
-from orca.data.utils.data_utils import ActionEncoding
 
 BRIDGE_MIX = [
     ("bridge_dataset", 1.0),
@@ -136,122 +128,9 @@ OXE_FULL_MIX = [
     ("berkeley_gnm_sac_son", 1.0),
 ]
 
-mixes = {
+OXE_NAMED_MIXES = {
     "bridge": BRIDGE_MIX,
     "rtx": RT_X_MIX,
     "rtx_franka": RT_X_MIX + OXE_FRANKA_MIX,
     "oxe_magic_soup": OXE_MAGIC_SOUP,
 }
-
-
-def make_oxe_dataset_kwargs_and_weights(
-    data_mix: List[Tuple[str, float]],
-    data_dir: str,
-    deduplicate: bool = True,
-    n_third_person_cameras: int = 1,
-    n_wrist_cameras: int = 0,
-    load_depth: bool = True,
-    load_proprio: bool = True,
-) -> Tuple[Dict[str, Any], List[float]]:
-    """
-    Generates dataset kwargs for a given dataset mix from the Open X-Embodiment dataset.
-
-    Args:
-         data_mix: List of (dataset name, sampling weight) tuples.
-         data_dir: Base data directory that gets registered in each dataset.
-         deduplicate: If True, discards any duplicate dataset entries based on dataset name.
-         n_third_person_cameras: Number of RGB third person camera input streams to load.
-         n_wrist_cameras: Number of RGB wrist camera input streams to load.
-         load_depth: If True, loads corresponding depth channels for each RGB channel.
-         load_proprio: If True, loads proprioceptive information.
-    Returns:
-        Tuple of (dataset_kwargs_list, sampling weights).
-    """
-    if deduplicate:
-        filtered_datasets, included_dataset_names = [], []
-        for dataset, weight in data_mix:
-            if dataset not in included_dataset_names:
-                filtered_datasets.append((dataset, weight))
-                included_dataset_names.append(dataset)
-            else:
-                print(f"Skipping duplicate: {(dataset, weight)}.")
-        data_mix = filtered_datasets
-
-    data_kwargs_list, weights = [], []
-    for dataset, weight in data_mix:
-        dataset_kwargs = copy.deepcopy(oxe_dataset_configs.OXE_DATASET_KWARGS[dataset])
-        if dataset_kwargs["action_encoding"] is not ActionEncoding.EEF_POS:
-            print(
-                f"Skipping {dataset} since only EEF pose delta action encoding "
-                f"is supported."
-            )
-            continue
-
-        # adjust loaded features in kwargs
-        dataset_kwargs["image_obs_keys"] = dataset_kwargs["image_obs_keys"][
-            :n_third_person_cameras
-        ] + (
-            dataset_kwargs["image_obs_keys"][-n_wrist_cameras:]
-            if n_wrist_cameras
-            else []
-        )
-
-        if not any([e is not None for e in dataset_kwargs["image_obs_keys"]]):
-            print(f"Skipping {dataset} since no image input was loaded from it.")
-            continue
-
-        dataset_kwargs["depth_obs_keys"] = dataset_kwargs["depth_obs_keys"][
-            :n_third_person_cameras
-        ] + (
-            dataset_kwargs["depth_obs_keys"][-n_wrist_cameras:]
-            if n_wrist_cameras
-            else []
-        )
-        if not load_depth:
-            dataset_kwargs.pop("depth_obs_keys")
-        if not load_proprio:
-            dataset_kwargs.pop("state_obs_keys")
-
-        # add dataset to list
-        data_kwargs_list.append(
-            {"name": dataset, "data_dir": data_dir, **dataset_kwargs}
-        )
-        weights.append(weight)
-
-    return data_kwargs_list, weights
-
-
-if __name__ == "__main__":
-    from orca.data.dataset import make_interleaved_dataset
-
-    base_data_config = dict(
-        window_size=4,
-        image_augment_kwargs=dict(
-            random_resized_crop=dict(scale=[0.8, 1.0], ratio=[0.9, 1.1]),
-            random_brightness=[0.2],
-            random_contrast=[0.8, 1.2],
-            random_saturation=[0.8, 1.2],
-            random_hue=[0.1],
-            augment_order=[
-                "random_resized_crop",
-                "random_brightness",
-                "random_contrast",
-                "random_saturation",
-                "random_hue",
-            ],
-        ),
-        goal_relabeling_strategy="uniform",
-        action_proprio_normalization_type="normal",
-        resize_size=(256, 256),
-    )
-    data_kwargs_list, weights = make_oxe_dataset_kwargs_and_weights(
-        data_mix=RT_X_MIX,
-        data_dir="gs://rail-orca-central1",
-        balance_sampling_ratios=True,
-        n_third_person_cameras=1,
-        load_depth=False,
-    )
-    ds = make_interleaved_dataset(
-        base_data_config, data_kwargs_list, train=True, sample_weights=weights
-    )
-    print(ds.element_spec)

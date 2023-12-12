@@ -13,7 +13,6 @@ from flax import linen as nn
 import jax.numpy as jnp
 
 from orca.model.components.film_conditioning_layer import FilmConditioning
-from orca.model.components.transformer import Transformer
 
 T = TypeVar("T")
 
@@ -264,6 +263,14 @@ class ViTResnet(nn.Module):
                 x = FilmConditioning()(x, cond_var)
 
         return x
+
+
+class SmallStem16(SmallStem):
+    patch_size: int = 16
+
+
+class SmallStem32(SmallStem):
+    patch_size: int = 32
 
 
 vit_encoder_configs = {

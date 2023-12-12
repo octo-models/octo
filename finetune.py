@@ -1,5 +1,6 @@
 import datetime
 from functools import partial
+import imp
 import json
 import os
 
@@ -15,9 +16,9 @@ import tqdm
 import wandb
 
 from orca.data.dataset import make_single_dataset
-from orca.data.utils.text_processing import text_processors
 from orca.utils.jax_utils import initialize_compilation_cache
 from orca.utils.pretrained_utils import ORCAModel
+from orca.utils.spec import ModuleSpec
 from orca.utils.train_callbacks import (
     RolloutVisualizationCallback,
     SaveCallback,
@@ -145,21 +146,28 @@ def main(_):
     if config["text_processor"] is None:
         text_processor = None
     else:
-        text_processor = text_processors[config["text_processor"]](
-            **config["text_processor_kwargs"]
-        )
+        text_processor = ModuleSpec.instantiate(config["text_processor"])()
 
     def process_batch(batch):
         batch = process_text(batch, text_processor)
         del batch["dataset_name"]
         return batch
 
+    # load standardize_fn from `path/to/file.py:fn_name` format
+    if (
+        standardize_fn := FLAGS.config["dataset_kwargs"].get("standardize_fn", None)
+    ) is not None:
+        path, name = standardize_fn.split(":")
+        # imp is deprecated, but it's also what ml_collections uses
+        standardize_fn = getattr(imp.load_source("standardize_fn", path), name)
+        del FLAGS.config["dataset_kwargs"]["standardize_fn"]
+        FLAGS.config["dataset_kwargs"]["standardize_fn"] = standardize_fn
+
     dataset = make_single_dataset(
         FLAGS.config.dataset_kwargs,
         FLAGS.config.traj_transform_kwargs,
         FLAGS.config.frame_transform_kwargs,
         train=True,
-        frame_transform_threads=FLAGS.config.frame_transform_threads,
     )
     train_data_iter = (
         dataset.repeat()
@@ -267,7 +275,7 @@ def main(_):
         model = model_def.bind({"params": params}, rngs={"dropout": rng})
         transformer_embeddings = model.orca_transformer(
             batch["observation"],
-            batch["tasks"],
+            batch["task"],
             batch["observation"]["pad_mask"],
             train=train,
         )

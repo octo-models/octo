@@ -23,11 +23,10 @@ import wandb
 
 import orca
 from orca.data.dataset import make_interleaved_dataset
-from orca.data.oxe.oxe_dataset_mixes import make_oxe_dataset_kwargs_and_weights, mixes
-from orca.data.utils.text_processing import text_processors
+from orca.data.oxe import make_oxe_dataset_kwargs_and_weights
 from orca.model import create_model_def
-from orca.model.components.hf_weight_loaders import weights_loaders
 from orca.utils import jax_utils
+from orca.utils.spec import ModuleSpec
 from orca.utils.train_callbacks import (
     RolloutVisualizationCallback,
     SaveCallback,
@@ -139,9 +138,7 @@ def main(_):
     if FLAGS.config.text_processor is None:
         text_processor = None
     else:
-        text_processor = text_processors[FLAGS.config.text_processor](
-            **FLAGS.config.text_processor_kwargs
-        )
+        text_processor = ModuleSpec.instantiate(FLAGS.config.text_processor)()
 
     def process_batch(batch):
         batch = process_text(batch, text_processor)
@@ -151,23 +148,13 @@ def main(_):
     # load datasets
     if "oxe_kwargs" in FLAGS.config.dataset_kwargs:
         # create dataset_kwargs_list from oxe_kwargs
-        oxe_kwargs = FLAGS.config.dataset_kwargs["oxe_kwargs"].to_dict()
-        del FLAGS.config.dataset_kwargs["oxe_kwargs"]
-        oxe_kwargs["data_mix"] = mixes[oxe_kwargs["data_mix"]]
         (
-            dataset_kwargs_list,
-            dataset_sampling_weights,
-        ) = make_oxe_dataset_kwargs_and_weights(**oxe_kwargs)
-        FLAGS.config.dataset_kwargs["dataset_kwargs_list"] = dataset_kwargs_list
-        FLAGS.config.dataset_kwargs["sample_weights"] = dataset_sampling_weights
-
-    # override each element of dataset_kwargs_list with common_dataset_kwargs
-    if "common_dataset_kwargs" in FLAGS.config.dataset_kwargs:
-        FLAGS.config.dataset_kwargs["dataset_kwargs_list"] = [
-            {**kwargs, **FLAGS.config.dataset_kwargs["common_dataset_kwargs"]}
-            for kwargs in FLAGS.config.dataset_kwargs["dataset_kwargs_list"]
-        ]
-        del FLAGS.config.dataset_kwargs["common_dataset_kwargs"]
+            FLAGS.config.dataset_kwargs["dataset_kwargs_list"],
+            FLAGS.config.dataset_kwargs["sample_weights"],
+        ) = make_oxe_dataset_kwargs_and_weights(
+            **FLAGS.config.dataset_kwargs["oxe_kwargs"]
+        )
+        del FLAGS.config.dataset_kwargs["oxe_kwargs"]
 
     train_data = make_interleaved_dataset(**FLAGS.config.dataset_kwargs, train=True)
 
@@ -200,27 +187,13 @@ def main(_):
     )
 
     # set up model, optimizer, loss
-    model_def = create_model_def(
-        **FLAGS.config.model.to_dict(),
-    )
-
-    # pretrained weights to load
-    pretrained_loader_kwargs = FLAGS.config.pretrained_loader_kwargs or [
-        dict() for _ in FLAGS.config.pretrained_loaders
-    ]
-    assert len(pretrained_loader_kwargs) == len(
-        FLAGS.config.pretrained_loaders
-    ), "supply one kwarg dict for each loader!"
-    pretrained_loaders = [
-        partial(weights_loaders[w], **kwargs)
-        for w, kwargs in zip(FLAGS.config.pretrained_loaders, pretrained_loader_kwargs)
-    ]
+    model_def = create_model_def(**FLAGS.config.model.to_dict())
 
     # ensure construct rng is same on every host
     construct_rng = jax.random.PRNGKey(FLAGS.config.seed)
     model_init_args = (
         example_batch["observation"],
-        example_batch["tasks"],
+        example_batch["task"],
         example_batch["observation"]["pad_mask"],
     )
     print(
@@ -248,7 +221,7 @@ def main(_):
         tx,
         init_args=model_init_args,
         init_kwargs=dict(train=False),
-        pretrained_loaders=pretrained_loaders,
+        pretrained_loaders=FLAGS.config.pretrained_loaders,
     )
 
     example_batch = multihost_utils.process_allgather(example_batch)
@@ -299,7 +272,7 @@ def main(_):
         model = model_def.bind({"params": params}, rngs={"dropout": rng})
         transformer_embeddings = model.orca_transformer(
             batch["observation"],
-            batch["tasks"],
+            batch["task"],
             batch["observation"]["pad_mask"],
             train=train,
         )

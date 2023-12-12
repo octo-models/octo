@@ -1,7 +1,5 @@
 from typing import Optional, Sequence
 
-from flax.core import FrozenDict
-import jax.numpy as jnp
 import numpy as np
 import tensorflow as tf
 
@@ -52,7 +50,7 @@ class HFTokenizer(TextProcessor):
 class MuseEmbedding(TextProcessor):
     def __init__(self):
         import tensorflow_hub as hub  # lazy import
-        import tensorflow_text  # required for muse
+        import tensorflow_text  # noqa: F401
 
         self.muse_model = hub.load(MULTI_MODULE)
 
@@ -81,10 +79,10 @@ class CLIPTextProcessor(TextProcessor):
             text=strings,
             **self.kwargs,
         )
-        inputs["position_ids"] = jnp.expand_dims(
-            jnp.arange(inputs["input_ids"].shape[1]), axis=0
+        inputs["position_ids"] = np.expand_dims(
+            np.arange(inputs["input_ids"].shape[1]), axis=0
         ).repeat(inputs["input_ids"].shape[0], axis=0)
-        return FrozenDict(inputs)
+        return inputs
 
 
 text_processors = {

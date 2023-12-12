@@ -24,34 +24,42 @@ class OrcaTransformer(nn.Module):
 
         [task, observation 0, observation 1, observation 2, ...]
 
-    but with additional groups of tokens ("readouts") that provide
-    a way of "reading out" the information in the transformer.
+    The task is tokenized using a set of *task tokenizers* (for example, a tokenizer that processes the
+    language instruction into tokens, or one that processes the goal images into tokens).
 
-    For example, we may have an "action" readout that provides embeddings that are
-    useful for predicting actions, and a "value" readout with embeddings that are useful for
-    predicting values.
+    The observation at each timestep is tokenized using a set of *observation tokenizers*
+    (for example, a tokenizer that processes the primary image into tokens, or one that processes
+    the wrist image into tokens).
 
+    We introduce additional tokens ("readouts") that "read out" the information
+    in the transformer for downstream action or value prediction. For example, we
+    may have an "action" readout that provides embeddings that are useful for predicting
+    actions, and a "value" readout with embeddings that are useful for predicting values.
 
     The transformer is a blockwise-causal transformer, where each timestep only attends to the same or previous timesteps.
+    The easiest way to understand how the model works is to run:
 
-    The model performs a forward pass of the transformer on the following sequence:
+    ```
+        >>> model(observations, tasks, pad_mask, verbose=True)
+    ```
+
+    Generally, the model runs the transformer on something like the following sequence:
 
     [
-        <task tokens>,
-        <observation ts0 tokens>, <readout1 ts0 tokens>, <readout2 ts0 tokens>, ...
-        <observation ts1 tokens>, <readout1 ts1 tokens>, <readout2 ts1 tokens>, ...
+        <task language tokens>,
+        <t=0 "image_primary" tokens>, <t=0 "image_wrist" tokens>, <t=0 readout_action tokens>, ...
+        <t=1 "image_primary" tokens>, <t=1 "image_wrist" tokens>, <t=1 readout_action tokens>, ...
+        <t=2 "image_primary" tokens>, <t=2 "image_wrist" tokens>, <t=2 readout_action tokens>, ...
         ...
     ]
 
     The observation tokens attend to the task prefix, and to all observation tokens in the same or previous timesteps.
-    Readouts provide a mechanism for "reading out" the information in the transformer. They can attend to the task prefix,
-    and causally to all previous observation tokens, but
-        - Readouts cannot attend to other readouts
-        - Observation and task tokens cannot attend to readouts
+    (So, "image_wrist" can attend to "image_primary" and vice versa)
 
-    By this design, each readout does not influence the computation happening in the task or observation tokens,
-    and each readout is **independent of one another**. This flexible design allows us to hot-swap in different
-    readouts at any time (e.g. we can run with the action readout or the value readout or both at the same time).
+    Readouts provide a mechanism for "reading out" the information in the transformer. They are designed to
+    only *read* from the sequence before it, without the ability to influence (i.e. write) the computation
+    for any of the non-readout tokens. By design, different readouts (e.g. "action" vs "value") are completely
+    independent of each other, meaning they can be run separately without affecting each other.
 
     Args:
         observations_tokenizers (Dict[str, nn.Module]): Dictionary of flax modules for tokenizing the observations.
@@ -70,8 +78,8 @@ class OrcaTransformer(nn.Module):
     task_tokenizers: Dict[str, nn.Module]
     readouts: Dict[str, int]
     transformer_kwargs: Dict
-    token_embedding_size: int = 512
-    max_horizon: int = 1
+    token_embedding_size: int
+    max_horizon: int
 
     @nn.compact
     def __call__(
@@ -119,20 +127,26 @@ class OrcaTransformer(nn.Module):
         ), "observations must have the same horizon"
 
         #
+        # Attention rules for the transformer
+        #
+
+        # Tasks attend to all other tasks, but not to observations or readouts
+        task_attention_rules = {"task_*": AttentionRule.CAUSAL}
+
+        # Observations attend to all tasks and all other observations tokens causally,
+        # e.g. at same timestep or before, but do not attend to readouts
+
+        observation_attention_rules = {
+            "task_*": AttentionRule.CAUSAL,
+            "obs_*": AttentionRule.CAUSAL,
+        }
+
+        #
         # Create inputs for the transformer
         #
 
         all_prefix_groups = []
         all_timestep_groups = []
-
-        # Tasks attend to all other tasks, but not to observations or readouts
-        task_attention_rules = {"task_*": AttentionRule.CAUSAL}
-
-        # Observations attend to all tasks and previous observations causally, but not to readouts
-        observation_attention_rules = {
-            "task_*": AttentionRule.CAUSAL,
-            "obs_*": AttentionRule.CAUSAL,
-        }
 
         #
         # First, add the task tokens
@@ -306,7 +320,7 @@ class OrcaModel(nn.Module):
                 where each element has shape (batch, *).
             pad_mask: A boolean mask of shape (batch, horizon) where False indicates a padded timestep.
             train: Run in training mode
-            verbose: If True, prints out the structure of the OrcaTransformer
+            verbose: If True, prints out the structure of the OrcaTransformer (useful for debugging!)
 
         Returns:
             transformer_embeddings: See OrcaTransformer.__call__
