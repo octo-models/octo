@@ -14,19 +14,14 @@ from absl import app, flags, logging
 import click
 import cv2
 from envs.widowx_env import convert_obs, state_to_eep, wait_for_obs, WidowXGym
+import flax
 import imageio
 import jax
 import jax.numpy as jnp
 import numpy as np
-import tensorflow as tf
 from widowx_envs.widowx_env_service import WidowXClient, WidowXConfigs, WidowXStatus
 
 from orca.model.orca_model import ORCAModel
-from orca.utils.eval_utils import (
-    download_checkpoint_from_gcs,
-    sample_actions,
-    supply_rng,
-)
 from orca.utils.gym_wrappers import HistoryWrapper, RHCWrapper, UnnormalizeActionProprio
 from orca.utils.gym_wrappers import TemporalEnsembleWrapper  # noqa: F401
 
@@ -36,13 +31,10 @@ logging.set_verbosity(logging.WARNING)
 
 FLAGS = flags.FLAGS
 
-flags.DEFINE_multi_string(
+flags.DEFINE_string(
     "checkpoint_weights_path", None, "Path to checkpoint", required=True
 )
-flags.DEFINE_multi_integer("checkpoint_step", None, "Checkpoint step", required=True)
-flags.DEFINE_string(
-    "checkpoint_cache_dir", "/tmp/", "Where to cache checkpoints downloaded from GCS"
-)
+flags.DEFINE_integer("checkpoint_step", None, "Checkpoint step", required=True)
 
 # custom to bridge_data_robot
 flags.DEFINE_string("ip", "localhost", "IP address of the robot")
@@ -111,45 +103,54 @@ def main(_):
         assert STEP_DURATION == 0.2, STEP_DURATION_MESSAGE
 
     # load models
-    assert len(FLAGS.checkpoint_weights_path) == len(FLAGS.checkpoint_step)
-    models = {}
-    for weights_path, step in zip(
+    model = ORCAModel.load_pretrained(
         FLAGS.checkpoint_weights_path,
         FLAGS.checkpoint_step,
-    ):
-        weights_path, step = download_checkpoint_from_gcs(
-            weights_path,
-            step,
-            FLAGS.checkpoint_cache_dir,
-        )
-        assert tf.io.gfile.exists(weights_path), weights_path
-        run_name = weights_path.rpartition("/")[2]
-        models[f"{run_name}-{step}"] = ORCAModel.load_pretrained(
-            weights_path, step=int(step)
-        )
+    )
 
-    # load action metadata
-    model = next(iter(models.values()))
-    metadata = model.load_dataset_statistics(FLAGS.checkpoint_weights_path[0])
-
-    # wrap the robot envionment
-    env = UnnormalizeActionProprio(env, metadata, normalization_type="normal")
+    # wrap the robot environment
+    env = UnnormalizeActionProprio(
+        env, model.dataset_statistics, normalization_type="normal"
+    )
     env = HistoryWrapper(env, FLAGS.horizon)
     # env = TemporalEnsembleWrapper(env, FLAGS.pred_horizon)
     env = RHCWrapper(env, FLAGS.exec_horizon)
 
     # create policy functions
-    policies = {}
-    for name, model in models.items():
-        policy_fn = supply_rng(
-            partial(
-                sample_actions,
-                model,
-                argmax=FLAGS.deterministic,
-                temperature=FLAGS.temperature,
-            ),
+    @partial(jax.jit, static_argnames="argmax")
+    def sample_actions(
+        pretrained_model: ORCAModel,
+        observations,
+        tasks,
+        rng,
+        argmax=False,
+        temperature=1.0,
+    ):
+        # add batch dim to observations
+        observations = jax.tree_map(lambda x: x[None], observations)
+        logging.warning(
+            "observations: %s",
+            flax.core.pretty_repr(jax.tree_map(jnp.shape, observations)),
         )
-        policies[name] = policy_fn
+        logging.warning(
+            "tasks: %s", flax.core.pretty_repr(jax.tree_map(jnp.shape, tasks))
+        )
+        actions = pretrained_model.sample_actions(
+            observations,
+            tasks,
+            rng=rng,
+            argmax=argmax,
+            temperature=temperature,
+        )
+        # remove batch dim
+        return actions[0]
+
+    policy_fn = partial(
+        sample_actions,
+        model,
+        argmax=FLAGS.deterministic,
+        temperature=FLAGS.temperature,
+    )
 
     goal_image = jnp.zeros((FLAGS.im_size, FLAGS.im_size, 3), dtype=np.uint8)
     goal_instruction = ""
@@ -160,21 +161,6 @@ def main(_):
 
     # goal sampling loop
     while True:
-        # ask for which policy to use
-        if len(policies) == 1:
-            policy_idx = 0
-            print("Using default policy 0: ", list(policies.keys())[policy_idx])
-        else:
-            print("policies:")
-            for i, name in enumerate(policies.keys()):
-                print(f"{i}) {name}")
-            policy_idx = click.prompt("Select policy", type=int)
-
-        policy_name = list(policies.keys())[policy_idx]
-        policy_fn = policies[policy_name]
-        model = models[policy_name]
-        model: ORCAModel  # type hinting
-
         if not modality:
             modality = click.prompt(
                 "Language or goal image?", type=click.Choice(["l", "g"])
@@ -255,7 +241,7 @@ def main(_):
             curr_time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
             save_path = os.path.join(
                 FLAGS.video_save_path,
-                f"{curr_time}_{policy_name}.mp4",
+                f"{curr_time}.mp4",
             )
             video = np.concatenate([np.stack(goals), np.stack(images)], axis=1)
             imageio.mimsave(save_path, video, fps=1.0 / STEP_DURATION * 3)
