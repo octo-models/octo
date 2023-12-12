@@ -83,10 +83,3 @@ class CLIPTextProcessor(TextProcessor):
             np.arange(inputs["input_ids"].shape[1]), axis=0
         ).repeat(inputs["input_ids"].shape[0], axis=0)
         return inputs
-
-
-text_processors = {
-    "hf_tokenizer": HFTokenizer,
-    "muse_embedding": MuseEmbedding,
-    "clip_processor": CLIPTextProcessor,
-}

@@ -15,6 +15,7 @@ import tqdm
 
 from orca.data.dataset import make_single_dataset
 from orca.data.utils.text_processing import TextProcessor
+from orca.model.orca_module import ORCAModule
 from orca.utils.train_utils import batched_apply, TrainState
 from orca.utils.typing import Any, Data, Sequence
 from orca.utils.visualization_lib import RolloutVisualizer, Visualizer
@@ -57,14 +58,14 @@ def create_validation_dataset(
 
 @dataclass
 class SaveCallback(Callback):
-    """Callback that saves checkpoints to `save_dir`. If `save_dir` is None, does nothing.  Also
-    includes an `open` method for saving arbitrary files to `save_dir`.
-    """
+    """Callback that saves checkpoints to `save_dir`. If `save_dir` is None, does nothing."""
 
     save_dir: Optional[str]
 
     def __post_init__(self):
         if self.save_dir is not None:
+            if not self.save_dir.startswith("gs://"):
+                self.save_dir = os.path.abspath(self.save_dir)
             if jax.process_index() == 0:
                 tf.io.gfile.makedirs(self.save_dir)
                 logging.info(f"Created {self.save_dir}")
@@ -85,23 +86,14 @@ class SaveCallback(Callback):
 
     def __call__(self, train_state: TrainState, step: int):
         if self.save_dir is not None:
-            self.params_checkpointer.save(
-                step,
-                train_state.params,
-                {"save_args": orbax_utils.save_args_from_target(train_state.params)},
+            train_state.model.save_pretrained(
+                step, checkpoint_manager=self.params_checkpointer
             )
             self.state_checkpointer.save(
                 step,
                 train_state,
                 {"save_args": orbax_utils.save_args_from_target(train_state)},
             )
-
-    def open(self, fname: str, mode: str):
-        if self.save_dir is not None and jax.process_index() == 0:
-            logging.info(f"Saving to {tf.io.gfile.join(self.save_dir, fname)}")
-            return tf.io.gfile.GFile(tf.io.gfile.join(self.save_dir, fname), mode)
-        else:
-            return open(os.devnull, mode)
 
 
 def remove_text(tasks: Data, zero_text_encoding: Data):
@@ -145,7 +137,13 @@ def remove_images(tasks: Data):
 
 @partial(jax.jit, static_argnames=("samples_per_state", "policy_mode"))
 def get_policy_sampled_actions(
-    state, observations, tasks, *, zero_text, samples_per_state, policy_mode=None
+    state: TrainState,
+    observations,
+    tasks,
+    *,
+    zero_text,
+    samples_per_state,
+    policy_mode=None,
 ):
     # only use first horizon timesteps as input to predict_action
 
@@ -156,15 +154,15 @@ def get_policy_sampled_actions(
     elif policy_mode == "unconditioned":
         tasks = remove_text(remove_images(tasks), zero_text)
 
-    def get_actions(model, observations, tasks, train):
-        transformer_embeddings = model.orca_transformer(
+    def get_actions(module: ORCAModule, observations, tasks, train):
+        transformer_embeddings = module.orca_transformer(
             observations,
             tasks,
             observations["pad_mask"],
             train=train,
         )
 
-        actions = model.heads["action"].predict_action(
+        actions = module.heads["action"].predict_action(
             transformer_embeddings,
             train=train,
             argmax=False,
@@ -173,8 +171,8 @@ def get_policy_sampled_actions(
         )
         return actions
 
-    actions = state.apply_fn(
-        {"params": state.params},
+    actions = state.model.model_def.apply(
+        {"params": state.model.params},
         observations,
         tasks,
         train=False,
@@ -226,11 +224,10 @@ class ValidationCallback(Callback):
             jax.jit,
             out_shardings=jax.sharding.PositionalSharding(jax.devices()).replicate(),
         )
-        def eval_step(state, batch):
+        def eval_step(state: TrainState, batch: Data):
             loss_fn_partial = partial(
                 self.loss_fn,
-                params=state.params,
-                state=state,
+                params=state.model.params,
                 rng=state.rng,
                 train=False,
             )

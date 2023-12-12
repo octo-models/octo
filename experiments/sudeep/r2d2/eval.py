@@ -13,7 +13,7 @@ import jax
 import jax.numpy as jnp
 from functools import partial
 
-from orca.utils.pretrained_utils import ORCAModel
+from orca.model.orca_model import ORCAModel
 from orca.data.utils.data_utils import StateEncoding
 import optax
 
