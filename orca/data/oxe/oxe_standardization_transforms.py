@@ -42,16 +42,14 @@ def bridge_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
 
 def rt1_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
     # make gripper action absolute action, +1 = open, 0 = close
-    gripper_action = trajectory["action"]["gripper_closedness_action"]
+    gripper_action = trajectory["action"]["gripper_closedness_action"][:, 0]
     gripper_action = rel2abs_gripper_actions(gripper_action)
-    gripper_action = binarize_gripper_actions(gripper_action)
-    gripper_action = invert_gripper_actions(gripper_action)
 
     trajectory["action"] = tf.concat(
         (
             trajectory["action"]["world_vector"],
             trajectory["action"]["rotation_delta"],
-            gripper_action,
+            gripper_action[:, None],
         ),
         axis=-1,
     )
@@ -63,16 +61,14 @@ def rt1_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
 
 def kuka_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
     # make gripper action absolute action, +1 = open, 0 = close
-    gripper_action = trajectory["action"]["gripper_closedness_action"]
+    gripper_action = trajectory["action"]["gripper_closedness_action"][:, 0]
     gripper_action = rel2abs_gripper_actions(gripper_action)
-    gripper_action = binarize_gripper_actions(gripper_action)
-    gripper_action = invert_gripper_actions(gripper_action)
 
     trajectory["action"] = tf.concat(
         (
             trajectory["action"]["world_vector"],
             trajectory["action"]["rotation_delta"],
-            gripper_action,
+            gripper_action[:, None],
         ),
         axis=-1,
     )
@@ -129,16 +125,14 @@ def jaco_play_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
     ][:, -1:]
 
     # make gripper action absolute action, +1 = open, 0 = close
-    gripper_action = trajectory["action"]["gripper_closedness_action"]
+    gripper_action = trajectory["action"]["gripper_closedness_action"][:, 0]
     gripper_action = rel2abs_gripper_actions(gripper_action)
-    gripper_action = binarize_gripper_actions(gripper_action)
-    gripper_action = invert_gripper_actions(gripper_action)
 
     trajectory["action"] = tf.concat(
         (
             trajectory["action"]["world_vector"],
             tf.zeros_like(trajectory["action"]["world_vector"]),
-            gripper_action,
+            gripper_action[:, None],
         ),
         axis=-1,
     )
@@ -187,16 +181,14 @@ def roboturk_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
 
 def nyu_door_opening_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
     # make gripper action absolute action, +1 = open, 0 = close
-    gripper_action = trajectory["action"]["gripper_closedness_action"]
+    gripper_action = trajectory["action"]["gripper_closedness_action"][:, 0]
     gripper_action = rel2abs_gripper_actions(gripper_action)
-    gripper_action = binarize_gripper_actions(gripper_action)
-    gripper_action = invert_gripper_actions(gripper_action)
 
     trajectory["action"] = tf.concat(
         (
             trajectory["action"]["world_vector"],
             trajectory["action"]["rotation_delta"],
-            gripper_action,
+            gripper_action[:, None],
         ),
         axis=-1,
     )
@@ -237,16 +229,14 @@ def berkeley_autolab_ur5_dataset_transform(
     )
 
     # make gripper action absolute action, +1 = open, 0 = close
-    gripper_action = trajectory["action"]["gripper_closedness_action"][:, None]
+    gripper_action = trajectory["action"]["gripper_closedness_action"]
     gripper_action = rel2abs_gripper_actions(gripper_action)
-    gripper_action = binarize_gripper_actions(gripper_action)
-    gripper_action = invert_gripper_actions(gripper_action)
 
     trajectory["action"] = tf.concat(
         (
             trajectory["action"]["world_vector"],
             trajectory["action"]["rotation_delta"],
-            gripper_action,
+            gripper_action[:, None],
         ),
         axis=-1,
     )
