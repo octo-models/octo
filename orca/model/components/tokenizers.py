@@ -305,18 +305,3 @@ TOKENIZERS = {
     "bin_tokenizer": BinTokenizer,
     "lowdim_obs_tokenizer": LowdimObsTokenizer,
 }
-
-
-if __name__ == "__main__":
-    import numpy as np
-
-    action = np.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7])
-    action = np.broadcast_to(action, [2, 2, 7])
-    tokenizer = BinTokenizer(n_bins=256, bin_type="normal")
-    params = tokenizer.init(jax.random.PRNGKey(0), action)
-    action_tokens = tokenizer.apply(params, action)
-    detokenized_actions = tokenizer.apply(params, action_tokens, method="decode")
-
-    print(action)
-    print(action_tokens)
-    print(detokenized_actions)

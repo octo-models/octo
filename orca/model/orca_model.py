@@ -297,7 +297,8 @@ class ORCAModel:
         """Initializes a model with a fresh set of weights from a given config + example_batch.
 
         Args:
-            config (Dict[str, Any]): Config dict.
+            config (Dict[str, Any]): Config dict. The only required key is "model", but other configuration
+                may be saved for posterity.
             example_batch (Dict[str, Any]): Example batch.
             text_processor (Any, optional): Preprocessor for text inputs.
             verbose (bool, optional): Whether to print out a summary of the model.
