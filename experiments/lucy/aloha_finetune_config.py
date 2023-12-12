@@ -2,7 +2,7 @@ from copy import deepcopy
 
 from ml_collections import ConfigDict
 from ml_collections.config_dict import FieldReference, placeholder
-from config import wrap
+from scripts.configs.config import wrap
 
 from orca.data.utils.data_utils import ActionEncoding, StateEncoding
 from experiments.lucy.aloha_wrapper import AlohaGymEnv

@@ -3,8 +3,8 @@
 ![](https://github.com/rail-berkeley/orca/workflows/run-debug/badge.svg)
 ![](https://github.com/rail-berkeley/orca/workflows/pre-commit/badge.svg)
 
-This repo contains code for training and finetuning large robot policies.
-Currently, ORCA policies are causal transformer models trained on a diverse mix of robot datasets using BC.
+This repo contains code for training and finetuning ORCA generalist robotic models (GRMs).
+ORCA models are transformer-based diffusion policies, trained on a diverse mix of >1M robot trajectories.
 
 ![ORCA model](docs/assets/orca_model.jpeg)
 
@@ -34,69 +34,64 @@ Test the installation by training on the debug dataset:
 python train.py --config tests/debug_config.py --debug
 ```
 
-## Training
+## Checkpoints
 
-### Data
-We use the RLDS data format and provide fast, parallelized data loaders for policy training. To download the datasets
-please reach out to [pertsch@berkeley.edu](mailto:pertsch@berkeley.edu) or download datasets directly from the
-**"Open X-Embodiment" repo.
+You can find pre-trained ORCA checkpoints [here](huggingface.com).
+At the moment we provide the following model versions:
 
-### Finetuning ORCA Policies
+| Model                     | Size       |
+|---------------------------|------------|
+| [ORCA-B](huggingface.com) | XXX Params |
+| [ORCA-S](huggingface.com) | XXX Params |
 
-To finetune foundational ORCA policies, you can follow the example command below. You can modify hyperparameters like dataset, batch size etc. in [finetune_config.py](finetune_config.py).
 
-```
-python finetune.py --config=your_finetune_config.py:mode=head_only --config.pretrained_path=...
-```
-We offer three finetuning modes depending on the parts of the model that are kept frozen: ```head_only```, ```head_mlp_only``` and ```full``` to finetune the full model. Besides, one can specify the task type to finetune with ```image_conditioned```, ```language_conditioned``` or ```multimodal``` for both. For example, to finetune the full transformer with multimodal inputs use:
-```--config=your_finetune_config.py:mode=full,multimodal```
+## Examples
 
-In order to finetune the model to new observation or action spaces, one needs to define this in the config file. We provide an example for finetuning for joint control on the Aloha setup here.
+We provide simple [example scripts](examples) that demonstrate how to inference and finetune ORCA models,
+as well as how to use our data loader independently. We provide the following examples:
 
-### Base Policy Training
+|                                                                   | Content                                                                                                         |
+|-------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------|
+| [ORCA Inference](examples/01_inference_pretrained.ipynb)          | Minimal example for loading and inferencing a pre-trained ORCA model                                            |
+| [ORCA Finetuning](examples/02_finetune_new_observation_action.py) | Minimal example for finetuning a pre-trained ORCA models on a small dataset with new observation + action space |
+| [ORCA Rollout](examples/03_eval_finetuned.py)                     | Run a rollout of a pre-trained ORCA policy in a Gym environment                                                 |
+| [ORCA Robot Eval](examples/04_eval_finetuned_on_robot.py)         | Evaluate a pre-trained ORCA model on a real WidowX robot                                                        |
+| [OpenX Dataloader Intro](examples/05_dataloading.ipynb)           | Walkthrough of the features of our Open X-Embodiment data loader                                                |
 
-To train foundational ORCA policies, you can follow the example command below. You can modify hyperparameters like
-dataset, batch size etc. in [config.py](config.py).
+
+## ORCA Pre-Training
+
+To reproduce our ORCA pre-training on >1M robot trajectories, run:
 ```
 python train.py --config config.py:vit_s --name=orca --config.dataset_kwargs.oxe_kwargs.data_dir=... --config.dataset_kwargs.oxe_kwargs.data_mix=oxe_magic_soup ...
 ```
+Check out ...
+
+[I will put in more info regarding data download etc]
+
+## ORCA Finetuning
+
+[I will put in info regarding advanced finetuning script]
+
+
+## ORCA Evaluation
+
+[I will add info about the WidowX example and some documentation for wrapping general gym envs to be compatible]
 
 
 ## Code Structure
 
-|  | File                                                    | Description                                                               |
-| --- |---------------------------------------------------------|---------------------------------------------------------------------------|
-| Hyperparameters | [config.py](config.py)                                  | Defines all hyperparameters for the training run.                         |
-| Training Loop | [train.py](train.py)                                    | Main training script.                                                     |
-| Datasets | [dataset.py](orca/data/dataset.py)                      | Functions for creating single / interleaved datasets + data augmentation. |
-| Encoders | [tokenizers.py](orca/model/components/tokenizers.py)    | Tokenizers that encode image / text inputs into tokens.                   |
-| Model + Objective | [orca_policy.py](orca/model/orca_policy.py)             | Sort tokens into sequence, run forward pass, compute loss.                |
-| Visualization | [visualization_lib.py](orca/utils/visualization_lib.py) | Utilities for offline qualitative & quantitative eval.                    |
-| Sim Evaluation | [sim_eval.sh](orca/scripts/sim_eval.sh) | Script to run model evaluation.                    |
+|                     | File                                                    | Description                                                                   |
+|---------------------|---------------------------------------------------------|-------------------------------------------------------------------------------|
+| Hyperparameters     | [config.py](scripts/configs/config.py)                  | Defines all hyperparameters for the training run.                             |
+| Training Loop       | [train.py](scripts/train.py)                            | Main training script.                                                         |
+| Finetuning Script   | [finetune.py](scripts/finetune.py)                      | Main finetuning script.                                                       |
+| Datasets            | [dataset.py](orca/data/dataset.py)                      | Functions for creating single / interleaved datasets + data augmentation.     |
+| Tokenizers          | [tokenizers.py](orca/model/components/tokenizers.py)    | Tokenizers that encode image / text inputs into tokens.                       |
+| ORCA Model          | [orca_model.py](orca/model/orca_model.py)               | Main entrypoint for interacting with ORCA models, loading, saving, inference. |
+| Model Architecture  | [orca_module.py](orca/model/orca_module.py)             | Combines token sequencing, transformer backbone and readout heads.            |
+| Visualization       | [visualization_lib.py](orca/utils/visualization_lib.py) | Utilities for offline qualitative & quantitative eval.                        |
 
-## Evaluation
-
-To evaluate policies on a robot, first wrap your robot controller in a Gym environment. As an example, see
-[widowx_env.py](examples/envs/widowx_env.py) which wraps the robot controller used for the
-WidowX robot in BridgeData.
-
-The `step` and `reset` functions of the Gym environment should return observations with the images, depth images, and/or
-proprioceptive information that the policy expects as input. Specifically, the returned observations should be dictionaries
-of the form:
-```
-obs = {
-    "image_0": ...,
-    "image_1": ...,
-    ...
-    "depth_0": ...,
-    "depth_1": ...,
-    ...
-    "proprio": ...,
-}
-```
-
-Then, write a script that creates your Gym environment, loads the pretrained model, and passes both into the
-`run_eval_loop` function from [orca/utils/run_eval.py](orca/utils/run_eval.py). As an example, see [eval_widowx.py](examples/eval.py). A command to run this script can be found in [eval.sh](examples/widowx_eval/eval.sh). **VERY IMPORTANT**: make sure to wrap the Gym environment for your robot in the [UnnormalizeActionProprio](orca/utils/gym_wrappers.py) wrapper to unnormalize/normalize the actions and proprio so that they match what the policy was trained on.
 
 ## Contributing
 Experimental things and training/eval scripts should go in `experiments/<your_name>`. To make any changes to files outside of your experiments directory, please open a pull request.

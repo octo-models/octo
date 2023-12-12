@@ -1,5 +1,5 @@
-from config import get_config as get_base_config
-from config import update_config, wrap
+from scripts.configs.config import get_config as get_base_config
+from scripts.configs.config import update_config, wrap
 from functools import partial
 
 from orca.data.utils.data_utils import StateEncoding, ActionEncoding

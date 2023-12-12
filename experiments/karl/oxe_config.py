@@ -2,7 +2,7 @@ from copy import deepcopy
 
 from ml_collections import ConfigDict
 from ml_collections.config_dict import placeholder
-from config import update_config
+from scripts.configs.config import update_config
 from orca.data.oxe.oxe_dataset_mixes import *
 
 
