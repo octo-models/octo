@@ -23,8 +23,8 @@ import tensorflow as tf
 import wandb
 
 from orca.data.dataset import make_single_dataset
+from orca.model.orca_model import ORCAModel
 from orca.utils.jax_utils import initialize_compilation_cache
-from orca.utils.pretrained_utils import ORCAModel
 from orca.utils.train_utils import batched_apply, filter_eval_datasets
 from orca.utils.visualization_lib import Visualizer
 

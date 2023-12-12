@@ -3,11 +3,10 @@ from contextlib import contextmanager
 from fnmatch import fnmatch
 import logging
 import time
-from typing import Any, Callable, List, Mapping, Optional, Sequence, Union
+from typing import List, Optional
 
 import flax
-import flax.linen as nn
-from flax.training import train_state
+from flax import struct
 import jax
 from jax.experimental import multihost_utils
 import jax.numpy as jnp
@@ -16,51 +15,47 @@ import numpy as np
 import optax
 
 from orca.data.utils.text_processing import TextProcessor
-from orca.model.components.hf_weight_loaders import WeightLoader
+from orca.model.orca_model import ORCAModel
 from orca.utils import jax_utils
-from orca.utils.spec import ModuleSpec
 from orca.utils.typing import Config, Data, Params, PRNGKey
 
 
-class TrainState(train_state.TrainState):
+@struct.dataclass
+class TrainState:
     rng: PRNGKey
+    model: ORCAModel
+    step: int
+    opt_state: optax.OptState
+    tx: optax.GradientTransformation = struct.field(pytree_node=False)
 
+    @classmethod
+    def create(
+        cls,
+        rng: PRNGKey,
+        model: ORCAModel,
+        tx: optax.GradientTransformation,
+    ):
+        opt_state = tx.init(model.params)
+        return cls(
+            rng=rng,
+            model=model,
+            step=0,
+            opt_state=opt_state,
+            tx=tx,
+        )
 
-def create_train_state(
-    rng: PRNGKey,
-    model_def: nn.Module,
-    tx: optax.GradientTransformation,
-    init_args: Sequence[Any] = (),
-    init_kwargs: Mapping[str, Any] = dict(),
-    pretrained_loaders: Sequence[Union[WeightLoader, ModuleSpec]] = tuple(),
-    init_method: Optional[Union[str, Callable]] = None,
-) -> TrainState:
-    """Utility to create a TrainState."""
-    init_rng, state_rng = jax.random.split(rng)
+    def apply_gradients(self, *, grads, rng):
+        updates, new_opt_state = self.tx.update(
+            grads, self.opt_state, self.model.params
+        )
+        new_params = optax.apply_updates(self.model.params, updates)
 
-    # Initializing the model in a jit avoids running the model on CPU
-    @jax.jit
-    def _init():
-        return model_def.init(init_rng, *init_args, **init_kwargs, method=init_method)
-
-    init_dict = _init()
-
-    ev, params = flax.core.pop(init_dict, "params")
-    assert (
-        len(ev) == 0
-    ), "Are you forgetting to store some variables in the state? {}".format(ev.keys())
-
-    for loader in pretrained_loaders:
-        if not callable(loader):  # Means that it is a ModuleSpec
-            loader = ModuleSpec.instantiate(loader)
-        params = loader(params)
-
-    return TrainState.create(
-        apply_fn=model_def.apply,
-        params=params,
-        tx=tx,
-        rng=state_rng,
-    )
+        return self.replace(
+            step=self.step + 1,
+            model=self.model.replace(params=new_params),
+            opt_state=new_opt_state,
+            rng=rng,
+        )
 
 
 def format_name_with_config(name, config):

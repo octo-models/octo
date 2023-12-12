@@ -16,8 +16,8 @@ from orca.data.dataset import make_single_dataset
 from orca.data.oxe.oxe_dataset_configs import ActionEncoding, StateEncoding
 from orca.model.components.action_heads import L1ActionHead
 from orca.model.components.tokenizers import LowdimObsTokenizer
+from orca.model.orca_model import ORCAModel
 from orca.utils.jax_utils import initialize_compilation_cache
-from orca.utils.pretrained_utils import ORCAModel
 from orca.utils.spec import ModuleSpec
 from orca.utils.train_callbacks import SaveCallback
 from orca.utils.train_utils import (

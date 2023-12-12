@@ -1,3 +1,4 @@
+from abc import ABC, abstractmethod
 from typing import Optional, Sequence
 
 import numpy as np
@@ -6,11 +7,12 @@ import tensorflow as tf
 MULTI_MODULE = "https://tfhub.dev/google/universal-sentence-encoder-multilingual/3"
 
 
-class TextProcessor:
+class TextProcessor(ABC):
     """
     Base class for text tokenization or text embedding.
     """
 
+    @abstractmethod
     def encode(self, strings: Sequence[str]):
         raise NotImplementedError
 
@@ -83,10 +85,3 @@ class CLIPTextProcessor(TextProcessor):
             np.arange(inputs["input_ids"].shape[1]), axis=0
         ).repeat(inputs["input_ids"].shape[0], axis=0)
         return inputs
-
-
-text_processors = {
-    "hf_tokenizer": HFTokenizer,
-    "muse_embedding": MuseEmbedding,
-    "clip_processor": CLIPTextProcessor,
-}

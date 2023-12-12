@@ -1,21 +1,4 @@
-"""Action prediction modules that take in the transformer token outputs and predict actions.
-
-Each action head here does chunked action prediction: i.e. at every timestep,
-it tries to predict the next `pred_horizon` actions into the future from that timestep.
-Setting `pred_horizon=1` corresponds to the typical action prediction setup.
-
-The base structure of an action head is as follows:
-
-class ActionHead(nn.Module):
-    def loss(self, transformer_outputs, actions, pad_mask, train=True):
-        # Compute the loss and metrics for training the action head.
-        return loss, metrics
-
-    def predict_action(self, transformer_outputs, argmax=False, sample_shape=(), rng=None, temperature=1.0):
-        # Predict the action for the most recent timestep.
-        return predicted_action # shape (*sample_shape, batch_size, pred_horizon, action_dim)
-
-"""
+from abc import ABC, abstractmethod
 from typing import Dict, Optional, Tuple
 
 import distrax
@@ -32,6 +15,40 @@ from orca.model.components.diffusion import cosine_beta_schedule, create_diffusi
 from orca.model.components.tokenizers import BinTokenizer
 from orca.model.components.transformer import MAPHead
 from orca.utils.typing import PRNGKey
+
+
+class ActionHead(ABC):
+    """Action prediction modules that take in the transformer token outputs and predict actions.
+
+    Each action head here does chunked action prediction: i.e. at every timestep,
+    it tries to predict the next `pred_horizon` actions into the future from that timestep.
+    Setting `pred_horizon=1` corresponds to the typical action prediction setup.
+    """
+
+    @abstractmethod
+    def loss(
+        self,
+        transformer_outputs: Dict[str, TokenGroup],
+        actions: ArrayLike,
+        pad_mask: ArrayLike,
+        train: bool = True,
+    ) -> Tuple[Array, Dict[str, Array]]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def predict_action(
+        self,
+        transformer_outputs: Dict[str, TokenGroup],
+        argmax: bool = False,
+        sample_shape: Tuple[int, ...] = (),
+        rng: Optional[PRNGKey] = None,
+        temperature: float = 1.0,
+        train: bool = False,
+    ) -> Array:
+        """Predict the action for the last timestep in the window. Returns shape
+        (*sample_shape, batch_size, pred_horizon, action_dim).
+        """
+        raise NotImplementedError
 
 
 def masked_mean(x, mask):
@@ -142,7 +159,7 @@ def discrete_loss(
     }
 
 
-class ContinuousActionHead(nn.Module):
+class ContinuousActionHead(nn.Module, ActionHead):
     """Predicts continuous actions (as opposed to discretized).
 
     Continuous actions are predicted by tanh squashing the model output to [-max_action, max_action], and then
@@ -241,7 +258,7 @@ class ContinuousActionHead(nn.Module):
         return jnp.broadcast_to(mean, sample_shape + mean.shape)
 
 
-class DiscreteActionHead(nn.Module):
+class DiscreteActionHead(nn.Module, ActionHead):
     """
     A basic action decoding head that predicts discretized actions using the transformer token embeddings.
 

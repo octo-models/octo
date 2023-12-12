@@ -57,14 +57,14 @@ def create_validation_dataset(
 
 @dataclass
 class SaveCallback(Callback):
-    """Callback that saves checkpoints to `save_dir`. If `save_dir` is None, does nothing.  Also
-    includes an `open` method for saving arbitrary files to `save_dir`.
-    """
+    """Callback that saves checkpoints to `save_dir`. If `save_dir` is None, does nothing."""
 
     save_dir: Optional[str]
 
     def __post_init__(self):
         if self.save_dir is not None:
+            if not self.save_dir.startswith("gs://"):
+                self.save_dir = os.path.abspath(self.save_dir)
             if jax.process_index() == 0:
                 tf.io.gfile.makedirs(self.save_dir)
                 logging.info(f"Created {self.save_dir}")
@@ -85,23 +85,14 @@ class SaveCallback(Callback):
 
     def __call__(self, train_state: TrainState, step: int):
         if self.save_dir is not None:
-            self.params_checkpointer.save(
-                step,
-                train_state.params,
-                {"save_args": orbax_utils.save_args_from_target(train_state.params)},
+            train_state.model.save_pretrained(
+                step, checkpoint_manager=self.params_checkpointer
             )
             self.state_checkpointer.save(
                 step,
                 train_state,
                 {"save_args": orbax_utils.save_args_from_target(train_state)},
             )
-
-    def open(self, fname: str, mode: str):
-        if self.save_dir is not None and jax.process_index() == 0:
-            logging.info(f"Saving to {tf.io.gfile.join(self.save_dir, fname)}")
-            return tf.io.gfile.GFile(tf.io.gfile.join(self.save_dir, fname), mode)
-        else:
-            return open(os.devnull, mode)
 
 
 def remove_text(tasks: Data, zero_text_encoding: Data):
@@ -145,7 +136,13 @@ def remove_images(tasks: Data):
 
 @partial(jax.jit, static_argnames=("samples_per_state", "policy_mode"))
 def get_policy_sampled_actions(
-    state, observations, tasks, *, zero_text, samples_per_state, policy_mode=None
+    state: TrainState,
+    observations,
+    tasks,
+    *,
+    zero_text,
+    samples_per_state,
+    policy_mode=None,
 ):
     # only use first horizon timesteps as input to predict_action
 
@@ -156,31 +153,14 @@ def get_policy_sampled_actions(
     elif policy_mode == "unconditioned":
         tasks = remove_text(remove_images(tasks), zero_text)
 
-    def get_actions(model, observations, tasks, train):
-        transformer_embeddings = model.orca_transformer(
-            observations,
-            tasks,
-            observations["pad_mask"],
-            train=train,
-        )
-
-        actions = model.heads["action"].predict_action(
-            transformer_embeddings,
-            train=train,
-            argmax=False,
-            sample_shape=(samples_per_state,),
-            rng=state.rng,
-        )
-        return actions
-
-    actions = state.apply_fn(
-        {"params": state.params},
+    actions = state.model.sample_actions(
         observations,
         tasks,
         train=False,
-        method=get_actions,
-        rngs={"dropout": state.rng},
-    )  # We could also have used run_head here, but this is easier to read
+        argmax=False,
+        sample_shape=(samples_per_state,),
+        rng=state.rng,
+    )
 
     # viz expects (batch_size, n_samples, action_dim)
     actions = jnp.moveaxis(actions, 0, 1)
@@ -226,11 +206,10 @@ class ValidationCallback(Callback):
             jax.jit,
             out_shardings=jax.sharding.PositionalSharding(jax.devices()).replicate(),
         )
-        def eval_step(state, batch):
+        def eval_step(state: TrainState, batch: Data):
             loss_fn_partial = partial(
                 self.loss_fn,
-                params=state.params,
-                state=state,
+                params=state.model.params,
                 rng=state.rng,
                 train=False,
             )

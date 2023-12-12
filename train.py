@@ -5,13 +5,10 @@ import tensorflow as tf
 
 import datetime
 from functools import partial
-import json
 import os
 import os.path as osp
-import subprocess
 
 from absl import app, flags, logging
-import flax
 from flax.traverse_util import flatten_dict
 import jax
 from jax.experimental import multihost_utils
@@ -24,7 +21,7 @@ import wandb
 import orca
 from orca.data.dataset import make_interleaved_dataset
 from orca.data.oxe import make_oxe_dataset_kwargs_and_weights
-from orca.model import create_model_def
+from orca.model.orca_model import ORCAModel
 from orca.utils import jax_utils
 from orca.utils.spec import ModuleSpec
 from orca.utils.train_callbacks import (
@@ -35,12 +32,13 @@ from orca.utils.train_callbacks import (
 )
 from orca.utils.train_utils import (
     create_optimizer,
-    create_train_state,
     filter_eval_datasets,
     format_name_with_config,
     process_text,
     Timer,
+    TrainState,
 )
+from orca.utils.typing import Data
 
 FLAGS = flags.FLAGS
 
@@ -78,6 +76,7 @@ def main(_):
     # prevent tensorflow from using GPUs
     tf.config.set_visible_devices([], "GPU")
 
+    # make sure each process loads different data
     tf.random.set_seed(FLAGS.config.seed + jax.process_index())
 
     # set up wandb and logging
@@ -108,11 +107,6 @@ def main(_):
                 wandb_id,
             )
             logging.info("Saving to %s", save_dir)
-            save_callback = SaveCallback(save_dir)
-            if jax.process_index() == 0:
-                wandb.config.update(dict(save_dir=save_dir), allow_val_change=True)
-                with save_callback.open("config.json", "w") as config_file:
-                    config_file.write(FLAGS.config.to_json_best_effort())
         else:
             save_dir = None
             logging.info("save_dir not passed in, not saving checkpoints")
@@ -127,12 +121,12 @@ def main(_):
                 resume="must",
             )
         save_dir = wandb_run.config["save_dir"]
-        save_callback = SaveCallback(save_dir)
         logging.info("Resuming run %s", FLAGS.config.wandb_resume_id)
+    save_callback = SaveCallback(save_dir)
 
     if jax.process_index() == 0:
         codebase_directory = osp.abspath(osp.join(osp.dirname(orca.__file__), ".."))
-        wandb.run.log_code(codebase_directory)  # TODO: replace w/ codesave_library?
+        wandb.run.log_code(codebase_directory)
 
     # set up text tokenization (this needs to happen after batching but before sharding)
     if FLAGS.config.text_processor is None:
@@ -158,18 +152,14 @@ def main(_):
 
     train_data = make_interleaved_dataset(**FLAGS.config.dataset_kwargs, train=True)
 
-    # save dataset statistics
-    if save_dir is not None and jax.process_index() == 0:
-        for dataset_kwargs, dataset_statistics in zip(
+    # consolidate dataset statistics into one big dict
+    dataset_statistics = {
+        dataset_kwargs["name"]: statistics
+        for dataset_kwargs, statistics in zip(
             FLAGS.config.dataset_kwargs["dataset_kwargs_list"],
             train_data.dataset_statistics,
-        ):
-            fname = f"dataset_statistics_{dataset_kwargs['name']}.json"
-            with save_callback.open(fname, "w") as f:
-                json.dump(
-                    jax.tree_map(lambda x: x.tolist(), dataset_statistics),
-                    f,
-                )
+        )
+    }
 
     train_data_iter = map(
         shard,
@@ -186,70 +176,32 @@ def main(_):
         f"Batch size per device: {example_batch['action'].shape[0] // jax.device_count()}"
     )
 
-    # set up model, optimizer, loss
-    model_def = create_model_def(**FLAGS.config.model.to_dict())
-
-    # ensure construct rng is same on every host
-    construct_rng = jax.random.PRNGKey(FLAGS.config.seed)
-    model_init_args = (
-        example_batch["observation"],
-        example_batch["task"],
-        example_batch["observation"]["pad_mask"],
+    # set up model and initialize weights
+    rng = jax.random.PRNGKey(FLAGS.config.seed)
+    rng, init_rng = jax.random.split(rng)
+    model = ORCAModel.from_config(
+        FLAGS.config.to_dict(),
+        example_batch,
+        text_processor,
+        verbose=True,
+        rng=init_rng,
+        dataset_statistics=dataset_statistics,
     )
-    print(
-        model_def.tabulate(
-            construct_rng,
-            *model_init_args,
-            train=False,
-            verbose=True,
-            depth=2,
-        )
-    )  # Prints out the parameter count of our model
 
-    params_shape = jax.eval_shape(
-        partial(model_def.init, train=False),
-        construct_rng,
-        *model_init_args,
-    )["params"]
+    # create optimizer
     tx, lr_callable, param_norm_callable = create_optimizer(
-        params_shape,
+        model.params,
         **FLAGS.config.optimizer.to_dict(),
     )
-    train_state = create_train_state(
-        construct_rng,
-        model_def,
-        tx,
-        init_args=model_init_args,
-        init_kwargs=dict(train=False),
-        pretrained_loaders=FLAGS.config.pretrained_loaders,
-    )
 
-    example_batch = multihost_utils.process_allgather(example_batch)
-    if jax.process_index() == 0:
-        # Saving example batch for future checkpoint loading
-        example_batch_spec = jax.tree_map(
-            lambda arr: (arr.shape, str(arr.dtype)), example_batch
-        )
-        wandb.config.update(
-            dict(example_batch_spec=example_batch_spec), allow_val_change=True
-        )
+    # Load pretrained weights (e.g. text encoder) if necessary
+    for loader in FLAGS.config.pretrained_loaders:
+        if not callable(loader):  # Means that it is a ModuleSpec
+            loader = ModuleSpec.instantiate(loader)
+        model = model.replace(params=loader(model.params))
 
-        if save_dir is not None:
-            with save_callback.open("example_batch.msgpack", "wb") as f:
-                f.write(
-                    flax.serialization.msgpack_serialize(
-                        jax.tree_map(lambda x: x[:1], example_batch)
-                    )
-                )
-            try:
-                process = subprocess.Popen(
-                    ["git", "rev-parse", "HEAD"], shell=False, stdout=subprocess.PIPE
-                )
-                git_head_hash = process.communicate()[0].strip()
-                with save_callback.open("git_hash.txt", "wb") as f:
-                    f.write(git_head_hash)
-            except Exception as e:
-                logging.warning("Failed to save git hash: %s", e)
+    # create train state
+    train_state = TrainState.create(rng, model, tx)
 
     if FLAGS.config.get("wandb_resume_id", None) is not None:
         train_state = save_callback.state_checkpointer.restore(
@@ -264,20 +216,21 @@ def main(_):
         logging.info("Starting training from step %d", start_step)
     else:
         start_step = FLAGS.config.start_step or 0
+    train_state = train_state.replace(step=start_step)
 
     # replicate train state across devices
     train_state = jax_utils.replicate(train_state)
 
-    def loss_fn(params, state, batch, rng, train=True):
-        model = model_def.bind({"params": params}, rngs={"dropout": rng})
-        transformer_embeddings = model.orca_transformer(
+    def loss_fn(params, batch, rng, train=True):
+        bound_module = model.module.bind({"params": params}, rngs={"dropout": rng})
+        transformer_embeddings = bound_module.orca_transformer(
             batch["observation"],
             batch["task"],
             batch["observation"]["pad_mask"],
             train=train,
         )
-        action_loss, action_metrics = model.heads["action"].loss(
-            transformer_embeddings,  # Action head knows to pull out the action readout_key
+        action_loss, action_metrics = bound_module.heads["action"].loss(
+            transformer_embeddings,  # action head knows to pull out the "action" readout_key
             batch["action"],
             pad_mask=batch["observation"]["pad_mask"],
             train=train,
@@ -292,19 +245,19 @@ def main(_):
         # allows jax to modify `state` in-place, saving a lot of memory
         donate_argnums=0,
     )
-    def train_step(state, batch):
+    def train_step(state: TrainState, batch: Data):
         rng, dropout_rng = jax.random.split(state.rng)
         (loss, info), grads = jax.value_and_grad(loss_fn, has_aux=True)(
-            state.params, state, batch, dropout_rng, train=True
+            state.model.params, batch, dropout_rng, train=True
         )
         grad_norm = optax.global_norm(grads)
-        updates, _ = state.tx.update(grads, state.opt_state, state.params)
+        updates, _ = state.tx.update(grads, state.opt_state, state.model.params)
         update_norm = optax.global_norm(updates)
         info.update(
             {
                 "grad_norm": grad_norm,
                 "update_norm": update_norm,
-                "param_norm": param_norm_callable(state.params),
+                "param_norm": param_norm_callable(state.model.params),
                 "learning_rate": lr_callable(state.step),
             }
         )
@@ -361,7 +314,7 @@ def main(_):
         with timer("train"):
             train_state, update_info = train_step(train_state, batch)
 
-        if (i + 1) % FLAGS.config.save_interval == 0 and save_dir is not None:
+        if (i + 1) % FLAGS.config.save_interval == 0:
             save_callback(train_state, i + 1)
 
         if (i + 1) % FLAGS.config.eval_interval == 0:

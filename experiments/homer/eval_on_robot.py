@@ -28,7 +28,7 @@ from orca.utils.gym_wrappers import (
     TemporalEnsembleWrapper,
     UnnormalizeActionProprio,
 )
-from orca.utils.pretrained_utils import ORCAModel
+from orca.model.orca_model import ORCAModel
 
 np.set_printoptions(suppress=True)
 

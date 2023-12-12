@@ -11,13 +11,15 @@ class ModuleSpec(TypedDict):
     Usage:
 
         # Preferred way to create a spec:
-        > from orca.model.components.transformer import Transformer
-        > spec = ModuleSpec.create(Transformer, num_layers=3)
+        >>> from orca.model.components.transformer import Transformer
+        >>> spec = ModuleSpec.create(Transformer, num_layers=3)
         # Same as above using the fully qualified import string:
-        > spec = ModuleSpec.create("orca.model.components.transformer:Transformer", num_layers=3)
+        >>> spec = ModuleSpec.create("orca.model.components.transformer:Transformer", num_layers=3)
 
         # Usage:
-        > ModuleSpec.instantiate(spec) == partial(Transformer, num_layers=3)
+        >>> ModuleSpec.instantiate(spec) == partial(Transformer, num_layers=3)
+        # can pass additional kwargs at instantiation time
+        >>> transformer = ModuleSpec.instantiate(spec, num_heads=8)
 
     Note: ModuleSpec is just an alias for a dictionary (that is strongly typed), not a real class. So from
     your code's perspective, it is just a dictionary.
