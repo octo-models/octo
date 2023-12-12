@@ -211,6 +211,7 @@ def make_dataset_from_rlds(
     action_proprio_normalization_type: NormalizationType = NormalizationType.NORMAL,
     dataset_statistics: Optional[Union[dict, str]] = None,
     absolute_action_mask: Optional[Sequence[bool]] = None,
+    action_normalization_mask: Optional[Sequence[bool]] = None,
     num_parallel_reads: int = tf.data.AUTOTUNE,
     num_parallel_calls: int = tf.data.AUTOTUNE,
 ) -> Tuple[dl.DLataset, dict]:
@@ -268,6 +269,9 @@ def make_dataset_from_rlds(
             need to be made "neutral" to indicate that the task has been completed. For relative actions,
             "neutral" means zero, but for absolute actions, "neutral" means repeating the last valid action.
             This mask, if provided, indicates which action dimensions are absolute.
+        action_normalization_mask (Sequence[bool], optional): If provided, indicates which action dimensions
+            should be normalized. For example, you might not want to normalize the gripper action dimension if
+            it's always exactly 0 or 1. By default, all action dimensions are normalized.
         num_parallel_reads (int): number of parallel read workers. Default to AUTOTUNE.
         num_parallel_calls (int): number of parallel calls for traj_map operations. Default to AUTOTUNE.
     Returns:
@@ -378,6 +382,18 @@ def make_dataset_from_rlds(
             save_dir=builder.data_dir,
         )
     dataset_statistics = tree_map(np.array, dataset_statistics)
+
+    # skip normalization for certain action dimensions
+    if action_normalization_mask is not None:
+        if (
+            len(action_normalization_mask)
+            != dataset_statistics["action"]["mean"].shape[-1]
+        ):
+            raise ValueError(
+                f"Length of skip_normalization_mask ({len(action_normalization_mask)}) "
+                f"does not match action dimension ({dataset_statistics['action']['mean'].shape[-1]})."
+            )
+        dataset_statistics["action"]["mask"] = np.array(action_normalization_mask)
 
     # construct the dataset
     if "val" not in builder.info.splits:

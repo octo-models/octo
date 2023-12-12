@@ -1,5 +1,4 @@
 import flax.linen as nn
-import jax
 from transformers import CLIPTextConfig, CLIPVisionConfig, FlaxCLIPModel
 from transformers.models.clip.modeling_flax_clip import (
     FlaxCLIPTextTransformer,
@@ -90,32 +89,3 @@ def clip_weights_loader(params):
     find_and_replace(params, "clip_vision_transformer", vision_transformer_params)
     find_and_replace(params, "clip_text_transformer", text_transformer_params)
     return params
-
-
-if __name__ == "__main__":
-    # test CLIPVisionTokenizer
-    import numpy as np
-
-    rng = jax.random.PRNGKey(0)
-
-    tokenizer = CLIPVisionTokenizer()
-    observations = {"image": np.random.randn(2, 4, 224, 224, 3).astype(np.float32)}
-    tasks = {"image": np.random.randn(2, 224, 224, 3).astype(np.float32)}
-    params = tokenizer.init(rng, observations, tasks)
-    tokens = tokenizer.apply(params, observations, tasks)
-    print(tokens.shape)
-    # (2, 4, 50, 512)
-
-    # test CLIPTextTokenizer
-    tokenizer = CLIPTextTokenizer()
-    tasks = {
-        "language": {
-            "input_ids": np.random.randint(0, 100, (2, 4)),
-            "attention_mask": np.ones((2, 4)),
-            "position_ids": np.arange(4),
-        }
-    }
-    params = tokenizer.init(rng, observations, tasks)
-    tokens = tokenizer.apply(params, observations, tasks)
-    print(tokens.shape)
-    # (2, 4, 512)

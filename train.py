@@ -222,7 +222,7 @@ def main(_):
     train_state = jax_utils.replicate(train_state)
 
     def loss_fn(params, batch, rng, train=True):
-        bound_module = model.model_def.bind({"params": params}, rngs={"dropout": rng})
+        bound_module = model.module.bind({"params": params}, rngs={"dropout": rng})
         transformer_embeddings = bound_module.orca_transformer(
             batch["observation"],
             batch["task"],
@@ -230,7 +230,7 @@ def main(_):
             train=train,
         )
         action_loss, action_metrics = bound_module.heads["action"].loss(
-            transformer_embeddings,  # Action head knows to pull out the action readout_key
+            transformer_embeddings,  # action head knows to pull out the "action" readout_key
             batch["action"],
             pad_mask=batch["observation"]["pad_mask"],
             train=train,
