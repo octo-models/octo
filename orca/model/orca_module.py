@@ -356,6 +356,7 @@ class ORCAModule(nn.Module):
 
     @classmethod
     def create(
+        cls,
         observation_tokenizers: Dict[str, ModuleSpec],
         task_tokenizers: Dict[str, ModuleSpec],
         heads: Dict[str, ModuleSpec],
@@ -402,7 +403,7 @@ class ORCAModule(nn.Module):
             transformer_kwargs=transformer_kwargs,
         )
 
-        return ORCAModule(
+        return cls(
             orca_transformer=model_def,
             heads=head_defs,
         )
