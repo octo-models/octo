@@ -2,8 +2,6 @@
 This script demonstrates how to finetune ORCA to a new observation space (single camera + proprio)
 and new action space (bimanual) using a simulated ALOHA cube handover dataset (https://tonyzhaozh.github.io/aloha/).
 """
-import json
-
 from absl import app, flags, logging
 import flax
 import jax
@@ -122,13 +120,19 @@ def main(_):
         L1ActionHead,
         pred_horizon=50,
         action_dim=14,
-        readout_key="obs",  # TODO: switch this to "action" once we add readout keys
+        readout_key="action",
     )
 
     # initialize weights for modified ORCA model, then merge in all applicable pre-trained weights
     # new position encodings for proprio inputs & weights for new action head will remain "from scratch"
     logging.info("Updating model for new observation & action space...")
-    model = ORCAModel.from_config(config, example_batch)
+    model = ORCAModel.from_config(
+        config,
+        example_batch,
+        text_processor,
+        verbose=True,
+        dataset_statistics=dataset.dataset_statistics,
+    )
     merged_params = merge_params(model.params, pretrained_model.params)
     # can perform any additional parameter surgery here...
     # ...
@@ -137,7 +141,6 @@ def main(_):
 
     # create optimizer & train_state, optionally freeze keys for pre-trained transformer
     # train_state bundles parameters & optimizers
-    model_def = model.model_def
     learning_rate = optax.join_schedules(
         optax.linear_schedule(0, 3e-5, 100), optax.constant_schedule(3e-5)
     )
@@ -147,22 +150,21 @@ def main(_):
         frozen_keys.append("BlockTransformer_0")
     tx = freeze_weights(tx, model.params, frozen_keys)
     train_state = TrainState.create(
-        apply_fn=model_def.apply,
-        params=model.params,
-        tx=tx,
         rng=jax.random.PRNGKey(1234),
+        model=model,
+        tx=tx,
     )
 
     # define loss function and train step
-    def loss_fn(params, state, batch, rng, train=True):
-        model = model_def.bind({"params": params}, rngs={"dropout": rng})
-        transformer_embeddings = model.orca_transformer(
+    def loss_fn(params, batch, rng, train=True):
+        bound_model = model.model_def.bind({"params": params}, rngs={"dropout": rng})
+        transformer_embeddings = bound_model.orca_transformer(
             batch["observation"],
             batch["tasks"],
             batch["observation"]["pad_mask"],
             train=train,
         )
-        action_loss, action_metrics = model.heads["action"].loss(
+        action_loss, action_metrics = bound_model.heads["action"].loss(
             transformer_embeddings,  # Action head knows to pull out the action readout_key
             batch["action"],
             pad_mask=batch["observation"]["pad_mask"],
@@ -174,21 +176,13 @@ def main(_):
     def train_step(state, batch):
         rng, dropout_rng = jax.random.split(state.rng)
         (loss, info), grads = jax.value_and_grad(loss_fn, has_aux=True)(
-            state.params, state, batch, dropout_rng, train=True
+            state.model.params, batch, dropout_rng, train=True
         )
         new_state = state.apply_gradients(grads=grads, rng=rng)
         return new_state, info
 
     # save all info for loading of finetuned model
-    # (config, normalization stats, example batch)
     save_callback = SaveCallback(FLAGS.save_dir)
-    with save_callback.open("config.json", "w") as config_file:
-        config_file.write(config.to_json_best_effort())
-    with save_callback.open("dataset_statistics.json", "w") as f:
-        stats = jax.tree_map(lambda x: x.tolist(), dataset.dataset_statistics)
-        json.dump(stats, f)
-    with save_callback.open("example_batch.msgpack", "wb") as f:
-        f.write(flax.serialization.msgpack_serialize(example_batch))
 
     # run finetuning loop
     logging.info("Starting finetuning...")
