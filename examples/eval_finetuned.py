@@ -20,8 +20,8 @@ import wandb
 
 sys.path.append("/nfs/nfs2/users/karl/code/act")
 
+from orca.model.orca_model import ORCAModel
 from orca.utils.gym_wrappers import HistoryWrapper, RHCWrapper, UnnormalizeActionProprio
-from orca.utils.pretrained_utils import ORCAModel
 
 FLAGS = flags.FLAGS
 

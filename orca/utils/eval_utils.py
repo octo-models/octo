@@ -8,7 +8,7 @@ import jax
 import jax.numpy as jnp
 import tensorflow as tf
 
-from orca.utils.pretrained_utils import ORCAModel
+from orca.model.orca_model import ORCAModel
 
 
 def supply_rng(f, rng=jax.random.PRNGKey(0)):

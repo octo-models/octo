@@ -34,7 +34,7 @@ from aloha_wrapper import AlohaGymEnv
 from aloha_pro.aloha_scripts.sim_env import make_sim_env, sample_box_pose, sample_insertion_pose, BOX_POSE
 
 from orca.utils.gym_wrappers import HistoryWrapper, RHCWrapper, UnnormalizeActionProprio
-from orca.utils.pretrained_utils import ORCAModel
+from orca.model.orca_model import ORCAModel
 
 np.set_printoptions(suppress=True)
 

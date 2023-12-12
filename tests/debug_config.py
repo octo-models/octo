@@ -36,6 +36,7 @@ def get_config():
         log_interval=1,
         eval_interval=2,
         viz_interval=2,
+        save_interval=2,
         eval_datasets=None,
         dataset_kwargs={
             "dataset_kwargs_list": [
