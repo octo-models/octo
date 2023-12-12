@@ -45,35 +45,61 @@ class ORCAModel:
     example_batch: Data
     dataset_statistics: Optional[Data]
 
-    def create_tasks(self, goals: Data = None, texts: Optional[Sequence[str]] = None):
+    def create_tasks(
+        self, goals: Optional[Data] = None, texts: Optional[Sequence[str]] = None
+    ):
         """Creates tasks dict from goals and texts.
 
         Args:
-            goals: if not None, dict of shape (batch_size, *)
+            goals: if not None, dict of arrays with shape (batch_size, *)
             texts: if not None, list of texts of length batch_size
 
         Omit images to run the language-conditioned model, and omit texts to run the
         goal-conditioned model.
-
         """
         assert goals is not None or texts is not None
-        tasks = {}
+        tasks = {"pad_mask_dict": {}}
         if goals is not None:
             tasks.update(goals)
+            tasks["pad_mask_dict"].update(
+                {k: np.ones(v.shape[:1], dtype=bool) for k, v in goals.items()}
+            )
         else:
             batch_size = len(texts)
-            tasks = jax.tree_map(
-                lambda example: jnp.zeros(
-                    (batch_size, *example.shape[1:]), dtype=example.dtype
-                ),
-                self.example_batch["task"],
+            tasks.update(
+                {
+                    k: np.zeros((batch_size, *v.shape[1:]), dtype=v.dtype)
+                    for k, v in self.example_batch["task"].items()
+                    if k not in ("pad_mask_dict", "language_instruction")
+                }
+            )
+            tasks["pad_mask_dict"].update(
+                {
+                    k: np.zeros(batch_size, dtype=bool)
+                    for k in tasks.keys()
+                    if k != "pad_mask_dict"
+                }
             )
 
-        if texts is None:
-            batch_size = jax.tree_util.tree_leaves(goals)[0].shape[0]
-            texts = [""] * batch_size
+        if texts is not None:
+            assert self.text_processor is not None
+            tasks["language_instruction"] = texts
+            tasks["pad_mask_dict"]["language_instruction"] = np.ones(
+                len(texts), dtype=bool
+            )
+        else:
+            batch_size = jax.tree_leaves(goals)[0].shape[0]
+            tasks["language_instruction"] = [""] * batch_size
+            tasks["pad_mask_dict"]["language_instruction"] = np.zeros(
+                batch_size, dtype=bool
+            )
+
         if self.text_processor is not None:
-            tasks["language_instruction"] = self.text_processor.encode(texts)
+            tasks["language_instruction"] = self.text_processor.encode(
+                tasks["language_instruction"]
+            )
+        else:
+            del tasks["language_instruction"]
 
         _verify_shapes(tasks, "tasks", self.example_batch["task"], starting_dim=1)
         return tasks
