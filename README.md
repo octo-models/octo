@@ -4,12 +4,11 @@
 ![](https://github.com/rail-berkeley/orca/workflows/pre-commit/badge.svg)
 
 This repo contains code for training and finetuning large robot policies.
-Currently, ORCA policies are causal transformer models trained on a diverse mix of robot datasets using BC.
+Currently, ORCA policies are causal transformer models trained on a diverse mix of robot datasets containing 1.5M trajectories using BC.
+ORCA models can be instructed  via language commands or goal images and can be effectively finetuned to robot setups with new sensory inputs and action spaces on accessible compute budgets.
 
-![ORCA model](docs/assets/orca_model.jpeg)
+![ORCA model](docs/assets/teaser.png)
 
-We tokenize **task definitions** (like language instructions or goals), **observations** (like RGB-D images and proprioception)
-and **actions**. Given the sequence of input tokens, the model is trained to predict the action tokens.
 
 ## Installation
 ```bash
@@ -33,6 +32,14 @@ Test the installation by training on the debug dataset:
 ```bash
 python train.py --config tests/debug_config.py --debug
 ```
+
+## Architecture
+We tokenize **task definitions** like language instructions or goals, **observations** like RGB-D images and proprioception
+and **actions**. The transformer backbone processes the sequence of task and observation  tokens and produces readout tokens (purple) that get passed to output heads to produce actions.
+
+![ORCA architecture](docs/assets/architecture.png)
+The block-wise attention structure of the transformer backbone allows to flexibly add and remove inputs and outputs during fine-tuning and
+e.g., add new observations (blue, dashed) or action spaces (purple, dashed) during fine-tuning.
 
 ## Training
 
