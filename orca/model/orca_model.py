@@ -408,7 +408,7 @@ def _verify_shapes(
     }
     if mismatched_keys:
         if not silent:
-            logging.warning(
+            logging.error(
                 "'%s' contains mismatched shapes compared to example_batch: %s",
                 name,
                 flax.core.pretty_repr(
