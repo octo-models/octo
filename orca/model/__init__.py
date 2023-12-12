@@ -1,7 +1,7 @@
 import logging
 from typing import Dict
 
-from orca.model.orca_model import OrcaModel, OrcaTransformer
+from orca.model.orca_module import ORCAModule, ORCATransformer
 from orca.utils.spec import ModuleSpec
 
 
@@ -21,15 +21,15 @@ def create_model_def(
     observation_tokenizers: Dict[str, ModuleSpec],
     task_tokenizers: Dict[str, ModuleSpec],
     heads: Dict[str, ModuleSpec],
-    **kwargs,  # Options for OrcaTransformer
-):
+    **kwargs,  # Options for ORCATransformer
+) -> ORCAModule:
     """
     Args:
         observation_tokenizers: dict of {tokenizer_name (str): tokenizer_config (ModuleConfig)}
         task_tokenizers: dict of {tokenizer_name (str): tokenizer_config (ModuleConfig)}
         heads: dict of {head_name (str): head_config (ModuleConfig)}
 
-        # Options for OrcaTransformer
+        # Options for ORCATransformer
 
         readouts: dict of {readout_name (str): n_tokens_for_readout (int)}
         token_embedding_size: int # The latent dimension of the token embeddings
@@ -48,13 +48,13 @@ def create_model_def(
 
     head_defs = {k: ModuleSpec.instantiate(spec)() for k, spec in heads.items()}
 
-    model_def = OrcaTransformer(
+    model_def = ORCATransformer(
         observation_tokenizers=observation_tokenizer_defs,
         task_tokenizers=task_tokenizer_defs,
         **kwargs,
     )
 
-    return OrcaModel(
+    return ORCAModule(
         orca_transformer=model_def,
         heads=head_defs,
     )
