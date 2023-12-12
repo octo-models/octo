@@ -7,7 +7,7 @@ import tensorflow as tf
 from orca.sim.widowx_sim_env import WidowXSimEnv
 from orca.utils.eval_utils import download_checkpoint_from_gcs
 from orca.utils.gym_wrappers import UnnormalizeActionProprio
-from orca.utils.pretrained_utils import PretrainedModel
+from orca.model.orca_model import PretrainedModel
 from orca.utils.run_eval import run_eval_loop
 
 FLAGS = flags.FLAGS

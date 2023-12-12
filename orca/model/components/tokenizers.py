@@ -71,8 +71,7 @@ class ImageTokenizer(nn.Module):
     """Image tokenizer that encodes image stack into tokens with optional FiLM conditioning.
 
     Args:
-        encoder (str): Name of used encoder.
-        encoder_kwargs (dict, optional): Overwrite dict for encoder hyperparameters.
+        encoder (ModuleSpec): Encoder class.
         use_token_learner (bool): Whether to use token learner. Defaults to False.
         num_tokens (int): Number of output tokens, only enforced when use_token_learner is True.
         obs_stack_keys (Sequence[str]): Which spatial observation inputs get stacked for encoder input. Supports regex.
@@ -117,6 +116,10 @@ class ImageTokenizer(nn.Module):
         enc_inputs = extract_inputs(obs_stack_keys, observations, check_spatial=True)
         if tasks and self.task_stack_keys:
             task_stack_keys = regex_filter(self.task_stack_keys, sorted(tasks.keys()))
+            if len(task_stack_keys) == 0:
+                raise ValueError(
+                    f"No task inputs matching {self.task_stack_keys} were found."
+                )
             task_inputs = extract_inputs(task_stack_keys, tasks, check_spatial=True)
             task_inputs = task_inputs[:, None].repeat(enc_inputs.shape[1], axis=1)
             # TODO: allow somehow for task inputs to be not provided...
@@ -306,18 +309,3 @@ TOKENIZERS = {
     "bin_tokenizer": BinTokenizer,
     "lowdim_obs_tokenizer": LowdimObsTokenizer,
 }
-
-
-if __name__ == "__main__":
-    import numpy as np
-
-    action = np.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7])
-    action = np.broadcast_to(action, [2, 2, 7])
-    tokenizer = BinTokenizer(n_bins=256, bin_type="normal")
-    params = tokenizer.init(jax.random.PRNGKey(0), action)
-    action_tokens = tokenizer.apply(params, action)
-    detokenized_actions = tokenizer.apply(params, action_tokens, method="decode")
-
-    print(action)
-    print(action_tokens)
-    print(detokenized_actions)
