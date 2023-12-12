@@ -15,7 +15,6 @@ import orbax.checkpoint
 import tensorflow as tf
 
 from orca.data.utils.text_processing import TextProcessor
-from orca.model import create_model_def
 from orca.model.orca_module import ORCAModule
 from orca.utils.spec import ModuleSpec
 from orca.utils.typing import Config, Data, Params, PRNGKey, Sequence
@@ -188,7 +187,7 @@ class ORCAModel:
             )
 
         # create model def (an ORCAModule)
-        model_def = create_model_def(**config["model"])
+        model_def = ORCAModule.create(**config["model"])
         # infer params shape without actually doing any computation
         params_shape = jax.eval_shape(
             partial(model_def.init, train=False),
@@ -305,7 +304,7 @@ class ORCAModel:
             rng (Optional[PRNGKey], optional): RNG key for initializing the model.
             dataset_statistics (Optional[Dict[str, Any]], optional): Dataset statistics.
         """
-        model_def = create_model_def(**config["model"])
+        model_def = ORCAModule.create(**config["model"])
         rng = rng if rng is not None else jax.random.PRNGKey(0)
         example_batch = jax.tree_map(lambda x: x[:1], example_batch)
 

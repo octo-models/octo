@@ -71,8 +71,7 @@ class ImageTokenizer(nn.Module):
     """Image tokenizer that encodes image stack into tokens with optional FiLM conditioning.
 
     Args:
-        encoder (str): Name of used encoder.
-        encoder_kwargs (dict, optional): Overwrite dict for encoder hyperparameters.
+        encoder (ModuleSpec): Encoder class.
         use_token_learner (bool): Whether to use token learner. Defaults to False.
         num_tokens (int): Number of output tokens, only enforced when use_token_learner is True.
         obs_stack_keys (Sequence[str]): Which spatial observation inputs get stacked for encoder input. Supports regex.

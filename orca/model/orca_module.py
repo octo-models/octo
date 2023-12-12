@@ -13,12 +13,13 @@ from orca.model.components.block_transformer import (
     PrefixGroup,
     TimestepGroup,
 )
+from orca.utils.spec import ModuleSpec
 from orca.utils.typing import Data, Sequence
 
 
 class ORCATransformer(nn.Module):
     """
-    This module forms the base of the ORCA model.
+    This module forms the base of the ORCA architecture.
 
     The core idea is to run a causal transformer on the following sequence,
 
@@ -31,13 +32,13 @@ class ORCATransformer(nn.Module):
     (for example, a tokenizer that processes the primary image into tokens, or one that processes
     the wrist image into tokens).
 
-    We introduce additional tokens ("readouts") that "read out" the information
-    in the transformer for downstream action or value prediction. For example, we
-    may have an "action" readout that provides embeddings that are useful for predicting
-    actions, and a "value" readout with embeddings that are useful for predicting values.
+    We introduce additional tokens ("readouts") that "read out" the information in the transformer for
+    downstream action or value prediction. For example, we may have an "action" readout that provides
+    embeddings that are useful for predicting actions, and a "value" readout with embeddings that are useful
+    for predicting values.
 
-    The transformer is a blockwise-causal transformer, where each timestep only attends to the same or previous timesteps.
-    The easiest way to understand how the model works is to run:
+    The transformer is a blockwise-causal transformer, where each timestep only attends to the same or
+    previous timesteps.  The easiest way to understand how the model works is to run:
 
     ```
         >>> model(observations, tasks, pad_mask, verbose=True)
@@ -53,12 +54,12 @@ class ORCATransformer(nn.Module):
         ...
     ]
 
-    The observation tokens attend to the task prefix, and to all observation tokens in the same or previous timesteps.
-    (So, "image_wrist" can attend to "image_primary" and vice versa)
+    The observation tokens attend to the task prefix, and to all observation tokens in the same or previous
+    timesteps. So, "image_wrist" can attend to "image_primary" and vice versa.
 
     Readouts provide a mechanism for "reading out" the information in the transformer. They are designed to
-    only *read* from the sequence before it, without the ability to influence (i.e. write) the computation
-    for any of the non-readout tokens. By design, different readouts (e.g. "action" vs "value") are completely
+    only *read* from the sequence before it, without the ability to influence (i.e. write) the computation for
+    any of the non-readout tokens. By design, different readouts (e.g. "action" vs "value") are completely
     independent of each other, meaning they can be run separately without affecting each other.
 
     Args:
@@ -323,16 +324,16 @@ class ORCAModule(nn.Module):
             verbose: If True, prints out the structure of the ORCATransformer (useful for debugging!)
 
         Returns:
-            transformer_embeddings: See ORCATransformer.__call__
+            transformer_outputs: See ORCATransformer.__call__
             head_outputs: dictionary of outputs from heads {head_name: output}
         """
-        transformer_embeddings = self.orca_transformer(
+        transformer_outputs = self.orca_transformer(
             observations, tasks, pad_mask, train=train, verbose=verbose
         )
         head_outputs = {}
         for head_name, head in self.heads.items():
-            head_outputs[head_name] = head(transformer_embeddings, train=train)
-        return transformer_embeddings, head_outputs
+            head_outputs[head_name] = head(transformer_outputs, train=train)
+        return transformer_outputs, head_outputs
 
     def run_head(
         self,
@@ -352,3 +353,56 @@ class ORCAModule(nn.Module):
         head = self.heads[head_name]
         method = getattr(head, head_method_name)
         return method(*args, **kwargs)
+
+    @classmethod
+    def create(
+        observation_tokenizers: Dict[str, ModuleSpec],
+        task_tokenizers: Dict[str, ModuleSpec],
+        heads: Dict[str, ModuleSpec],
+        readouts: Dict[str, int],
+        transformer_kwargs: Dict,
+        token_embedding_size: int,
+        max_horizon: int,
+    ) -> "ORCAModule":
+        """
+        Canonical way to create an ORCAModule from configuration.
+
+        Args:
+            observation_tokenizers: dict of {tokenizer_name: tokenizer_spec} (see tokenizers.py)
+            task_tokenizers: dict of {tokenizer_name: tokenizer_spec} (see tokenizers.py)
+            heads: dict of {head_name: head_spec} (see heads.py)
+            readouts: dict of {readout_name (str): n_tokens_for_readout (int)}
+            token_embedding_size (int): The latent dimension of the token embeddings
+            max_horizon (int): Sets the size of positional embeddings, and provides an upper limit on the
+                maximum horizon of the model
+            transformer_kwargs: additional kwargs to forward to the transformer, which include:
+                num_layers (int): number of layers
+                mlp_dim (int): hidden dimension of the MLPs
+                num_heads (int): Number of heads in nn.MultiHeadDotProductAttention
+                dropout_rate (float): dropout rate.
+                attention_dropout_rate (float): dropout rate in self attention.
+        """
+
+        observation_tokenizer_defs = {
+            k: ModuleSpec.instantiate(spec)()
+            for k, spec in observation_tokenizers.items()
+        }
+        task_tokenizer_defs = {
+            k: ModuleSpec.instantiate(spec)() for k, spec in task_tokenizers.items()
+        }
+
+        head_defs = {k: ModuleSpec.instantiate(spec)() for k, spec in heads.items()}
+
+        model_def = ORCATransformer(
+            observation_tokenizers=observation_tokenizer_defs,
+            task_tokenizers=task_tokenizer_defs,
+            readouts=readouts,
+            token_embedding_size=token_embedding_size,
+            max_horizon=max_horizon,
+            transformer_kwargs=transformer_kwargs,
+        )
+
+        return ORCAModule(
+            orca_transformer=model_def,
+            heads=head_defs,
+        )
