@@ -15,7 +15,6 @@ import tqdm
 
 from orca.data.dataset import make_single_dataset
 from orca.data.utils.text_processing import TextProcessor
-from orca.model.orca_module import ORCAModule
 from orca.utils.train_utils import batched_apply, TrainState
 from orca.utils.typing import Any, Data, Sequence
 from orca.utils.visualization_lib import RolloutVisualizer, Visualizer
@@ -154,31 +153,14 @@ def get_policy_sampled_actions(
     elif policy_mode == "unconditioned":
         tasks = remove_text(remove_images(tasks), zero_text)
 
-    def get_actions(module: ORCAModule, observations, tasks, train):
-        transformer_embeddings = module.orca_transformer(
-            observations,
-            tasks,
-            observations["pad_mask"],
-            train=train,
-        )
-
-        actions = module.heads["action"].predict_action(
-            transformer_embeddings,
-            train=train,
-            argmax=False,
-            sample_shape=(samples_per_state,),
-            rng=state.rng,
-        )
-        return actions
-
-    actions = state.model.model_def.apply(
-        {"params": state.model.params},
+    actions = state.model.sample_actions(
         observations,
         tasks,
         train=False,
-        method=get_actions,
-        rngs={"dropout": state.rng},
-    )  # We could also have used run_head here, but this is easier to read
+        argmax=False,
+        sample_shape=(samples_per_state,),
+        rng=state.rng,
+    )
 
     # viz expects (batch_size, n_samples, action_dim)
     actions = jnp.moveaxis(actions, 0, 1)

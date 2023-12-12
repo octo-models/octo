@@ -335,25 +335,6 @@ class ORCAModule(nn.Module):
             head_outputs[head_name] = head(transformer_outputs, train=train)
         return transformer_outputs, head_outputs
 
-    def run_head(
-        self,
-        *args,
-        head_name: str,
-        head_method_name: str = "__call__",
-        **kwargs,
-    ):
-        """A convenience utility to run a method on a single head.
-
-        Args:
-            head_name: Name of head to run.
-            head_method_name: Name of method to run on head. Defaults to "__call__".
-            train: Whether model is being trained.
-            **kwargs: Keyword arguments to pass to method.
-        """
-        head = self.heads[head_name]
-        method = getattr(head, head_method_name)
-        return method(*args, **kwargs)
-
     @classmethod
     def create(
         cls,

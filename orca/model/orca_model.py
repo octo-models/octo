@@ -1,8 +1,7 @@
-from dataclasses import dataclass
-from functools import partial, update_wrapper
+from functools import partial
 import json
 import logging
-from typing import Any, Optional
+from typing import Any, Optional, Tuple
 
 import flax
 from flax import struct
@@ -10,11 +9,13 @@ from flax.training import orbax_utils
 import jax
 from jax.experimental import multihost_utils
 import jax.numpy as jnp
+from jax.typing import ArrayLike
 import numpy as np
 import orbax.checkpoint
 import tensorflow as tf
 
 from orca.data.utils.text_processing import TextProcessor
+from orca.model.components.action_heads import ActionHead
 from orca.model.orca_module import ORCAModule
 from orca.utils.spec import ModuleSpec
 from orca.utils.typing import Config, Data, Params, PRNGKey, Sequence
@@ -24,45 +25,25 @@ from orca.utils.typing import Config, Data, Params, PRNGKey, Sequence
 class ORCAModel:
     """Recommended way of interacting with a pretrained ORCA model.
 
-    Usage (example):
+    Usage:
         model = ORCAModel.load_pretrained(checkpoint_dir)
 
         # Create the task dict
         tasks = model.create_tasks(texts=["go to the red room"])
         # or
-        tasks = model.create_tasks(goals={"image_0": goal_images})
+        tasks = model.create_tasks(goals={"image_primary": goal_images})
 
-        # Run the model (jax.jit for speed)
-        policy_fn = jax.jit(model.sample_actions)
-        policy_fn(observations, tasks, rng=jax.random.PRNGKey(0))
+        # Run the model
+        model.sample_actions(observations, tasks, rng=jax.random.PRNGKey(0))
 
     """
 
-    model_def: ORCAModule = struct.field(pytree_node=False)
-    params: Params
+    module: ORCAModule = struct.field(pytree_node=False)
     text_processor: TextProcessor = struct.field(pytree_node=False)
-    example_batch: Data
     config: Config = struct.field(pytree_node=False)
+    params: Params
+    example_batch: Data
     dataset_statistics: Optional[Data]
-
-    def __call__(self, *args, **kwargs):
-        return self.model_def.apply({"params": self.params}, *args, **kwargs)
-
-    @property
-    def orca_transformer(self):
-        """Syntactic sugar for calling the transformer.
-
-        >>> transformer_outputs = self.orca_transformer(observations, tasks, pad_mask, train=False)
-        """
-        return partial(self, method="orca_transformer")
-
-    @property
-    def heads(self):
-        """Syntactic sugar for calling heads.
-
-        >>> self.heads["action"].predict_action(transformer_outputs)
-        """
-        return {name: HeadWrapper(self, name) for name in self.model_def.heads}
 
     def create_tasks(self, goals: Data = None, texts: Optional[Sequence[str]] = None):
         """Creates tasks dict from goals and texts.
@@ -94,11 +75,15 @@ class ORCAModel:
         if self.text_processor is not None:
             tasks["language_instruction"] = self.text_processor.encode(texts)
 
-        _verify_shapes(tasks, self.example_batch["task"], starting_dim=1)
+        _verify_shapes(tasks, "tasks", self.example_batch["task"], starting_dim=1)
         return tasks
 
-    def run_transformer(self, observations, tasks, pad_mask, train=False):
+    @partial(jax.jit, static_argnames=("train",))
+    def run_transformer(
+        self, observations: Data, tasks: Data, pad_mask: ArrayLike, train: bool = False
+    ):
         """Runs the transformer, but does shape checking on the inputs.
+
         Args:
             observations: dictionary of arrays of shape (batch_size, window_size, *shape).
                 Shape must be consistent with self.example_batch["observation"]
@@ -106,37 +91,63 @@ class ORCAModel:
                 Shape must be consistent with self.example_batch["task"]
             pad_mask: (batch_size, window_size) Boolean mask that is False when the timestep corresponds to padding
             train: whether to run in train mode
-            *args, **kwargs: Additional arguments for transformer or model.apply
         """
-        _verify_shapes(observations, self.example_batch["observation"], starting_dim=2)
-        _verify_shapes(tasks, self.example_batch["task"], starting_dim=1)
+        _verify_shapes(
+            observations,
+            "observations",
+            self.example_batch["observation"],
+            starting_dim=2,
+        )
+        _verify_shapes(tasks, "tasks", self.example_batch["task"], starting_dim=1)
 
-        return self.orca_transformer(observations, tasks, pad_mask, train=train)
+        return self.module.apply(
+            {"params": self.params},
+            observations,
+            tasks,
+            pad_mask,
+            train=train,
+            method="orca_transformer",
+        )
 
-    def sample_actions(self, observations, tasks, pad_mask=None, train=False, **kwargs):
+    @partial(jax.jit, static_argnames=("train", "sample_shape", "argmax"))
+    def sample_actions(
+        self,
+        observations: Data,
+        tasks: Data,
+        pad_mask: Optional[ArrayLike] = None,
+        train: bool = False,
+        argmax: bool = False,
+        sample_shape: Tuple[int, ...] = (),
+        rng: Optional[PRNGKey] = None,
+        temperature: float = 1.0,
+    ):
         """Samples actions from the model. See `action_heads.py` for more info.
-
-        Recommended to do this inside a jax.jit.
 
         Args:
             observations: dictionary of arrays of shape (batch_size, window_size, *)
             tasks: dict of tasks of shape (batch_size, *)
             pad_mask: (batch_size, window_size) Boolean mask that is False when the timestep corresponds to padding
             train: whether to run in train mode
-            **kwargs: kwargs to pass to model.heads["action"].predict_action
+            ...see `action_heads.py` for the rest of the kwargs.
         Returns:
             actions: (*sample_shape, batch_size, pred_horizon, action_dim)
         """
         if pad_mask is None:
             pad_mask = observations["pad_mask"]
 
-        transformer_embeddings = self.run_transformer(
+        transformer_outputs = self.run_transformer(
             observations, tasks, pad_mask, train=train
         )
-        return self.heads["action"].predict_action(
-            transformer_embeddings,
+        action_head: ActionHead = self.module.bind({"params": self.params}).heads[
+            "action"
+        ]
+        return action_head.predict_action(
+            transformer_outputs,
             train=train,
-            **kwargs,
+            argmax=argmax,
+            sample_shape=sample_shape,
+            rng=rng,
+            temperature=temperature,
         )
 
     @classmethod
@@ -187,10 +198,10 @@ class ORCAModel:
             )
 
         # create model def (an ORCAModule)
-        model_def = ORCAModule.create(**config["model"])
+        module = ORCAModule.create(**config["model"])
         # infer params shape without actually doing any computation
         params_shape = jax.eval_shape(
-            partial(model_def.init, train=False),
+            partial(module.init, train=False),
             jax.random.PRNGKey(0),
             example_batch["observation"],
             example_batch["task"],
@@ -200,7 +211,7 @@ class ORCAModel:
         checkpointer = orbax.checkpoint.CheckpointManager(
             checkpoint_path, orbax.checkpoint.PyTreeCheckpointer()
         )
-        step = step or checkpointer.latest_step()
+        step = step if step is not None else checkpointer.latest_step()
         params = checkpointer.restore(step, params_shape)
 
         if config["text_processor"] is not None:
@@ -209,7 +220,7 @@ class ORCAModel:
             text_processor = None
 
         return cls(
-            model_def=model_def,
+            module=module,
             params=params,
             text_processor=text_processor,
             example_batch=example_batch,
@@ -264,14 +275,7 @@ class ORCAModel:
             )
             if not tf.io.gfile.exists(example_batch_path):
                 with tf.io.gfile.GFile(example_batch_path, "wb") as f:
-                    f.write(
-                        flax.serialization.msgpack_serialize(
-                            jax.tree_map(
-                                lambda x: x[:1],
-                                multihost_utils.process_allgather(self.example_batch),
-                            )
-                        )
-                    )
+                    f.write(flax.serialization.msgpack_serialize(self.example_batch))
 
             # save dataset statistics
             dataset_statistics_path = tf.io.gfile.join(
@@ -305,8 +309,9 @@ class ORCAModel:
             rng (Optional[PRNGKey], optional): RNG key for initializing the model.
             dataset_statistics (Optional[Dict[str, Any]], optional): Dataset statistics.
         """
-        model_def = ORCAModule.create(**config["model"])
+        module = ORCAModule.create(**config["model"])
         rng = rng if rng is not None else jax.random.PRNGKey(0)
+        example_batch = multihost_utils.process_allgather(example_batch)
         example_batch = jax.tree_map(lambda x: x[:1], example_batch)
 
         init_args = (
@@ -317,17 +322,17 @@ class ORCAModel:
 
         if verbose:
             print(
-                model_def.tabulate(rng, *init_args, train=False, verbose=True, depth=2)
+                module.tabulate(rng, *init_args, train=False, verbose=True, depth=2)
             )  # Prints out the parameter count of our model, and tokenizer details
 
         @jax.jit
         def _init(rng):
-            return model_def.init(rng, *init_args, train=False)
+            return module.init(rng, *init_args, train=False)
 
         params = _init(rng)["params"]
 
         return cls(
-            model_def=model_def,
+            module=module,
             params=params,
             text_processor=text_processor,
             example_batch=example_batch,
@@ -336,40 +341,14 @@ class ORCAModel:
         )
 
 
-@dataclass
-class HeadWrapper:
-    """Dummy class to help with the following syntactic sugar.
-
-    > ORCAModel.heads["action"].predict_action(transformer_outputs)
-    """
-
-    model: ORCAModel
-    head_name: str
-
-    def __call__(self, *args, **kwargs):
-        return self.__getattr__("__call__")(*args, **kwargs)
-
-    def __getattr__(self, method_name):
-        def bound_fn(module: ORCAModule, *args, **kwargs):
-            return module.run_head(
-                *args, head_name=self.head_name, head_method_name=method_name, **kwargs
-            )
-
-        return update_wrapper(
-            # calls `self.model.__call__`, which binds the params to the ORCAModule, giving `bound_fn` above
-            # access to the bound module
-            partial(self.model, method=bound_fn),
-            self.model.model_def.heads[self.head_name].__getattribute__(method_name),
-        )
-
-
 def _verify_shapes(
     pytree,
+    name: str,
     example_pytree,
     starting_dim: int = 0,
     strict: bool = False,
     raise_error: bool = True,
-    silent=False,
+    silent: bool = False,
 ):
     weak_fail, fail = False, False
     pytree_flat = flax.traverse_util.flatten_dict(pytree)
@@ -378,18 +357,24 @@ def _verify_shapes(
     # Check that all elements are present
     if set(pytree_flat.keys()) != set(example_pytree_flat.keys()):
         if not silent:
-            logging.warning(
-                "Provided pytree contains extra items: %s",
-                set(pytree_flat.keys()) - set(example_pytree_flat.keys()),
-            )
-            logging.warning(
-                "Provided pytree doesn't contain items: %s",
-                set(example_pytree_flat.keys()) - set(pytree_flat.keys()),
-            )
+            extra = set(pytree_flat.keys()) - set(example_pytree_flat.keys())
+            if extra:
+                logging.warning(
+                    "'%s' contains extra items compared to example_batch: %s",
+                    name,
+                    {"/".join(x) for x in extra},
+                )
+            missing = set(example_pytree_flat.keys()) - set(pytree_flat.keys())
+            if missing:
+                logging.warning(
+                    "'%s' is missing items compared to example_batch: %s",
+                    name,
+                    {"/".join(x) for x in missing},
+                )
         weak_fail = True
 
     mismatched_keys = {
-        k: (pytree_flat[k].shape, example_pytree_flat[k].shape)
+        k: f"{pytree_flat[k].shape} != {example_pytree_flat[k].shape}"
         for k in pytree_flat
         if k in example_pytree_flat
         and pytree_flat[k].shape[starting_dim:]
@@ -398,12 +383,15 @@ def _verify_shapes(
     if mismatched_keys:
         if not silent:
             logging.warning(
-                "Provided pytree contains mismatched shapes: %s",
-                flax.core.pretty_repr(mismatched_keys),
+                "'%s' contains mismatched shapes compared to example_batch: %s",
+                name,
+                flax.core.pretty_repr(
+                    {"/".join(k): v for k, v in mismatched_keys.items()}
+                ),
             )
         fail = True
 
     if raise_error and (fail or (weak_fail and strict)):
-        raise AssertionError("Provided pytree does not match example pytree.")
+        raise AssertionError(f"{name} does not match example batch.")
 
     return weak_fail or fail
