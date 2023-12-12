@@ -4,9 +4,8 @@ import matplotlib
 
 matplotlib.use("Agg")
 from dataclasses import dataclass
-from functools import reduce
 import json
-from typing import Any, Callable, Dict, Optional, Tuple, Union
+from typing import Any, Dict, Optional, Union
 
 import dlimp as dl
 import flax
@@ -17,13 +16,11 @@ from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 import matplotlib.gridspec as gridspec
 import matplotlib.pyplot as plt
 import numpy as np
-from PIL import Image
 import plotly.graph_objects as go
 import tensorflow as tf
 import tqdm
 import wandb
 
-from orca.data.utils.data_utils import ActionEncoding
 from orca.utils.gym_wrappers import (
     HistoryWrapper,
     RHCWrapper,
@@ -95,10 +92,10 @@ def run_policy_on_trajectory(policy_fn, traj, *, text_processor=None):
     )
     if text_processor:
         tasks["language_instruction"] = text_processor.encode(
-            [s.decode("utf-8") for s in traj["tasks"]["language_instruction"]]
+            [s.decode("utf-8") for s in traj["task"]["language_instruction"]]
         )
         tasks["pad_mask_dict"]["language_instruction"] = np.array(
-            [len(s.decode("utf-8")) > 0 for s in traj["tasks"]["language_instruction"]]
+            [len(s.decode("utf-8")) > 0 for s in traj["task"]["language_instruction"]]
         )
 
     actions = policy_fn(traj["observation"], tasks)
@@ -203,12 +200,8 @@ class Visualizer:
             info = add_unnormalized_info(info, self.action_proprio_stats)
             info = add_manipulation_metrics(info)
 
-            if (
-                int(traj["observation"]["action_encoding"][0, 0, 0])
-                == ActionEncoding.EEF_POS
-            ):
-                plotly_fig = plot_trajectory_actions(**info)
-                visualizations[f"traj_{n}"] = plotly_fig
+            plotly_fig = plot_trajectory_actions(**info)
+            visualizations[f"traj_{n}"] = plotly_fig
 
             # plot qualitative action trajectory per dimension w/ and w/o action chunk
             visualizations[f"traj_{n}_mpl"] = plot_trajectory_overview_mpl(
@@ -582,7 +575,7 @@ def plot_trajectory_overview_mpl(
                 if chunk_idx == 0 and (act.shape[0] // chunk_length) <= 20:
                     ax.axvline(t, color="red", linestyle="--", alpha=0.2)
             ax.set_ylabel(f"dim {i}")
-        fig.suptitle(traj["tasks"]["language_instruction"][0].decode("utf-8"))
+        fig.suptitle(traj["task"]["language_instruction"][0].decode("utf-8"))
     return wandb.Image(wandb_figure.image)
 
 

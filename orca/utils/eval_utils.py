@@ -1,7 +1,7 @@
 from functools import partial
 import logging
 import os
-from pathlib import Path, PurePath
+from pathlib import Path
 
 import flax
 import jax

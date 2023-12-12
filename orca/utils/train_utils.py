@@ -18,6 +18,7 @@ import optax
 from orca.data.utils.text_processing import TextProcessor
 from orca.model.components.hf_weight_loaders import WeightLoader
 from orca.utils import jax_utils
+from orca.utils.spec import ModuleSpec
 from orca.utils.typing import Config, Data, Params, PRNGKey
 
 
@@ -31,7 +32,7 @@ def create_train_state(
     tx: optax.GradientTransformation,
     init_args: Sequence[Any] = (),
     init_kwargs: Mapping[str, Any] = dict(),
-    pretrained_loaders: Sequence[WeightLoader] = tuple(),
+    pretrained_loaders: Sequence[Union[WeightLoader, ModuleSpec]] = tuple(),
     init_method: Optional[Union[str, Callable]] = None,
 ) -> TrainState:
     """Utility to create a TrainState."""
@@ -50,6 +51,8 @@ def create_train_state(
     ), "Are you forgetting to store some variables in the state? {}".format(ev.keys())
 
     for loader in pretrained_loaders:
+        if not callable(loader):  # Means that it is a ModuleSpec
+            loader = ModuleSpec.instantiate(loader)
         params = loader(params)
 
     return TrainState.create(
@@ -421,12 +424,12 @@ def process_text(batch: Data, text_processor: Optional[TextProcessor]) -> Data:
 
     If the text processor is None, removes language entirely from the tasks.
     Expects batch to be a nested dictionary, where
-        batch["tasks"]["language_instruction"] is a sequence of byte strings
+        batch["task"]["language_instruction"] is a sequence of byte strings
     """
     if text_processor is None:
-        batch["tasks"].pop("language_instruction")
+        batch["task"].pop("language_instruction")
     else:
-        batch["tasks"]["language_instruction"] = text_processor.encode(
-            [s.decode("utf-8") for s in batch["tasks"]["language_instruction"]]
+        batch["task"]["language_instruction"] = text_processor.encode(
+            [s.decode("utf-8") for s in batch["task"]["language_instruction"]]
         )
     return batch

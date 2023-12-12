@@ -1,47 +1,52 @@
-from copy import deepcopy
-import functools
-
 from ml_collections import ConfigDict
 from ml_collections.config_dict import FieldReference, placeholder
 
+from orca.data.utils.data_utils import NormalizationType
+from orca.data.utils.text_processing import MuseEmbedding
+from orca.model import base_orca_model_config
+from orca.model.components.action_heads import MSEActionHead
+from orca.model.components.tokenizers import ImageTokenizer
+from orca.model.components.transformer import common_transformer_sizes
+from orca.model.components.vit_encoders import SmallStem16
+from orca.utils.spec import ModuleSpec
 
-def update_config(config, **kwargs):
-    updates = ConfigDict(kwargs)
-    new_config = deepcopy(config)
-    new_config.update(updates)
-    return new_config
 
-
-def wrap(f):
-    """Simple wrapper to enable passing config strings to `get_config`
-
-    Usage:
-
-    python train.py --config=config.py:vit_s,multimodal
-    python train.py --config=config.py:transformer_size=vit_s
+def get_model_config(transformer_size):
     """
+    Transformer_size is one of ["dummy", "vanilla", "vit_s", "vit_b", "vit_l", "vit_h"]
 
-    @functools.wraps(f)
-    def wrapped_f(config_string=None):
-        if config_string is None:
-            return f()
-        elements = config_string.split(",")
-        args, kwargs = [], {}
-        for e in elements:
-            if "=" in e:
-                k, v = e.split("=")
-                kwargs[k] = v
-            else:
-                args.append(e)
-        return f(*args, **kwargs)
+    This model stacks all the images from different cameras together, and passes it through
+    a small convolutional stem before entering the transformer.
 
-    return wrapped_f
+    The action head pools all the observation token embeddings, and passes it through a small MLP
+    before predicting the action using a MSE loss.
+    """
+    model_config = base_orca_model_config()
+    token_embedding_size, transformer_kwargs = common_transformer_sizes(
+        transformer_size
+    )
+    model_config["token_embedding_size"] = token_embedding_size
+    model_config["transformer_kwargs"] = transformer_kwargs
+
+    model_config["observation_tokenizers"]["image"] = ModuleSpec.create(
+        ImageTokenizer,
+        num_tokens=256,
+        obs_stack_keys=["image_.*"],
+        task_stack_keys=["image_.*"],
+        task_film_keys=["language_instruction"],
+        encoder=ModuleSpec.create(SmallStem16, use_film=True),
+    )
+    model_config["heads"]["action"] = ModuleSpec.create(
+        MSEActionHead,
+        pred_horizon=1,
+        action_dim=7,
+        readout_key="obs",
+    )
+    return model_config
 
 
-@wrap
 def get_config(
     transformer_size="vit_s",
-    modality="multimodal",
 ):
     print("Creating config with: ", locals())
     num_steps = FieldReference(default=int(2e6))
@@ -53,7 +58,7 @@ def get_config(
             save_dir=placeholder(str),
             model=get_model_config(transformer_size),
             window_size=window_size,
-            dataset_kwargs=get_dataset_config(modality, window_size),
+            dataset_kwargs=get_dataset_config(window_size),
             optimizer=dict(
                 learning_rate=dict(
                     name="rsqrt",
@@ -83,10 +88,8 @@ def get_config(
                 samples_per_state=8,
             ),
             resume_path=placeholder(str),
-            text_processor="muse_embedding",
-            text_processor_kwargs=dict(),
+            text_processor=ModuleSpec.create(MuseEmbedding),
             pretrained_loaders=tuple(),
-            pretrained_loader_kwargs=tuple(),
             wandb=dict(
                 project="orca",
                 group=placeholder(str),
@@ -103,20 +106,14 @@ def get_config(
     )
 
 
-def get_dataset_config(modality="multimodal", window_size=1):
-    normalization_type = "normal"
-    if modality == "multimodal":
-        task_augmentation = dict(
-            task_augment_strategy="delete_task_conditioning",
-            task_augment_kwargs=dict(
-                delete_key_groups_probs=[
-                    (["image_*"], 0.5),
-                    (["language_instruction"], 0.5),
-                ],
-            ),
-        )
-    else:
-        raise ValueError(f"Unknown modality {modality}")
+def get_dataset_config(window_size=1):
+    normalization_type = NormalizationType.NORMAL
+    task_augmentation = dict(
+        task_augment_strategy="delete_task_conditioning",
+        task_augment_kwargs=dict(
+            keep_image_prob=0.5,
+        ),
+    )
 
     return {
         # oxe_kwargs will generate dataset_kwargs_list and sampling weights
@@ -124,19 +121,15 @@ def get_dataset_config(modality="multimodal", window_size=1):
             data_mix=placeholder(str),
             # for v4 TPUs: "gs://rail-orca-central2/resize_336_336"
             data_dir=placeholder(str),
-            n_third_person_cameras=1,
-            n_wrist_cameras=0,
+            load_camera_views=("primary", "wrist"),
             load_depth=False,
-        ),
-        # common_dataset_kwargs override specific kwargs from dataset_kwargs_list
-        "common_dataset_kwargs": dict(
-            action_proprio_normalization_type=normalization_type,
         ),
         "traj_transform_kwargs": dict(
             window_size=window_size,
-            additional_action_window_size=0,
+            future_action_window_size=0,
             goal_relabeling_strategy="uniform",
             subsample_length=100,
+            **task_augmentation,
         ),
         "frame_transform_kwargs": dict(
             resize_size=(256, 256),
@@ -154,113 +147,11 @@ def get_dataset_config(modality="multimodal", window_size=1):
                     "random_hue",
                 ],
             ),
-            **task_augmentation,
+            num_parallel_calls=200,
         ),
         "traj_transform_threads": 48,  # shared between all datasets
         "traj_read_threads": 48,  # shared between all datasets
-        "frame_transform_threads": 200,  # not shared between datasets
         "shuffle_buffer_size": 100000,  # shared between all datasets
         "batch_size": 1024,
         "balance_weights": True,
-    }
-
-
-def get_transformer_kwargs(transformer_size):
-    assert transformer_size in ["dummy", "vanilla", "vit_s", "vit_b", "vit_l", "vit_h"]
-    default_params = {
-        "attention_dropout_rate": 0.0,
-        "add_position_embedding": False,
-    }
-
-    TRANSFORMER_SIZES = {
-        "dummy": dict(
-            num_layers=1,
-            mlp_dim=256,
-            num_attention_heads=2,
-            dropout_rate=0.1,
-        ),
-        "vanilla": dict(
-            num_layers=4,
-            mlp_dim=1024,
-            num_attention_heads=8,
-            dropout_rate=0.1,
-        ),
-        "vit_s": dict(
-            num_layers=12,
-            mlp_dim=1536,
-            num_attention_heads=6,
-            dropout_rate=0.0,
-        ),
-        "vit_b": dict(
-            num_layers=12,
-            mlp_dim=3072,
-            num_attention_heads=12,
-            dropout_rate=0.0,
-        ),
-        "vit_l": dict(
-            num_layers=24,
-            mlp_dim=4096,
-            num_attention_heads=16,
-            dropout_rate=0.1,
-        ),
-        "vit_h": dict(
-            num_layers=32,
-            mlp_dim=5120,
-            num_attention_heads=16,
-            dropout_rate=0.1,
-        ),
-    }
-
-    TOKEN_DIMS = {
-        "dummy": 256,
-        "vanilla": 256,
-        "vit_s": 384,
-        "vit_b": 768,
-        "vit_l": 1024,
-        "vit_h": 1280,
-    }
-    return dict(
-        token_embedding_size=TOKEN_DIMS[transformer_size],
-        transformer_kwargs={
-            **default_params,
-            **TRANSFORMER_SIZES[transformer_size],
-        },
-    )
-
-
-def get_model_config(transformer_size):
-    normalization_type = "normal"
-    base_tokenizer_kwargs = dict(
-        encoder="small-stem-16",
-        encoder_kwargs=dict(use_film=True),
-    )
-
-    return {
-        **get_transformer_kwargs(transformer_size),
-        "proper_pad_mask": True,
-        "max_horizon": 10,
-        "readouts": dict(),
-        "heads": dict(
-            action=dict(
-                cls_name="mse_action_head",
-                kwargs=dict(
-                    pred_horizon=1,
-                    action_dim=7,
-                    readout_key="obs",
-                ),
-            )
-        ),
-        "observation_tokenizers": {
-            "image": {
-                "cls_name": "image_tokenizer",
-                "kwargs": dict(
-                    num_tokens=256,
-                    obs_stack_keys=["image_.*"],
-                    task_stack_keys=["image_.*"],
-                    task_film_keys=["language_instruction"],
-                    **base_tokenizer_kwargs,
-                ),
-            },
-        },
-        "task_tokenizers": dict(),
     }

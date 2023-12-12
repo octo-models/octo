@@ -1,12 +1,8 @@
 import copy
-import os
 from typing import List
 
-import cv2
 import dlimp as dl
-from einops import rearrange
 import gym
-import jax
 import jax.numpy as jnp
 import numpy as np
 

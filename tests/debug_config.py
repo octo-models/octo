@@ -1,9 +1,15 @@
 from copy import deepcopy
 
 from config import get_config as get_base_config
-from config import update_config
+from ml_collections import ConfigDict
 
-get_base_config = get_base_config.__wrapped__
+
+def update_config(config: ConfigDict, **kwargs):
+    assert isinstance(config, ConfigDict)
+    updates = ConfigDict(kwargs)
+    new_config = deepcopy(config)
+    new_config.update(updates)
+    return new_config
 
 
 def get_config():
@@ -36,13 +42,17 @@ def get_config():
                 {
                     "name": "bridge_dataset",
                     "data_dir": "./tests/debug_dataset",
-                    "image_obs_keys": ["image_0"],
+                    "image_obs_keys": {"primary": "image_0"},
                     "state_obs_keys": ["state"],
+                    "language_key": "language_instruction",
                 },
             ],
+            "frame_transform_kwargs": {
+                "resize_size": (128, 128),
+                "num_parallel_calls": 4,
+            },
             "traj_transform_threads": 1,  # shared between all datasets
             "traj_read_threads": 1,  # shared between all datasets
-            "frame_transform_threads": 4,  # not shared between datasets
             "batch_size": 64,
             "sample_weights": None,
             "shuffle_buffer_size": 1000,
