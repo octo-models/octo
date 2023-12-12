@@ -21,6 +21,7 @@ import numpy as np
 import tensorflow as tf
 from widowx_envs.widowx_env_service import WidowXClient, WidowXConfigs, WidowXStatus
 
+from orca.model.orca_model import ORCAModel
 from orca.utils.eval_utils import (
     download_checkpoint_from_gcs,
     sample_actions,
@@ -28,7 +29,6 @@ from orca.utils.eval_utils import (
 )
 from orca.utils.gym_wrappers import HistoryWrapper, RHCWrapper, UnnormalizeActionProprio
 from orca.utils.gym_wrappers import TemporalEnsembleWrapper  # noqa: F401
-from orca.utils.pretrained_utils import ORCAModel
 
 np.set_printoptions(suppress=True)
 

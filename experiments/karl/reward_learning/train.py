@@ -22,7 +22,7 @@ import wandb
 import orca
 from orca.data.dataset import make_dataset, make_interleaved_dataset
 from orca.data.utils.text_processing import text_processors
-from orca.model import create_model_def, OrcaModel
+from orca.model import create_model_def, ORCAModule
 from orca.model.components.hf_weight_loaders import weights_loaders
 from orca.utils.jax_utils import initialize_compilation_cache
 from orca.utils.train_utils import (
@@ -263,7 +263,7 @@ def main(_):
     # )  # Ensures that there is a full horizon of actions to predict for each timestep
 
     def loss_fn(params, state, batch, rng, train=True):
-        def get_loss(model: OrcaModel, observations, tasks, actions, train):
+        def get_loss(model: ORCAModule, observations, tasks, actions, train):
             # only use first horizon timesteps as input to transformer
             # to ensure that there is a full horizon of actions to predict for each timestep
             # observations = jax.tree_map(lambda x: x[:, :horizon], observations)
