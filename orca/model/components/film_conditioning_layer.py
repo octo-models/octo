@@ -31,20 +31,3 @@ class FilmConditioning(nn.Module):
         projected_cond_mult = projected_cond_mult[:, None, None, :]
 
         return conv_filters * (1 + projected_cond_add) + projected_cond_mult
-
-
-if __name__ == "__main__":
-    import jax
-    import jax.numpy as jnp
-
-    key = jax.random.PRNGKey(0)
-    key, subkey = jax.random.split(key)
-    x = jax.random.normal(subkey, (1, 32, 32, 3))
-    x = jnp.array(x)
-
-    z = jnp.ones((1, 64))
-    film = FilmConditioning()
-    params = film.init(key, x, z)
-    y = film.apply(params, x, z)
-
-    print(y.shape)
