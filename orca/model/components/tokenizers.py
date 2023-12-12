@@ -116,6 +116,10 @@ class ImageTokenizer(nn.Module):
         enc_inputs = extract_inputs(obs_stack_keys, observations, check_spatial=True)
         if tasks and self.task_stack_keys:
             task_stack_keys = regex_filter(self.task_stack_keys, sorted(tasks.keys()))
+            if len(task_stack_keys) == 0:
+                raise ValueError(
+                    f"No task inputs matching {self.task_stack_keys} were found."
+                )
             task_inputs = extract_inputs(task_stack_keys, tasks, check_spatial=True)
             task_inputs = task_inputs[:, None].repeat(enc_inputs.shape[1], axis=1)
             # TODO: allow somehow for task inputs to be not provided...
