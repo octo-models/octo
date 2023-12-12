@@ -454,9 +454,9 @@ class DiffusionActionHead(nn.Module):
     def __call__(
         self,
         transformer_outputs: Dict[str, TokenGroup],
-        train: bool = True,
         time: Optional[ArrayLike] = None,
         noisy_actions: Optional[ArrayLike] = None,
+        train: bool = True,
     ) -> jax.Array:
         """Performs a single forward pass through the diffusion model."""
         token_group = transformer_outputs[self.readout_key]
