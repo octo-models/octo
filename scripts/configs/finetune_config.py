@@ -1,6 +1,6 @@
-from config import wrap
 from ml_collections import ConfigDict
 from ml_collections.config_dict import FieldReference, placeholder
+from scripts.configs.config import wrap
 
 
 @wrap
