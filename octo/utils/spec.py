@@ -63,8 +63,7 @@ class ModuleSpec(TypedDict):
                 f"Expected ModuleSpec, but got {spec}. "
                 "ModuleSpec must have keys 'module', 'name', 'args', and 'kwargs'."
             )
-        # From the past 🐬
-        cls = _import_from_string(spec["module"].replace("orca", "octo"), spec["name"])
+        cls = _import_from_string(spec["module"], spec["name"])
         return partial(cls, *spec["args"], **spec["kwargs"])
 
 
