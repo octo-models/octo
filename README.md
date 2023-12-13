@@ -45,8 +45,8 @@ At the moment we provide the following model versions:
 
 | Model                                                         | Inference on 1x NVIDIA 4090 | Size       |
 |---------------------------------------------------------------|-----------------------------|------------|
-| [ORCA-Base](https://huggingface.co/rail-berkeley/orca-base)   | 90 it/sec                   | 93M Params |
-| [ORCA-Small](https://huggingface.co/rail-berkeley/orca-small) | 130 it/sec                  | 27M Params |
+| [ORCA-Base](https://huggingface.co/rail-berkeley/orca-base)   | 13 it/sec                   | 93M Params |
+| [ORCA-Small](https://huggingface.co/rail-berkeley/orca-small) | 17 it/sec                   | 27M Params |
 
 
 ## Examples
