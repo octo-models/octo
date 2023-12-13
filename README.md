@@ -6,6 +6,15 @@
 This repo contains code for training and finetuning OCTO generalist robotic models (GRMs).
 OCTO models are transformer-based diffusion policies, trained on a diverse mix of >1M robot trajectories.
 
+## Get Started
+
+Follow the installation instructions below, then load a pre-trained OCTO model!
+
+```
+from octo.model.octo_model import OCTOModel
+model = OCTOModel.load_pretrained("hf://rail-berkeley/octo-small")
+```
+
 ![OCTO model](docs/assets/teaser.png)
 
 Out of the box, OCTO supports multiple RGB camera inputs, can control various robot arms,
