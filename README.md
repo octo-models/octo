@@ -40,7 +40,7 @@ python train.py --config tests/debug_config.py --debug
 
 ## Checkpoints
 
-You can find pre-trained ORCA checkpoints [here](huggingface.com).
+You can find pre-trained ORCA checkpoints [here](https://huggingface.co/rail-berkeley).
 At the moment we provide the following model versions:
 
 | Model                                                         | Inference on 1x NVIDIA 4090 | Finetune on 1x NVIDIA 4090 | Size       |
@@ -99,6 +99,7 @@ For example, to finetune the full transformer with multimodal inputs use:
 Loading and inferencing a trained ORCA model is as easy as:
 ```
 from orca.model import ORCAModel
+
 model = ORCAModel.load_pretrained("hf://rail-berkeley/orca-small")
 task = model.create_tasks(texts=["pick up the spoon"])
 action = model.sample_action(observation, task, rng=jax.random.PRNGKey(0))
