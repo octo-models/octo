@@ -2,10 +2,8 @@ from ml_collections import ConfigDict
 from ml_collections.config_dict import FieldReference, placeholder
 
 
-def get_config(
-    mode="full",
-    task="multimodal",
-):
+def get_config(config_string="full,multimodal"):
+    task, mode = config_string.split(",")
     assert task in ["image_conditioned", "language_conditioned", "multimodal"]
     assert mode in ["full", "head_only", "head_mlp_only"]
 
@@ -23,6 +21,9 @@ def get_config(
         "state_obs_keys": ["state", None],
         "language_key": "language_instruction",
         "action_proprio_normalization_type": "normal",
+        # All actions are relative deltas, except for the last one (gripper) which is absolute
+        # Specifying this is only necessary if you want to predict > 1 step into the future
+        "absolute_action_mask": [False, False, False, False, False, False, True],
         # standardize_fn is dynamically loaded from a file
         # for example: "experiments/kevin/custom_standardization_transforms.py:aloha_dataset_transform"
         "standardize_fn": "orca/data/oxe/oxe_standardization_transforms.py:bridge_dataset_transform",
