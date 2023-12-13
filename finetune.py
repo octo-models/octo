@@ -116,13 +116,16 @@ def main(_):
 
     #########
     #
-    # Load Pretraining Config + optionally modify
+    # Load Pretrained model + optionally modify config
     #
     #########
 
-    orig_config = ORCAModel.load_config(FLAGS.config.pretrained_path)
+    pretrained_model = ORCAModel.load_pretrained(
+        FLAGS.config.pretrained_path,
+        step=FLAGS.config.pretrained_step,
+    )
     flat_config = flax.traverse_util.flatten_dict(
-        orig_config.to_dict(), keep_empty_nodes=True
+        pretrained_model.config.to_dict(), keep_empty_nodes=True
     )
     for d_key in flax.traverse_util.flatten_dict(
         FLAGS.config.get("config_delete_keys", ConfigDict()).to_dict()
@@ -133,7 +136,7 @@ def main(_):
 
     config = ConfigDict(flax.traverse_util.unflatten_dict(flat_config))
     config.update(FLAGS.config.get("update_config", ConfigDict()))
-    check_config_diff(config, orig_config)
+    check_config_diff(config, pretrained_model.config)
 
     #########
     #
@@ -186,10 +189,6 @@ def main(_):
 
     rng = jax.random.PRNGKey(FLAGS.config.seed)
     rng, init_rng = jax.random.split(rng)
-    pretrained_model = ORCAModel.load_pretrained(
-        FLAGS.config.pretrained_path,
-        step=FLAGS.config.pretrained_step,
-    )
     model = ORCAModel.from_config(
         config,
         example_batch,
