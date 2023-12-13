@@ -77,7 +77,7 @@ def main(_):
         task = model.create_tasks(texts=language_instruction)
 
         # run rollout for 400 steps
-        images = [obs["image_0"][0]]
+        images = [obs["image_primary"][0]]
         episode_return = 0.0
         while len(images) < 400:
             # model returns actions of shape [batch, pred_horizon, action_dim] -- remove batch
@@ -89,7 +89,7 @@ def main(_):
             # step env -- info contains full "chunk" of observations for logging
             # obs only contains observation for final step of chunk
             obs, reward, done, trunc, info = env.step(actions)
-            images.extend([o["image_0"][0] for o in info["observations"]])
+            images.extend([o["image_primary"][0] for o in info["observations"]])
             episode_return += reward
             if done or trunc:
                 break

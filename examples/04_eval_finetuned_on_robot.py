@@ -183,7 +183,7 @@ def main(_):
                 goal = jax.tree_map(lambda x: x[None], obs)
 
             task = model.create_tasks(goals=goal)
-            goal_image = goal["image_0"][0]
+            goal_image = goal["image_primary"][0]
             goal_instruction = ""
         elif modality == "l":
             print("Current instruction: ", goal_instruction)
@@ -212,11 +212,11 @@ def main(_):
                 last_tstep = time.time()
 
                 # save images
-                images.append(obs["image_0"][-1])
+                images.append(obs["image_primary"][-1])
                 goals.append(goal_image)
 
                 if FLAGS.show_image:
-                    bgr_img = cv2.cvtColor(obs["image_0"][-1], cv2.COLOR_RGB2BGR)
+                    bgr_img = cv2.cvtColor(obs["image_primary"][-1], cv2.COLOR_RGB2BGR)
                     cv2.imshow("img_view", bgr_img)
                     cv2.waitKey(20)
 
