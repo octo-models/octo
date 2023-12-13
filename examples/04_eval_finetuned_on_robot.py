@@ -1,8 +1,9 @@
 """
-This script shows how to evaluate a finetuned OCTO model on a real WidowX robot.
-To reproduce the robot setup, follow the instructions at https://rail-berkeley.github.io/bridgedata/
-To install the robot controller, please follow the instructions here: https://github.com/rail-berkeley/bridge_data_robot
-Even if you don't plan to run on a WidowX robot, this script demonstrates the general layout of a robot eval loop.
+This script shows how we evaluated a finetuned OCTO model on a real WidowX robot. While the exact specifics may not
+be applicable to your use case, this script serves as a didactic example of how to use OCTO in a real-world setting.
+
+If you wish, you may reproduce these results by [reproducing the robot setup](https://rail-berkeley.github.io/bridgedata/)
+and installing [the robot controller](https://github.com/rail-berkeley/bridge_data_robot)
 """
 
 from datetime import datetime
@@ -14,7 +15,6 @@ from absl import app, flags, logging
 import click
 import cv2
 from envs.widowx_env import convert_obs, state_to_eep, wait_for_obs, WidowXGym
-import flax
 import imageio
 import jax
 import jax.numpy as jnp
@@ -23,7 +23,6 @@ from widowx_envs.widowx_env_service import WidowXClient, WidowXConfigs, WidowXSt
 
 from octo.model.octo_model import OCTOModel
 from octo.utils.gym_wrappers import HistoryWrapper, RHCWrapper, UnnormalizeActionProprio
-from octo.utils.gym_wrappers import TemporalEnsembleWrapper  # noqa: F401
 
 np.set_printoptions(suppress=True)
 
@@ -43,19 +42,14 @@ flags.DEFINE_spaceseplist("goal_eep", [0.3, 0.0, 0.15], "Goal position")
 flags.DEFINE_spaceseplist("initial_eep", [0.3, 0.0, 0.15], "Initial position")
 flags.DEFINE_bool("blocking", False, "Use the blocking controller")
 
-flags.DEFINE_string(
-    "modality",
-    "",
-    "Either 'g', 'goal', 'l', 'language' (leave empty to prompt when running)",
-)
+
 flags.DEFINE_integer("im_size", None, "Image size", required=True)
 flags.DEFINE_string("video_save_path", None, "Path to save video")
 flags.DEFINE_integer("num_timesteps", 120, "num timesteps")
 flags.DEFINE_integer("horizon", 1, "Observation history length")
 flags.DEFINE_integer("pred_horizon", 1, "Length of action sequence from model")
 flags.DEFINE_integer("exec_horizon", 1, "Length of action sequence to execute")
-flags.DEFINE_float("temperature", 1.0, "Temperature for sampling actions")
-flags.DEFINE_bool("deterministic", False, "Whether to sample action deterministically")
+
 
 # show image flag
 flags.DEFINE_bool("show_image", False, "Show image")
@@ -113,34 +107,22 @@ def main(_):
         env, model.dataset_statistics, normalization_type="normal"
     )
     env = HistoryWrapper(env, FLAGS.horizon)
-    # env = TemporalEnsembleWrapper(env, FLAGS.pred_horizon)
     env = RHCWrapper(env, FLAGS.exec_horizon)
 
     # create policy functions
-    @partial(jax.jit, static_argnames="argmax")
+    @jax.jit
     def sample_actions(
         pretrained_model: OCTOModel,
         observations,
         tasks,
         rng,
-        argmax=False,
-        temperature=1.0,
     ):
         # add batch dim to observations
         observations = jax.tree_map(lambda x: x[None], observations)
-        logging.warning(
-            "observations: %s",
-            flax.core.pretty_repr(jax.tree_map(jnp.shape, observations)),
-        )
-        logging.warning(
-            "tasks: %s", flax.core.pretty_repr(jax.tree_map(jnp.shape, tasks))
-        )
         actions = pretrained_model.sample_actions(
             observations,
             tasks,
             rng=rng,
-            argmax=argmax,
-            temperature=temperature,
         )
         # remove batch dim
         return actions[0]
@@ -155,16 +137,11 @@ def main(_):
     goal_image = jnp.zeros((FLAGS.im_size, FLAGS.im_size, 3), dtype=np.uint8)
     goal_instruction = ""
 
-    modality = FLAGS.modality[:1]
-    if modality not in ["g", "l", ""]:
-        modality = ""
-
     # goal sampling loop
     while True:
-        if not modality:
-            modality = click.prompt(
-                "Language or goal image?", type=click.Choice(["l", "g"])
-            )
+        modality = click.prompt(
+            "Language or goal image?", type=click.Choice(["l", "g"])
+        )
 
         if modality == "g":
             if click.confirm("Take a new goal?", default=True):
@@ -182,15 +159,19 @@ def main(_):
                 obs = convert_obs(obs, FLAGS.im_size)
                 goal = jax.tree_map(lambda x: x[None], obs)
 
+            # Format task for the model
             task = model.create_tasks(goals=goal)
+            # For logging purposes
             goal_image = goal["image_primary"][0]
             goal_instruction = ""
+
         elif modality == "l":
             print("Current instruction: ", goal_instruction)
             if click.confirm("Take a new instruction?", default=True):
                 text = input("Instruction?")
-
+            # Format task for the model
             task = model.create_tasks(texts=[text])
+            # For logging purposes
             goal_instruction = text
             goal_image = jnp.zeros_like(goal_image)
         else:
