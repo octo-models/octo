@@ -3,7 +3,7 @@ from ml_collections.config_dict import FieldReference, placeholder
 
 
 def get_config(config_string="full,multimodal"):
-    task, mode = config_string.split(",")
+    mode, task = config_string.split(",")
     assert task in ["image_conditioned", "language_conditioned", "multimodal"]
     assert mode in ["full", "head_only", "head_mlp_only"]
 
@@ -15,7 +15,7 @@ def get_config(config_string="full,multimodal"):
 
     FINETUNING_KWARGS = {
         "name": "bridge_dataset",
-        # On v4, this might be "gs://rail-orca-central2/resize_256_256"
+        # On v4, this might be "gs://rail-octo-central2/resize_256_256"
         "data_dir": "./tests/debug_dataset",
         "image_obs_keys": {"primary": "image_0", "wrist": None},
         "state_obs_keys": ["state", None],
@@ -26,7 +26,7 @@ def get_config(config_string="full,multimodal"):
         "absolute_action_mask": [False, False, False, False, False, False, True],
         # standardize_fn is dynamically loaded from a file
         # for example: "experiments/kevin/custom_standardization_transforms.py:aloha_dataset_transform"
-        "standardize_fn": "orca/data/oxe/oxe_standardization_transforms.py:bridge_dataset_transform",
+        "standardize_fn": "octo/data/oxe/oxe_standardization_transforms.py:bridge_dataset_transform",
         # If the default data loading speed is too slow, try these:
         # "num_parallel_reads": 8,  # for reading from disk / GCS
         # "num_parallel_calls": 16,  # for initial dataset construction
@@ -35,15 +35,15 @@ def get_config(config_string="full,multimodal"):
     if mode == "full":
         frozen_keys = None
     elif mode == "head_only":
-        frozen_keys = ("orca_transformer.*",)
+        frozen_keys = ("octo_transformer.*",)
     elif mode == "head_mlp_only":
         frozen_keys = (
-            "orca_transformer.*",
+            "octo_transformer.*",
             "heads_*.map_head.probe",
             "heads_*.map_head.MultiHeadDotProductAttention_0.*",
         )
     elif mode == "frozen_transformer":
-        frozen_keys = ("orca_transformer.BlockTransformer_0.*",)
+        frozen_keys = ("octo_transformer.BlockTransformer_0.*",)
     else:
         raise ValueError("Invalid mode")
 
@@ -62,7 +62,7 @@ def get_config(config_string="full,multimodal"):
         save_dir=placeholder(str),
         seed=42,
         wandb=dict(
-            project="orca_finetune", group=placeholder(str), entity=placeholder(str)
+            project="octo_finetune", group=placeholder(str), entity=placeholder(str)
         ),
         dataset_kwargs=FINETUNING_KWARGS,
         modality=task,

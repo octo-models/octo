@@ -1,12 +1,12 @@
 from ml_collections import ConfigDict
 from ml_collections.config_dict import FieldReference, placeholder
 
-from orca.data.utils.text_processing import MuseEmbedding
-from orca.model.components.action_heads import MSEActionHead
-from orca.model.components.tokenizers import ImageTokenizer
-from orca.model.components.transformer import common_transformer_sizes
-from orca.model.components.vit_encoders import SmallStem16
-from orca.utils.spec import ModuleSpec
+from octo.data.utils.text_processing import MuseEmbedding
+from octo.model.components.action_heads import MSEActionHead
+from octo.model.components.tokenizers import ImageTokenizer
+from octo.model.components.transformer import common_transformer_sizes
+from octo.model.components.vit_encoders import SmallStem16
+from octo.utils.spec import ModuleSpec
 
 
 def get_model_config(transformer_size):
@@ -95,7 +95,7 @@ def get_config(
             text_processor=ModuleSpec.create(MuseEmbedding),
             pretrained_loaders=tuple(),
             wandb=dict(
-                project="orca",
+                project="octo",
                 group=placeholder(str),
                 entity=placeholder(str),
             ),
@@ -122,7 +122,7 @@ def get_dataset_config(window_size=1):
         # oxe_kwargs will generate dataset_kwargs_list and sampling weights
         "oxe_kwargs": dict(
             data_mix=placeholder(str),
-            # for v4 TPUs: "gs://rail-orca-central2/resize_336_336"
+            # for v4 TPUs: "gs://rail-octo-central2/resize_336_336"
             data_dir=placeholder(str),
             load_camera_views=("primary", "wrist"),
             load_depth=False,

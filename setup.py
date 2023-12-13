@@ -1,3 +1,3 @@
 from setuptools import setup
 
-setup(name="orca", packages=["orca"])
+setup(name="octo", packages=["octo"])

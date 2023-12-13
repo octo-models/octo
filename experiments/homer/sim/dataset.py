@@ -2,8 +2,9 @@ import tensorflow as tf
 import dlimp as dl
 from functools import partial
 from typing import Optional, Tuple
-from orca.data.utils import bc_goal_relabeling, task_augmentation
-from orca.data.dataset import _normalize_action_and_proprio, _chunk_act_obs
+from octo.data.utils import bc_goal_relabeling, task_augmentation
+from octo.data.dataset import _normalize_action_and_proprio, _chunk_act_obs
+
 
 def make_sim_dataset(data_path: str, train: bool, **kwargs) -> tf.data.Dataset:
     """Creates a dataset from the BridgeData format.

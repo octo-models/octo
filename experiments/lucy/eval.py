@@ -23,7 +23,9 @@ import wandb
 
 # aloha
 try:
-    import sys; sys.path.append(os.path.join(os.getcwd(), 'aloha_pro/aloha_scripts/'))
+    import sys
+
+    sys.path.append(os.path.join(os.getcwd(), "aloha_pro/aloha_scripts/"))
     from aloha_pro.aloha_scripts.real_env import make_real_env
     from aloha_pro.aloha_scripts.robot_utils import move_grippers
 except:
@@ -31,10 +33,15 @@ except:
 from aloha_pro.aloha_scripts.constants import DT, PUPPET_GRIPPER_JOINT_OPEN
 from aloha_pro.aloha_scripts.visualize_episodes import save_videos
 from aloha_wrapper import AlohaGymEnv
-from aloha_pro.aloha_scripts.sim_env import make_sim_env, sample_box_pose, sample_insertion_pose, BOX_POSE
+from aloha_pro.aloha_scripts.sim_env import (
+    make_sim_env,
+    sample_box_pose,
+    sample_insertion_pose,
+    BOX_POSE,
+)
 
-from orca.utils.gym_wrappers import HistoryWrapper, RHCWrapper, UnnormalizeActionProprio
-from orca.model.orca_model import ORCAModel
+from octo.utils.gym_wrappers import HistoryWrapper, RHCWrapper, UnnormalizeActionProprio
+from octo.model.octo_model import OCTOModel
 
 np.set_printoptions(suppress=True)
 
@@ -55,7 +62,9 @@ flags.DEFINE_string(
     "Where to cache checkpoints downloaded from GCS",
 )
 flags.DEFINE_string(
-    "modality", "", "Either 'g', 'goal', 'l', 'language' (leave empty to prompt when running)"
+    "modality",
+    "",
+    "Either 'g', 'goal', 'l', 'language' (leave empty to prompt when running)",
 )
 
 flags.DEFINE_integer("im_size", None, "Image size", required=True)
@@ -141,14 +150,13 @@ def supply_rng(f, rng=jax.random.PRNGKey(0)):
 
 @partial(jax.jit, static_argnames="argmax")
 def sample_actions(
-    pretrained_model: ORCAModel,
+    pretrained_model: OCTOModel,
     observations,
     tasks,
     rng,
     argmax=False,
     temperature=1.0,
 ):
-
     # add batch dim to observations
     observations = jax.tree_map(lambda x: x[None], observations)
     logging.warning(
@@ -167,7 +175,7 @@ def sample_actions(
 
 
 def load_checkpoint(weights_path, step):
-    model = ORCAModel.load_pretrained(weights_path, step=int(step))
+    model = OCTOModel.load_pretrained(weights_path, step=int(step))
 
     policy_fn = supply_rng(
         partial(
@@ -180,11 +188,15 @@ def load_checkpoint(weights_path, step):
     )
     return (policy_fn, model)
 
+
 def main(_):
     assert len(FLAGS.checkpoint_weights_path) == len(FLAGS.checkpoint_step)
     # policies is a dict from run_name to policy function
     policies = {}
-    for (checkpoint_weights_path, checkpoint_step,) in zip(
+    for (
+        checkpoint_weights_path,
+        checkpoint_step,
+    ) in zip(
         FLAGS.checkpoint_weights_path,
         FLAGS.checkpoint_step,
     ):
@@ -212,28 +224,40 @@ def main(_):
 
     policy_name = list(policies.keys())[policy_idx]
     policy_fn, model = policies[policy_name]
-    model: ORCAModel  # type hinting
+    model: OCTOModel  # type hinting
 
     # set up environment
     if FLAGS.is_sim:
         env = make_sim_env(task_name=FLAGS.task_name)
-        camera_names = ['top']
+        camera_names = ["top"]
         env_max_reward = env.task.max_reward
         episode_returns = []
         highest_rewards = []
     else:
         env = make_real_env(init_node=True)
         from interbotix_xs_modules.arm import InterbotixManipulatorXS
-        master_bot_left = InterbotixManipulatorXS(robot_model="wx250s", group_name="arm", gripper_name="gripper",
-                                        robot_name=f'master_left', init_node=False)
-        master_bot_right = InterbotixManipulatorXS(robot_model="wx250s", group_name="arm", gripper_name="gripper",
-                                        robot_name=f'master_right', init_node=False)
 
-        camera_names = ['cam_high', 'cam_low', 'cam_left_wrist', 'cam_right_wrist']
+        master_bot_left = InterbotixManipulatorXS(
+            robot_model="wx250s",
+            group_name="arm",
+            gripper_name="gripper",
+            robot_name=f"master_left",
+            init_node=False,
+        )
+        master_bot_right = InterbotixManipulatorXS(
+            robot_model="wx250s",
+            group_name="arm",
+            gripper_name="gripper",
+            robot_name=f"master_right",
+            init_node=False,
+        )
+
+        camera_names = ["cam_high", "cam_low", "cam_left_wrist", "cam_right_wrist"]
 
     # load normalization statistics
     metadata_path = os.path.join(
-        checkpoint_weights_path, "dataset_statistics_aloha_sim_cube_scripted_dataset.json"
+        checkpoint_weights_path,
+        "dataset_statistics_aloha_sim_cube_scripted_dataset.json",
     )
     with open(metadata_path, "r") as f:
         norm_statistics = json.load(f)
@@ -244,7 +268,7 @@ def main(_):
     env = RHCWrapper(env, FLAGS.exec_horizon)
     env = UnnormalizeActionProprio(env, norm_statistics, normalization_type="normal")
 
-    query_frequency = FLAGS.exec_horizon # chunk size
+    query_frequency = FLAGS.exec_horizon  # chunk size
     max_timesteps = FLAGS.num_timesteps // query_frequency
     num_rollouts = 50
 
@@ -254,30 +278,30 @@ def main(_):
         chunk=FLAGS.exec_horizon,
         time=datetime.now().strftime("%Y%m%d_%H%M%S"),
     )
-    wandb.init(
-        id=wandb_id,
-        name=FLAGS.wandb_name,
-        project="aloha_eval"
-    )
+    wandb.init(id=wandb_id, name=FLAGS.wandb_name, project="aloha_eval")
 
-    n_existing_rollouts = len([f for f in os.listdir(FLAGS.video_save_path) if f.startswith('video')])
-    print(f'{n_existing_rollouts=}')
+    n_existing_rollouts = len(
+        [f for f in os.listdir(FLAGS.video_save_path) if f.startswith("video")]
+    )
+    print(f"{n_existing_rollouts=}")
 
     for rollout_id in range(num_rollouts):
         if FLAGS.is_sim:
             ### set task
-            if 'sim_transfer_cube' in FLAGS.task_name:
-                BOX_POSE[0] = sample_box_pose() # used in sim reset
-            elif 'sim_insertion' in FLAGS.task_name:
-                BOX_POSE[0] = np.concatenate(sample_insertion_pose()) # used in sim reset
+            if "sim_transfer_cube" in FLAGS.task_name:
+                BOX_POSE[0] = sample_box_pose()  # used in sim reset
+            elif "sim_insertion" in FLAGS.task_name:
+                BOX_POSE[0] = np.concatenate(
+                    sample_insertion_pose()
+                )  # used in sim reset
             rewards = []
 
         obs, info = env.reset()
-        image_list = [] # for visualization
+        image_list = []  # for visualization
 
         for t in range(max_timesteps):
             if t > 0:
-                image_list.extend(info['images'])
+                image_list.extend(info["images"])
 
             # query policy
             actions = policy_fn(obs, tasks={})
@@ -289,40 +313,57 @@ def main(_):
 
         if FLAGS.is_sim:
             rewards = np.array(rewards)
-            episode_return = np.sum(rewards[rewards!=None])
+            episode_return = np.sum(rewards[rewards != None])
             episode_returns.append(episode_return)
             episode_highest_reward = np.max(rewards)
             highest_rewards.append(episode_highest_reward)
-            print(f'Rollout {rollout_id}\n{episode_return=}, {episode_highest_reward=}, '
-                  f'{env_max_reward=}, Success: {episode_highest_reward==env_max_reward}')
+            print(
+                f"Rollout {rollout_id}\n{episode_return=}, {episode_highest_reward=}, "
+                f"{env_max_reward=}, Success: {episode_highest_reward==env_max_reward}"
+            )
         else:
-            move_grippers([env.puppet_bot_left, env.puppet_bot_right],
-                          [PUPPET_GRIPPER_JOINT_OPEN] * 2, move_time=0.5)  # open
+            move_grippers(
+                [env.puppet_bot_left, env.puppet_bot_right],
+                [PUPPET_GRIPPER_JOINT_OPEN] * 2,
+                move_time=0.5,
+            )  # open
 
-        print(f'Finished rollout {rollout_id}')
+        print(f"Finished rollout {rollout_id}")
         if rollout_id < 3:
             # construct video, resize
-            imgs = [np.array(Image.fromarray(img).resize(int(320*len(camera_names)), 240)) for img in image_list]
+            imgs = [
+                np.array(Image.fromarray(img).resize(int(320 * len(camera_names)), 240))
+                for img in image_list
+            ]
             video = np.stack(imgs)
-            wandb.log({
-                f"{policy_name}/rollout_{rollout_id}": wandb.Video(video.transpose(0, 3, 1, 2)[::2], fps=25)
-            })
+            wandb.log(
+                {
+                    f"{policy_name}/rollout_{rollout_id}": wandb.Video(
+                        video.transpose(0, 3, 1, 2)[::2], fps=25
+                    )
+                }
+            )
 
     if FLAGS.is_sim:
         success_rate = np.mean(np.array(highest_rewards) == env_max_reward)
         avg_return = np.mean(episode_returns)
-        summary_str = f'\nSuccess rate: {success_rate}\nAverage return: {avg_return}\n\n'
-        for r in range(env_max_reward+1):
+        summary_str = (
+            f"\nSuccess rate: {success_rate}\nAverage return: {avg_return}\n\n"
+        )
+        for r in range(env_max_reward + 1):
             more_or_equal_r = (np.array(highest_rewards) >= r).sum()
             more_or_equal_r_rate = more_or_equal_r / num_rollouts
-            summary_str += f'Reward >= {r}: {more_or_equal_r}/{num_rollouts} = {more_or_equal_r_rate*100}%\n'
+            summary_str += f"Reward >= {r}: {more_or_equal_r}/{num_rollouts} = {more_or_equal_r_rate*100}%\n"
 
         print(summary_str)
 
-        wandb.log({
-            f"{policy_name}/success_rate": success_rate,
-            f"{policy_name}/average_return": avg_return,
-        })
+        wandb.log(
+            {
+                f"{policy_name}/success_rate": success_rate,
+                f"{policy_name}/average_return": avg_return,
+            }
+        )
+
 
 if __name__ == "__main__":
     app.run(main)

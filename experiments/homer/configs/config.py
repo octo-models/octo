@@ -18,7 +18,7 @@ def update_config(config, **kwargs):
 
 def get_config(config_string):
     base_wandb_config = dict(
-        project="orca", group=placeholder(str), entity=placeholder(str)
+        project="octo", group=placeholder(str), entity=placeholder(str)
     )
 
     base_config = dict(
@@ -82,7 +82,7 @@ def get_config(config_string):
             num_heads=8,
             dropout_rate=0.1,
             normalization_type=normalization_type,
-            pred_horizon=4
+            pred_horizon=4,
         )
     )
 

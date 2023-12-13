@@ -11,7 +11,7 @@ def get_config(
     assert transformer_size in ["vanilla", "vit_s", "vit_b", "vit_l"]
 
     base_wandb_config = dict(
-        project="orca", group=placeholder(str), entity=placeholder(str)
+        project="octo", group=placeholder(str), entity=placeholder(str)
     )
 
     base_config = dict(
@@ -150,7 +150,7 @@ def get_config(
     oxe_kwargs = ConfigDict(
         dict(
             data_mix=placeholder(str),
-            # for v4 TPUs: "gs://rail-orca-central2/resize_336_336"
+            # for v4 TPUs: "gs://rail-octo-central2/resize_336_336"
             data_dir=placeholder(str),
             n_third_person_cameras=1,
             n_wrist_cameras=0,

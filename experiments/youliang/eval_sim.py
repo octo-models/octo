@@ -4,11 +4,11 @@ import os
 from absl import app, flags
 import tensorflow as tf
 
-from orca.sim.widowx_sim_env import WidowXSimEnv
-from orca.utils.eval_utils import download_checkpoint_from_gcs
-from orca.utils.gym_wrappers import UnnormalizeActionProprio
-from orca.model.orca_model import PretrainedModel
-from orca.utils.run_eval import run_eval_loop
+from octo.sim.widowx_sim_env import WidowXSimEnv
+from octo.utils.eval_utils import download_checkpoint_from_gcs
+from octo.utils.gym_wrappers import UnnormalizeActionProprio
+from octo.model.octo_model import PretrainedModel
+from octo.utils.run_eval import run_eval_loop
 
 FLAGS = flags.FLAGS
 
@@ -26,7 +26,7 @@ if __name__ == "__main__":
         assert len(FLAGS.checkpoint_weights_path) == len(FLAGS.checkpoint_step)
 
         models = {}
-        for (weights_path, step) in zip(
+        for weights_path, step in zip(
             FLAGS.checkpoint_weights_path,
             FLAGS.checkpoint_step,
         ):

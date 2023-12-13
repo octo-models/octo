@@ -14,16 +14,16 @@ import tensorflow as tf
 import tqdm
 import wandb
 
-from orca.model import create_model_def
-from orca.model.components.hf_weight_loaders import weights_loaders
-from orca.utils.jax_utils import initialize_compilation_cache
-from orca.utils.train_utils import (
+from octo.model import create_model_def
+from octo.model.components.hf_weight_loaders import weights_loaders
+from octo.utils.jax_utils import initialize_compilation_cache
+from octo.utils.train_utils import (
     create_train_state,
     format_name_with_config,
     Timer,
 )
-from orca.utils.visualization_lib import Visualizer
-from orca.utils.eval_utils import sample_actions
+from octo.utils.visualization_lib import Visualizer
+from octo.utils.eval_utils import sample_actions
 
 try:
     from jax_smi import initialise_tracking  # type: ignore

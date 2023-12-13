@@ -16,19 +16,19 @@ import tensorflow as tf
 from widowx_env import convert_obs, state_to_eep, wait_for_obs, WidowXGym
 from widowx_envs.widowx_env_service import WidowXClient, WidowXConfigs, WidowXStatus
 
-from orca.utils.eval_utils import (
+from octo.utils.eval_utils import (
     download_checkpoint_from_gcs,
     load_jaxrlm_checkpoint,
     sample_actions,
     supply_rng,
 )
-from orca.utils.gym_wrappers import (
+from octo.utils.gym_wrappers import (
     HistoryWrapper,
     RHCWrapper,
     TemporalEnsembleWrapper,
     UnnormalizeActionProprio,
 )
-from orca.model.orca_model import ORCAModel
+from octo.model.octo_model import OCTOModel
 
 np.set_printoptions(suppress=True)
 
@@ -125,7 +125,7 @@ def main(_):
         )
         assert tf.io.gfile.exists(weights_path), weights_path
         run_name = weights_path.rpartition("/")[2]
-        models[f"{run_name}-{step}"] = ORCAModel.load_pretrained(
+        models[f"{run_name}-{step}"] = OCTOModel.load_pretrained(
             weights_path, step=int(step)
         )
 
@@ -193,7 +193,7 @@ def main(_):
         policy_name = list(policies.keys())[policy_idx]
         policy_fn = policies[policy_name]
         model = models[policy_name]
-        model: ORCAModel  # type hinting
+        model: OCTOModel  # type hinting
 
         if not modality:
             modality = click.prompt(

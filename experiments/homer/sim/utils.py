@@ -7,7 +7,7 @@ import mujoco_manipulation
 import tensorflow as tf
 from .wrappers.dmcgym import DMCGYM
 from .wrappers.mujoco import GCMujocoWrapper
-from orca.utils.gym_wrappers import (
+from octo.utils.gym_wrappers import (
     UnnormalizeActionProprio,
     HistoryWrapper,
     RHCWrapper,

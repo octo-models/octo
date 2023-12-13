@@ -1,5 +1,5 @@
 """
-This script shows how to evaluate a finetuned ORCA model on a real WidowX robot.
+This script shows how to evaluate a finetuned OCTO model on a real WidowX robot.
 To reproduce the robot setup, follow the instructions at https://rail-berkeley.github.io/bridgedata/
 To install the robot controller, please follow the instructions here: https://github.com/rail-berkeley/bridge_data_robot
 Even if you don't plan to run on a WidowX robot, this script demonstrates the general layout of a robot eval loop.
@@ -21,9 +21,9 @@ import jax.numpy as jnp
 import numpy as np
 from widowx_envs.widowx_env_service import WidowXClient, WidowXConfigs, WidowXStatus
 
-from orca.model.orca_model import ORCAModel
-from orca.utils.gym_wrappers import HistoryWrapper, RHCWrapper, UnnormalizeActionProprio
-from orca.utils.gym_wrappers import TemporalEnsembleWrapper  # noqa: F401
+from octo.model.octo_model import OCTOModel
+from octo.utils.gym_wrappers import HistoryWrapper, RHCWrapper, UnnormalizeActionProprio
+from octo.utils.gym_wrappers import TemporalEnsembleWrapper  # noqa: F401
 
 np.set_printoptions(suppress=True)
 
@@ -103,7 +103,7 @@ def main(_):
         assert STEP_DURATION == 0.2, STEP_DURATION_MESSAGE
 
     # load models
-    model = ORCAModel.load_pretrained(
+    model = OCTOModel.load_pretrained(
         FLAGS.checkpoint_weights_path,
         FLAGS.checkpoint_step,
     )
@@ -119,7 +119,7 @@ def main(_):
     # create policy functions
     @partial(jax.jit, static_argnames="argmax")
     def sample_actions(
-        pretrained_model: ORCAModel,
+        pretrained_model: OCTOModel,
         observations,
         tasks,
         rng,

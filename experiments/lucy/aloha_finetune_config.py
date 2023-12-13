@@ -4,7 +4,7 @@ from ml_collections import ConfigDict
 from ml_collections.config_dict import FieldReference, placeholder
 from scripts.configs.config import wrap
 
-from orca.data.utils.data_utils import ActionEncoding, StateEncoding
+from octo.data.utils.data_utils import ActionEncoding, StateEncoding
 from experiments.lucy.aloha_wrapper import AlohaGymEnv
 
 
@@ -16,17 +16,24 @@ def update_config(config, **kwargs):
 
 
 @wrap
-def get_config(mode="full", head="mse", augment="full", temp_ensembling="uniform", window_size=1, pred_horizon=50):
-    # If starting with an ORCA-wrist model, there should be two image keys
+def get_config(
+    mode="full",
+    head="mse",
+    augment="full",
+    temp_ensembling="uniform",
+    window_size=1,
+    pred_horizon=50,
+):
+    # If starting with an OCTO-wrist model, there should be two image keys
     # first image key should be the third-person view
     # and second image key should be the wrist view
 
-    # If starting with an ORCA model, there should be one image key
+    # If starting with an OCTO model, there should be one image key
     # and it should be the third-person view
 
     FINETUNING_KWARGS = dict(
         name="aloha_sim_cube_scripted_dataset",
-        data_dir="gs://rail-orca-central2",
+        data_dir="gs://rail-octo-central2",
         image_obs_keys=[
             "top",
         ],
@@ -43,15 +50,15 @@ def get_config(mode="full", head="mse", augment="full", temp_ensembling="uniform
     if mode == "full":
         frozen_keys = None
     elif mode == "head_only":
-        frozen_keys = ("orca_transformer.*",)
+        frozen_keys = ("octo_transformer.*",)
     elif mode == "head_mlp_only":
         frozen_keys = (
-            "orca_transformer.*",
+            "octo_transformer.*",
             "heads_*.map_head.probe",
             "heads_*.map_head.MultiHeadDotProductAttention_0.*",
         )
     elif mode == "frozen_transformer":
-        frozen_keys = ("orca_transformer.BlockTransformer_0.*", "*hf_model*")
+        frozen_keys = ("octo_transformer.BlockTransformer_0.*", "*hf_model*")
     else:
         raise ValueError("Invalid mode")
 
@@ -65,13 +72,13 @@ def get_config(mode="full", head="mse", augment="full", temp_ensembling="uniform
         num_val_batches=8,
         num_steps=max_steps,
         log_interval=100,
-        eval_interval=1, #5000,
-        save_interval=1, #5000,
+        eval_interval=1,  # 5000,
+        save_interval=1,  # 5000,
         save_dir="gs://karl-central-2",
         seed=42,
         debug_sim=False,
         wandb=dict(
-            project="orca_finetune", group=placeholder(str), entity=placeholder(str)
+            project="octo_finetune", group=placeholder(str), entity=placeholder(str)
         ),
         finetuning_dataset=FINETUNING_KWARGS,
         modality=None,
@@ -102,7 +109,7 @@ def get_config(mode="full", head="mse", augment="full", temp_ensembling="uniform
             "random_brightness",
             "random_contrast",
             "random_saturation",
-            "random_hue"
+            "random_hue",
         ]
     elif augment == "none":
         augment_order = []
@@ -118,12 +125,12 @@ def get_config(mode="full", head="mse", augment="full", temp_ensembling="uniform
             random_saturation=[0.8, 1.2],
             random_hue=[0.1],
             augment_order=augment_order,
-                #"random_resized_crop",
-                #"random_brightness",
-                #"random_contrast",
-                #"random_saturation",
-                #"random_hue",
-            #],
+            # "random_resized_crop",
+            # "random_brightness",
+            # "random_contrast",
+            # "random_saturation",
+            # "random_hue",
+            # ],
         ),
         goal_relabeling_strategy="uniform",
         action_encoding=ActionEncoding.JOINT_POS_BIMANUAL,
@@ -137,11 +144,7 @@ def get_config(mode="full", head="mse", augment="full", temp_ensembling="uniform
     config["data_transforms"] = transform_kwargs
 
     config["config_delete_keys"] = dict(
-        model=dict(
-            observation_tokenizers=dict(
-                wrist=None
-            )
-        )
+        model=dict(observation_tokenizers=dict(wrist=None))
     )
 
     if head == "mse":
@@ -169,8 +172,8 @@ def get_config(mode="full", head="mse", augment="full", temp_ensembling="uniform
                     "kwargs": dict(
                         n_bins=256,
                         bin_type="normal",
-                        low=-2.,
-                        high=2.,
+                        low=-2.0,
+                        high=2.0,
                         obs_keys=["proprio"],
                     ),
                 },
@@ -191,20 +194,20 @@ def get_config(mode="full", head="mse", augment="full", temp_ensembling="uniform
                 action_chunk=int(pred_horizon),
                 vis_fps=25,
                 video_subsample_rate=2,
-                norm_statistics="gs://rail-orca-central2/aloha_sim_cube_scripted_dataset/1.0.0/dataset_statistics_707801797899cdd91dcb18bd45463cf73ac935bfd6ac6b62456653e96f120a5f.json",
+                norm_statistics="gs://rail-octo-central2/aloha_sim_cube_scripted_dataset/1.0.0/dataset_statistics_707801797899cdd91dcb18bd45463cf73ac935bfd6ac6b62456653e96f120a5f.json",
                 use_temp_averaging=use_temp_averaging,
-            )
+            ),
         ),
         (
             "aloha-sim-cube-v0",
             dict(
                 max_episode_length=400,
-                action_chunk=int(int(pred_horizon)/2),
+                action_chunk=int(int(pred_horizon) / 2),
                 vis_fps=25,
                 video_subsample_rate=2,
-                norm_statistics="gs://rail-orca-central2/aloha_sim_cube_scripted_dataset/1.0.0/dataset_statistics_707801797899cdd91dcb18bd45463cf73ac935bfd6ac6b62456653e96f120a5f.json",
+                norm_statistics="gs://rail-octo-central2/aloha_sim_cube_scripted_dataset/1.0.0/dataset_statistics_707801797899cdd91dcb18bd45463cf73ac935bfd6ac6b62456653e96f120a5f.json",
                 use_temp_averaging=use_temp_averaging,
-            )
-        )
+            ),
+        ),
     ]
     return ConfigDict(config)

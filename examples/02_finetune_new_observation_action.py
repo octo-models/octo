@@ -1,5 +1,5 @@
 """
-This script demonstrates how to finetune ORCA to a new observation space (single camera + proprio)
+This script demonstrates how to finetune OCTO to a new observation space (single camera + proprio)
 and new action space (bimanual) using a simulated ALOHA cube handover dataset (https://tonyzhaozh.github.io/aloha/).
 """
 from absl import app, flags, logging
@@ -10,14 +10,14 @@ import tensorflow as tf
 import tqdm
 import wandb
 
-from orca.data.dataset import make_single_dataset
-from orca.data.oxe.oxe_dataset_configs import ActionEncoding, StateEncoding
-from orca.model.components.action_heads import L1ActionHead
-from orca.model.components.tokenizers import LowdimObsTokenizer
-from orca.model.orca_model import ORCAModel
-from orca.utils.jax_utils import initialize_compilation_cache
-from orca.utils.spec import ModuleSpec
-from orca.utils.train_utils import (
+from octo.data.dataset import make_single_dataset
+from octo.data.oxe.oxe_dataset_configs import ActionEncoding, StateEncoding
+from octo.model.components.action_heads import L1ActionHead
+from octo.model.components.tokenizers import LowdimObsTokenizer
+from octo.model.octo_model import OCTOModel
+from octo.utils.jax_utils import initialize_compilation_cache
+from octo.utils.spec import ModuleSpec
+from octo.utils.train_utils import (
     freeze_weights,
     merge_params,
     process_text,
@@ -27,7 +27,7 @@ from orca.utils.train_utils import (
 FLAGS = flags.FLAGS
 
 flags.DEFINE_string(
-    "pretrained_path", None, "Path to pre-trained ORCA checkpoint directory."
+    "pretrained_path", None, "Path to pre-trained OCTO checkpoint directory."
 )
 flags.DEFINE_string("data_dir", None, "Path to finetuning dataset, in RLDS format.")
 flags.DEFINE_string("save_dir", None, "Directory for saving finetuning checkpoints.")
@@ -44,11 +44,11 @@ def main(_):
     tf.config.set_visible_devices([], "GPU")
 
     # setup wandb for logging
-    wandb.init(name="finetune_aloha", project="orca")
+    wandb.init(name="finetune_aloha", project="octo")
 
     # load pre-trained model
     logging.info("Loading pre-trained model...")
-    pretrained_model = ORCAModel.load_pretrained(FLAGS.pretrained_path)
+    pretrained_model = OCTOModel.load_pretrained(FLAGS.pretrained_path)
 
     # make finetuning dataset
     # apply Gaussian normalization, load chunks of 50 actions since we'll train with action chunking
@@ -102,7 +102,7 @@ def main(_):
 
     # load pre-training config and modify --> remove wrist cam, add proprio input, change action head
     # following Zhao et al. we use "action chunks" of length 50 and L1 loss for ALOHA
-    pretrained_model = ORCAModel.load_pretrained(FLAGS.pretrained_path)
+    pretrained_model = OCTOModel.load_pretrained(FLAGS.pretrained_path)
     config = pretrained_model.config
     del config["model"]["observation_tokenizers"]["wrist"]
     ###
@@ -122,10 +122,10 @@ def main(_):
         readout_key="readout_action",
     )
 
-    # initialize weights for modified ORCA model, then merge in all applicable pre-trained weights
+    # initialize weights for modified OCTO model, then merge in all applicable pre-trained weights
     # new position encodings for proprio inputs & weights for new action head will remain "from scratch"
     logging.info("Updating model for new observation & action space...")
-    model = ORCAModel.from_config(
+    model = OCTOModel.from_config(
         config,
         example_batch,
         text_processor,
@@ -157,7 +157,7 @@ def main(_):
     # define loss function and train step
     def loss_fn(params, batch, rng, train=True):
         bound_module = model.module.bind({"params": params}, rngs={"dropout": rng})
-        transformer_embeddings = bound_module.orca_transformer(
+        transformer_embeddings = bound_module.octo_transformer(
             batch["observation"],
             batch["tasks"],
             batch["observation"]["pad_mask"],

@@ -1,5 +1,5 @@
 PATHS=(
-    "gs://rail-dibya-central2/orca_releases/20231130/orca_small_ws2"
+    "gs://rail-dibya-central2/octo_releases/20231130/octo_small_ws2"
 )
 
 STEPS=(
@@ -21,7 +21,7 @@ EXEC_HORIZON="1"
 
 CMD="python experiments/homer/bridge/eval.py \
     --num_timesteps $TIMESTEPS \
-    --video_save_path /home/youliang/orca_eval/videos/$VIDEO_DIR \
+    --video_save_path /home/youliang/octo_eval/videos/$VIDEO_DIR \
     $(for i in "${!PATHS[@]}"; do echo "--checkpoint_weights_path ${PATHS[$i]} "; done) \
     $(for i in "${!PATHS[@]}"; do echo "--checkpoint_step ${STEPS[$i]} "; done) \
     --im_size 256 \
@@ -32,7 +32,7 @@ CMD="python experiments/homer/bridge/eval.py \
     --exec_horizon $EXEC_HORIZON \
     --blocking \
     --modality $CONDITIONING_MODE \
-    --checkpoint_cache_dir /home/youliang/orca_eval/checkpoints/ \
+    --checkpoint_cache_dir /home/youliang/octo_eval/checkpoints/ \
     --show_image
 "
 

@@ -4,11 +4,11 @@ from copy import deepcopy
 from scripts.configs.config import get_config as get_base_config
 from ml_collections import ConfigDict
 
-from orca.data.utils.text_processing import HFTokenizer
-from orca.model.components.hf_weight_loaders import hf_weights_loader
-from orca.model.components.tokenizers import ImageTokenizer, LanguageTokenizer
-from orca.model.components.vit_encoders import SmallStem16
-from orca.utils.spec import ModuleSpec
+from octo.data.utils.text_processing import HFTokenizer
+from octo.model.components.hf_weight_loaders import hf_weights_loader
+from octo.model.components.tokenizers import ImageTokenizer, LanguageTokenizer
+from octo.model.components.vit_encoders import SmallStem16
+from octo.utils.spec import ModuleSpec
 
 
 def update_config(config, **kwargs):
@@ -109,7 +109,7 @@ def get_config(config_string=None):
         dataset_kwargs=dict(
             oxe_kwargs=dict(
                 data_mix="oxe_magic_soup",
-                data_dir="gs://rail-orca-central2/resize_256_256",
+                data_dir="gs://rail-octo-central2/resize_256_256",
             ),
             batch_size=256,
             shuffle_buffer_size=500000,

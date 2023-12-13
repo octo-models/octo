@@ -14,17 +14,17 @@ import tensorflow as tf
 import tqdm
 import wandb
 
-from orca.data.dataset import make_single_dataset
-from orca.model.orca_model import ORCAModel
-from orca.utils.jax_utils import initialize_compilation_cache
-from orca.utils.spec import ModuleSpec
-from orca.utils.train_callbacks import (
+from octo.data.dataset import make_single_dataset
+from octo.model.octo_model import OCTOModel
+from octo.utils.jax_utils import initialize_compilation_cache
+from octo.utils.spec import ModuleSpec
+from octo.utils.train_callbacks import (
     RolloutVisualizationCallback,
     SaveCallback,
     ValidationCallback,
     VisualizationCallback,
 )
-from orca.utils.train_utils import (
+from octo.utils.train_utils import (
     check_config_diff,
     create_optimizer,
     format_name_with_config,
@@ -62,7 +62,7 @@ def main(_):
     devices = jax.devices()
     logging.info(
         f"""
-        ORCA Finetuning Script
+        OCTO Finetuning Script
         ======================
         Pretrained model: {FLAGS.config.pretrained_path}
         Finetuning Dataset: {FLAGS.config.dataset_kwargs.name}
@@ -120,7 +120,7 @@ def main(_):
     #
     #########
 
-    pretrained_model = ORCAModel.load_pretrained(
+    pretrained_model = OCTOModel.load_pretrained(
         FLAGS.config.pretrained_path,
         step=FLAGS.config.pretrained_step,
     )
@@ -190,7 +190,7 @@ def main(_):
 
     rng = jax.random.PRNGKey(FLAGS.config.seed)
     rng, init_rng = jax.random.split(rng)
-    model = ORCAModel.from_config(
+    model = OCTOModel.from_config(
         config,
         example_batch,
         text_processor,
@@ -268,7 +268,7 @@ def main(_):
 
     def loss_fn(params, batch, rng, train=True):
         bound_module = model.module.bind({"params": params}, rngs={"dropout": rng})
-        transformer_embeddings = bound_module.orca_transformer(
+        transformer_embeddings = bound_module.octo_transformer(
             batch["observation"],
             batch["task"],
             batch["observation"]["pad_mask"],

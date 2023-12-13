@@ -22,11 +22,11 @@ import orbax.checkpoint as ocp
 import tensorflow as tf
 import wandb
 
-from orca.data.dataset import make_single_dataset
-from orca.model.orca_model import ORCAModel
-from orca.utils.jax_utils import initialize_compilation_cache
-from orca.utils.train_utils import batched_apply, filter_eval_datasets
-from orca.utils.visualization_lib import Visualizer
+from octo.data.dataset import make_single_dataset
+from octo.model.octo_model import OCTOModel
+from octo.utils.jax_utils import initialize_compilation_cache
+from octo.utils.train_utils import batched_apply, filter_eval_datasets
+from octo.utils.visualization_lib import Visualizer
 
 FLAGS = flags.FLAGS
 flags.DEFINE_bool("dummy", False, "Dummy visualization run.")
@@ -64,7 +64,7 @@ config_flags.DEFINE_config_file(
 
 wandb_config = ConfigDict(
     dict(
-        project="orca_evaluation",
+        project="octo_evaluation",
         group=placeholder(str),
         entity=placeholder(str),
         name="evaluation",
@@ -84,7 +84,7 @@ def dummy_main(_):
     images = visualizer.visualize_for_wandb(policy_fn, n_trajs=1)
     info = visualizer.raw_evaluations(policy_fn, max_trajs=100)
     bridge_metrics = visualizer.metrics_for_wandb(info)
-    wandb.init(name="dummy", group="orca", project="test")
+    wandb.init(name="dummy", group="octo", project="test")
     wandb.log(images)
     wandb.log(bridge_metrics)
 
@@ -99,7 +99,7 @@ def main(_):
 
     # prevent tensorflow from using GPUs
     tf.config.set_visible_devices([], "GPU")
-    model = ORCAModel.load_pretrained(FLAGS.checkpoints)
+    model = OCTOModel.load_pretrained(FLAGS.checkpoints)
     text_processor = model.text_processor
     if text_processor is not None:
         zero_text = text_processor.encode([""])[0]
@@ -154,7 +154,7 @@ def main(_):
 
     @partial(jax.jit, static_argnames=("argmax", "n", "policy_mode"))
     def get_policy_sampled_actions(
-        model: ORCAModel,
+        model: OCTOModel,
         observations,
         tasks,
         *,
