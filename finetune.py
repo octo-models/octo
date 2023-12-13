@@ -266,7 +266,7 @@ def main(_):
     #
     #########
 
-    def loss_fn(params, state, batch, rng, train=True):
+    def loss_fn(params, batch, rng, train=True):
         bound_module = model.module.bind({"params": params}, rngs={"dropout": rng})
         transformer_embeddings = bound_module.orca_transformer(
             batch["observation"],
@@ -291,7 +291,7 @@ def main(_):
     def train_step(state, batch):
         rng, dropout_rng = jax.random.split(state.rng)
         (loss, info), grads = jax.value_and_grad(loss_fn, has_aux=True)(
-            state.model.params, state, batch, dropout_rng, train=True
+            state.model.params, batch, dropout_rng, train=True
         )
         # Gradient Metrics (TODO: Does the finetuner need these?) ###
         grad_norm = optax.global_norm(grads)
