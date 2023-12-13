@@ -8,7 +8,7 @@ Octo models are transformer-based diffusion policies, trained on a diverse mix o
 
 ## Get Started
 
-Follow the installation instructions, then load a pre-trained OCTO model! See the [examples](examples/) for starting points for zero-shot evaluation and finetuning.
+Follow the installation instructions, then load a pre-trained OCTO model! See [examples](examples/) for guides to zero-shot evaluation and finetuning.
 
 ```
 from octo.model.octo_model import OCTOModel
