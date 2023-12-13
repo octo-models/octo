@@ -31,6 +31,8 @@ class OctoModel:
         >>> tasks = model.create_tasks(texts=["go to the red room"])
         >>> # or tasks = model.create_tasks(goals={"image_primary": goal_images})
         >>> actions = model.sample_actions(observations, tasks, rng=jax.random.PRNGKey(0))
+        >>> # Note: these are normalized actions (processed to mean 0 and std 1). To get the raw actions,
+            # un-normalize them using model.dataset_statistics
 
     Usage for finetuning:
 
@@ -397,7 +399,8 @@ class OctoModel:
         )
 
     def get_pretty_spec(self):
-        # TODO: generalize this to work with other models
+        """Brief summary of the model's expected inputs and outputs."""
+        # TODO: generalize this to print out proprio when it is being tokenized
         window_size = self.example_batch["observation"]["pad_mask"].shape[1]
 
         observation_space = {
