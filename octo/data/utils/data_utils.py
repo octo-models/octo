@@ -332,6 +332,27 @@ def invert_gripper_actions(actions: tf.Tensor):
     return 1 - actions
 
 
+def relabel_actions(traj: Dict[str, Any]) -> Dict[str, Any]:
+    """Relabels the actions to use the reached proprio instead. Discards the last timestep of the
+    trajectory (since we don't have a next state to compute the action.)
+    """
+    # relabel the first 6 action dims (xyz position, xyz rotation) using the reached proprio
+    movement_actions = (
+        traj["observation"]["state"][1:, :6] - traj["observation"]["state"][:-1, :6]
+    )
+
+    # discard the last timestep of the trajectory
+    traj_truncated = tf.nest.map_structure(lambda x: x[:-1], traj)
+
+    # recombine to get full actions
+    traj_truncated["action"] = tf.concat(
+        [movement_actions, traj["action"][:-1, -1:]],
+        axis=1,
+    )
+
+    return traj_truncated
+
+
 def allocate_threads(n: Optional[int], weights: np.ndarray):
     """Allocates an integer number of threads across datasets based on weights. The final array sums to `n`,
     but each element is no less than 1. If `n` is None, then every dataset is assigned a value of AUTOTUNE.

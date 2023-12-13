@@ -16,11 +16,11 @@ from typing import Any, Dict
 
 import tensorflow as tf
 
-import octo.data.bridge.bridge_utils as bridge
 from octo.data.utils.data_utils import (
     binarize_gripper_actions,
     invert_gripper_actions,
     rel2abs_gripper_actions,
+    relabel_actions,
 )
 
 
@@ -32,7 +32,7 @@ def bridge_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
         ],
         axis=1,
     )
-    trajectory = bridge.relabel_actions(trajectory)
+    trajectory = relabel_actions(trajectory)
     trajectory["observation"]["EEF_state"] = trajectory["observation"]["state"][:, :6]
     trajectory["observation"]["gripper_state"] = trajectory["observation"]["state"][
         :, -1:
