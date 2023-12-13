@@ -43,10 +43,10 @@ python train.py --config tests/debug_config.py --debug
 You can find pre-trained ORCA checkpoints [here](https://huggingface.co/rail-berkeley).
 At the moment we provide the following model versions:
 
-| Model                                                         | Inference on 1x NVIDIA 4090 | Finetune on 1x NVIDIA 4090 | Size       |
-|---------------------------------------------------------------|-----------------------------|----------------------------|------------|
-| [ORCA-Base](https://huggingface.co/rail-berkeley/orca-base)   | XXX it/sec                  | ~XXX h                     | 93M Params |
-| [ORCA-Small](https://huggingface.co/rail-berkeley/orca-small) | XXX it/sec                  | ~XXX h                     | 27M Params |
+| Model                                                         | Inference on 1x NVIDIA 4090 | Size       |
+|---------------------------------------------------------------|-----------------------------|------------|
+| [ORCA-Base](https://huggingface.co/rail-berkeley/orca-base)   | 90 it/sec                   | 93M Params |
+| [ORCA-Small](https://huggingface.co/rail-berkeley/orca-small) | 130 it/sec                  | 27M Params |
 
 
 ## Examples
@@ -86,12 +86,12 @@ We provide a [minimal example](examples/02_finetune_new_observation_action.py) f
 We also provide a more advanced finetuning script that allows to change hyperparameters via a config and logs finetuning
 metrics. To run advanced finetuning, use:
 ```
-python scripts/finetune.py --config=scripts/configs/finetune_config.py:mode=full --config.pretrained_path=...
+python scripts/finetune.py --config=scripts/configs/finetune_config.py:mode=full --config.pretrained_path=hf://rail-berkeley/orca-small
 ```
 We offer three finetuning modes depending on the parts of the model that are kept frozen: ```head_only```, ```head_mlp_only``` and ```full``` to finetune the full model.
 Besides, one can specify the task type to finetune with ```image_conditioned```, ```language_conditioned``` or ```multimodal``` for both.
-For example, to finetune the full transformer with multimodal inputs use:
-```--config=your_finetune_config.py:mode=full,multimodal```
+For example, to finetune the full transformer with image inputs only use:
+```--config=your_finetune_config.py:mode=full,image_conditioned```
 
 
 ## ORCA Evaluation
