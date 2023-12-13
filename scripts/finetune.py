@@ -1,7 +1,6 @@
 import datetime
 from functools import partial
 import imp
-import json
 import os
 
 from absl import app, flags, logging
@@ -117,13 +116,16 @@ def main(_):
 
     #########
     #
-    # Load Pretraining Config + optionally modify
+    # Load Pretrained model + optionally modify config
     #
     #########
 
-    orig_config = ORCAModel.load_config(FLAGS.config.pretrained_path)
+    pretrained_model = ORCAModel.load_pretrained(
+        FLAGS.config.pretrained_path,
+        step=FLAGS.config.pretrained_step,
+    )
     flat_config = flax.traverse_util.flatten_dict(
-        orig_config.to_dict(), keep_empty_nodes=True
+        pretrained_model.config, keep_empty_nodes=True
     )
     for d_key in flax.traverse_util.flatten_dict(
         FLAGS.config.get("config_delete_keys", ConfigDict()).to_dict()
@@ -134,7 +136,8 @@ def main(_):
 
     config = ConfigDict(flax.traverse_util.unflatten_dict(flat_config))
     config.update(FLAGS.config.get("update_config", ConfigDict()))
-    check_config_diff(config, orig_config)
+    config = config.to_dict()
+    check_config_diff(config, pretrained_model.config)
 
     #########
     #
@@ -165,8 +168,8 @@ def main(_):
 
     dataset = make_single_dataset(
         FLAGS.config.dataset_kwargs,
-        FLAGS.config.traj_transform_kwargs,
-        FLAGS.config.frame_transform_kwargs,
+        traj_transform_kwargs=FLAGS.config.traj_transform_kwargs,
+        frame_transform_kwargs=FLAGS.config.frame_transform_kwargs,
         train=True,
     )
     train_data_iter = (
@@ -185,23 +188,24 @@ def main(_):
     #
     #########
 
-    pretrained_model = ORCAModel.load_pretrained(
-        FLAGS.config.pretrained_path,
-        step=FLAGS.config.pretrained_step,
+    rng = jax.random.PRNGKey(FLAGS.config.seed)
+    rng, init_rng = jax.random.split(rng)
+    model = ORCAModel.from_config(
+        config,
+        example_batch,
+        text_processor,
+        rng=init_rng,
+        dataset_statistics=dataset.dataset_statistics,
     )
-    model = ORCAModel.from_config(config, example_batch, text_processor)
     merged_params = merge_params(model.params, pretrained_model.params)
     model = model.replace(params=merged_params)
     del pretrained_model
-    model_def = model.model_def
 
     #########
     #
     # Setup Optimizer and Train State
     #
     #########
-
-    rng = jax.random.PRNGKey(FLAGS.config.seed)
 
     params = model.params
     if FLAGS.config.optimizer.frozen_keys is None:
@@ -212,8 +216,7 @@ def main(_):
         **FLAGS.config.optimizer.to_dict(),
     )
     train_state = TrainState.create(
-        apply_fn=model.model_def.apply,
-        params=params,
+        model=model,
         tx=tx,
         rng=rng,
     )
@@ -235,24 +238,16 @@ def main(_):
         logging.info("Saving to %s", save_dir)
         save_callback = SaveCallback(save_dir)
 
-        # Save model config
+        # Add window_size to top of config, to make eval easier
         new_config = ConfigDict(model.config)
-        new_config.window_size = example_batch["observation"]["pad_mask"].shape[1]
+        new_config["window_size"] = example_batch["observation"]["pad_mask"].shape[1]
+        model = model.replace(config=new_config)
 
-        with save_callback.open("config.json", "w") as config_file:
-            config_file.write(new_config.to_json_best_effort())
-
-        # Save finetuning config
-        with save_callback.open("finetune_config.json", "w") as config_file:
+        # Save finetuning config since it's not saved by SaveCallback, i.e. as part of model.save_pretrained()
+        with open(
+            tf.io.gfile.join(save_dir, "finetune_config.json"), "w"
+        ) as config_file:
             config_file.write(FLAGS.config.to_json_best_effort())
-
-        with save_callback.open("dataset_statistics.json", "w") as f:
-            stats = jax.tree_map(lambda x: x.tolist(), dataset.dataset_statistics)
-            json.dump(stats, f)
-
-        # Save example batch to verify shapes later
-        with save_callback.open("example_batch.msgpack", "wb") as f:
-            f.write(flax.serialization.msgpack_serialize(example_batch))
     else:
         save_dir = None
         save_callback = SaveCallback(None)
@@ -271,15 +266,15 @@ def main(_):
     #
     #########
 
-    def loss_fn(params, state, batch, rng, train=True):
-        model = model_def.bind({"params": params}, rngs={"dropout": rng})
-        transformer_embeddings = model.orca_transformer(
+    def loss_fn(params, batch, rng, train=True):
+        bound_module = model.module.bind({"params": params}, rngs={"dropout": rng})
+        transformer_embeddings = bound_module.orca_transformer(
             batch["observation"],
             batch["task"],
             batch["observation"]["pad_mask"],
             train=train,
         )
-        action_loss, action_metrics = model.heads["action"].loss(
+        action_loss, action_metrics = bound_module.heads["action"].loss(
             transformer_embeddings,  # Action head knows to pull out the action readout_key
             batch["action"],
             pad_mask=batch["observation"]["pad_mask"],
@@ -296,17 +291,17 @@ def main(_):
     def train_step(state, batch):
         rng, dropout_rng = jax.random.split(state.rng)
         (loss, info), grads = jax.value_and_grad(loss_fn, has_aux=True)(
-            state.params, state, batch, dropout_rng, train=True
+            state.model.params, batch, dropout_rng, train=True
         )
         # Gradient Metrics (TODO: Does the finetuner need these?) ###
         grad_norm = optax.global_norm(grads)
-        updates, _ = state.tx.update(grads, state.opt_state, state.params)
+        updates, _ = state.tx.update(grads, state.opt_state, state.model.params)
         update_norm = optax.global_norm(updates)
         info.update(
             {
                 "grad_norm": grad_norm,
                 "update_norm": update_norm,
-                "param_norm": param_norm_callable(state.params),
+                "param_norm": param_norm_callable(state.model.params),
                 "learning_rate": lr_callable(state.step),
             }
         )
