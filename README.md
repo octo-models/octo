@@ -6,7 +6,16 @@
 This repo contains code for training and finetuning Octo generalist robotic policies (GRPs).
 Octo models are transformer-based diffusion policies, trained on a diverse mix of 800k robot trajectories.
 
-![Octo model](docs/assets/teaser.png)
+## Get Started
+
+Follow the installation instructions below, then load a pre-trained OCTO model!
+
+```
+from octo.model.octo_model import OCTOModel
+model = OCTOModel.load_pretrained("hf://rail-berkeley/octo-small")
+```
+
+![OCTO model](docs/assets/teaser.png)
 
 Out of the box, Octo supports multiple RGB camera inputs, can control various robot arms,
 and can be instructed via language commands or goal images.
