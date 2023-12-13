@@ -33,9 +33,9 @@ pip install --upgrade "jax[tpu]==0.4.20" -f https://storage.googleapis.com/jax-r
 ```
 See the [Jax Github page](https://github.com/google/jax) for more details on installing Jax.
 
-Test the installation by training on the debug dataset:
+Test the installation by fine-tuning on the debug dataset:
 ```bash
-python train.py --config tests/debug_config.py --debug
+python scripts/finetune.py --config.pretrained_path=hf://rail-berkeley/orca-small
 ```
 
 ## Checkpoints
@@ -86,12 +86,13 @@ We provide a [minimal example](examples/02_finetune_new_observation_action.py) f
 We also provide a more advanced finetuning script that allows to change hyperparameters via a config and logs finetuning
 metrics. To run advanced finetuning, use:
 ```
-python scripts/finetune.py --config=scripts/configs/finetune_config.py:mode=full --config.pretrained_path=hf://rail-berkeley/orca-small
+python scripts/finetune.py --config.pretrained_path=hf://rail-berkeley/orca-small
 ```
+
 We offer three finetuning modes depending on the parts of the model that are kept frozen: ```head_only```, ```head_mlp_only``` and ```full``` to finetune the full model.
 Besides, one can specify the task type to finetune with ```image_conditioned```, ```language_conditioned``` or ```multimodal``` for both.
 For example, to finetune the full transformer with image inputs only use:
-```--config=your_finetune_config.py:mode=full,image_conditioned```
+```--config=finetune_config.py:full,image_conditioned```
 
 
 ## ORCA Evaluation
@@ -133,5 +134,5 @@ Steps to contribute:
 1. Fork the repo and create your branch from `master`.
 2. Use `pre-commit` to enable code checks and auto-formatting.
 3. Test that a basic training starts with the debug dataset with: ```
-python train.py --config tests/debug_config.py
+python scripts/finetune.py --config.pretrained_path=hf://rail-berkeley/orca-small
 ```
