@@ -240,8 +240,8 @@ def main(_):
 
         # Add window_size to top of config, to make eval easier
         new_config = ConfigDict(model.config)
-        new_config.window_size = example_batch["observation"]["pad_mask"].shape[1]
-        model.replace(config=new_config)
+        new_config["window_size"] = example_batch["observation"]["pad_mask"].shape[1]
+        model = model.replace(config=new_config)
 
         # Save finetuning config since it's not saved by SaveCallback, i.e. as part of model.save_pretrained()
         with open(
