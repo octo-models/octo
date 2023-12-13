@@ -1,7 +1,12 @@
 from copy import deepcopy
+import imp
+import os
 
 from ml_collections import ConfigDict
-from scripts.configs.config import get_config as get_base_config
+
+get_base_config = imp.load_source(
+    "config", os.path.join(os.path.dirname(__file__), "../scripts/configs/config.py")
+).get_config
 
 
 def update_config(config: ConfigDict, **kwargs):
