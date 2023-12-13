@@ -316,8 +316,11 @@ def create_optimizer(
 
     clip_gradient = kwargs.pop("clip_gradient", None)
     frozen_keys = kwargs.pop("frozen_keys", None)
+    grad_accumulation_steps = kwargs.pop("grad_accumulation_steps", None)
 
     tx = optax.adamw(mu_dtype=jnp.bfloat16, **kwargs, mask=wd_mask)
+    if grad_accumulation_steps:
+        tx = optax.MultiSteps(tx, grad_accumulation_steps)
     if clip_gradient is not None:
         tx = optax.chain(
             optax.clip_by_global_norm(clip_gradient),
