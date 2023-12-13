@@ -47,7 +47,7 @@ flags.DEFINE_string("name", "experiment", "Experiment name.")
 flags.DEFINE_bool("debug", False, "Debug config (no wandb logging)")
 
 default_config_file = os.path.join(
-    os.path.dirname(__file__), "experiments/dibya/finetune_config.py:image_conditioned"
+    os.path.dirname(__file__), "configs/finetune_config.py"
 )
 config_flags.DEFINE_config_file(
     "config",
