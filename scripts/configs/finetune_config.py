@@ -15,7 +15,6 @@ def get_config(config_string="full,multimodal"):
 
     FINETUNING_KWARGS = {
         "name": "bridge_dataset",
-        # On v4, this might be "gs://rail-octo-central2/resize_256_256"
         "data_dir": "./tests/debug_dataset",
         "image_obs_keys": {"primary": "image_0", "wrist": None},
         "state_obs_keys": ["state", None],
