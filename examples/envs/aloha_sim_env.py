@@ -27,7 +27,7 @@ class AlohaGymEnv(gym.Env):
                         high=255 * np.ones((im_size, im_size, 3)),
                         dtype=np.uint8,
                     )
-                    for i in range(len(camera_names))
+                    for i in ["primary", "wrist"][: len(camera_names)]
                 },
                 "proprio": gym.spaces.Box(
                     low=np.ones((14,)) * -1, high=np.ones((14,)), dtype=np.float32
@@ -73,11 +73,12 @@ class AlohaGymEnv(gym.Env):
         curr_obs = {}
         vis_images = []
 
+        obs_img_names = ["primary", "wrist"]
         for i, cam_name in enumerate(self.camera_names):
             curr_image = ts.observation["images"][cam_name]
             vis_images.append(copy.deepcopy(curr_image))
             curr_image = jnp.array(curr_image)
-            curr_obs[f"image_{i}"] = curr_image
+            curr_obs[f"image_{obs_img_names[i]}"] = curr_image
         curr_obs = dl.transforms.resize_images(
             curr_obs, match=curr_obs.keys(), size=(self._im_size, self._im_size)
         )

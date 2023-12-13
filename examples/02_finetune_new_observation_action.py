@@ -17,7 +17,6 @@ from orca.model.components.tokenizers import LowdimObsTokenizer
 from orca.model.orca_model import ORCAModel
 from orca.utils.jax_utils import initialize_compilation_cache
 from orca.utils.spec import ModuleSpec
-from orca.utils.train_callbacks import SaveCallback
 from orca.utils.train_utils import (
     freeze_weights,
     merge_params,
@@ -120,7 +119,7 @@ def main(_):
         L1ActionHead,
         pred_horizon=50,
         action_dim=14,
-        readout_key="action",
+        readout_key="readout_action",
     )
 
     # initialize weights for modified ORCA model, then merge in all applicable pre-trained weights
@@ -142,7 +141,7 @@ def main(_):
     # create optimizer & train_state, optionally freeze keys for pre-trained transformer
     # train_state bundles parameters & optimizers
     learning_rate = optax.join_schedules(
-        optax.linear_schedule(0, 3e-5, 100), optax.constant_schedule(3e-5)
+        [optax.linear_schedule(0, 3e-5, 100), optax.constant_schedule(3e-5)], [100]
     )
     tx = optax.adamw(learning_rate)
     frozen_keys = model.config["optimizer"]["frozen_keys"]
@@ -181,12 +180,9 @@ def main(_):
         new_state = state.apply_gradients(grads=grads, rng=rng)
         return new_state, info
 
-    # save all info for loading of finetuned model
-    save_callback = SaveCallback(FLAGS.save_dir)
-
     # run finetuning loop
     logging.info("Starting finetuning...")
-    for i in tqdm.tqdm(range(2000), total=2000, dynamic_ncols=True):
+    for i in tqdm.tqdm(range(5000), total=5000, dynamic_ncols=True):
         batch = next(train_data_iter)
         train_state, update_info = train_step(train_state, batch)
         if (i + 1) % 100 == 0:
@@ -195,9 +191,9 @@ def main(_):
                 flax.traverse_util.flatten_dict({"training": update_info}, sep="/"),
                 step=i,
             )
-        if (i + 1) % 500 == 0:
+        if (i + 1) % 1000 == 0:
             # save checkpoint
-            save_callback(train_state, i)
+            train_state.model.save_pretrained(step=i, checkpoint_path=FLAGS.save_dir)
 
 
 if __name__ == "__main__":
