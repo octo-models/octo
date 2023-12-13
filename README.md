@@ -11,8 +11,9 @@ Octo models are transformer-based diffusion policies, trained on a diverse mix o
 Follow the installation instructions, then load a pre-trained OCTO model! See [examples](examples/) for guides to zero-shot evaluation and finetuning.
 
 ```
-from octo.model.octo_model import OCTOModel
-model = OCTOModel.load_pretrained("hf://rail-berkeley/octo-base")
+from octo.model.octo_model import OctoModel
+model = OctoModel.load_pretrained("hf://rail-berkeley/octo-base")
+print(model.get_pretty_spec())
 ```
 
 ![Octo model](docs/assets/teaser.png)
