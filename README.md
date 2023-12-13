@@ -12,7 +12,7 @@ Follow the installation instructions, then load a pre-trained OCTO model! See [e
 
 ```
 from octo.model.octo_model import OCTOModel
-model = OCTOModel.load_pretrained("hf://rail-berkeley/octo-small")
+model = OCTOModel.load_pretrained("hf://rail-berkeley/octo-base")
 ```
 
 ![OCTO model](docs/assets/teaser.png)
