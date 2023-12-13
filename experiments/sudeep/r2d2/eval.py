@@ -13,7 +13,7 @@ import jax
 import jax.numpy as jnp
 from functools import partial
 
-from octo.model.octo_model import OCTOModel
+from octo.model.octo_model import OctoModel
 from octo.data.utils.data_utils import StateEncoding
 import optax
 
@@ -111,7 +111,7 @@ def _null_obs():
 
 @partial(jax.jit, static_argnames="argmax")
 def sample_actions(
-    pretrained_model: OCTOModel,
+    pretrained_model: OctoModel,
     observations,
     tasks,
     mean,
@@ -139,7 +139,7 @@ def sample_actions(
 
 
 def load_checkpoint(weights_path, config_path, metadata_path, example_batch_path):
-    model = OCTOModel.load_pretrained(weights_path)
+    model = OctoModel.load_pretrained(weights_path)
 
     with open(metadata_path, "r") as f:
         action_proprio_metadata = json.load(f)

@@ -15,7 +15,7 @@ import tqdm
 import wandb
 
 from octo.data.dataset import make_single_dataset
-from octo.model.octo_model import OCTOModel
+from octo.model.octo_model import OctoModel
 from octo.utils.jax_utils import initialize_compilation_cache
 from octo.utils.spec import ModuleSpec
 from octo.utils.train_callbacks import (
@@ -62,7 +62,7 @@ def main(_):
     devices = jax.devices()
     logging.info(
         f"""
-        OCTO Finetuning Script
+        Octo Finetuning Script
         ======================
         Pretrained model: {FLAGS.config.pretrained_path}
         Finetuning Dataset: {FLAGS.config.dataset_kwargs.name}
@@ -120,7 +120,7 @@ def main(_):
     #
     #########
 
-    pretrained_model = OCTOModel.load_pretrained(
+    pretrained_model = OctoModel.load_pretrained(
         FLAGS.config.pretrained_path,
         step=FLAGS.config.pretrained_step,
     )
@@ -190,7 +190,7 @@ def main(_):
 
     rng = jax.random.PRNGKey(FLAGS.config.seed)
     rng, init_rng = jax.random.split(rng)
-    model = OCTOModel.from_config(
+    model = OctoModel.from_config(
         config,
         example_batch,
         text_processor,

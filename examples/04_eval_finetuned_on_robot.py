@@ -1,9 +1,8 @@
 """
-This script shows how we evaluated a finetuned OCTO model on a real WidowX robot. While the exact specifics may not
-be applicable to your use case, this script serves as a didactic example of how to use OCTO in a real-world setting.
-
-If you wish, you may reproduce these results by [reproducing the robot setup](https://rail-berkeley.github.io/bridgedata/)
-and installing [the robot controller](https://github.com/rail-berkeley/bridge_data_robot)
+This script shows how to evaluate a finetuned Octo model on a real WidowX robot.
+To reproduce the robot setup, follow the instructions at https://rail-berkeley.github.io/bridgedata/
+To install the robot controller, please follow the instructions here: https://github.com/rail-berkeley/bridge_data_robot
+Even if you don't plan to run on a WidowX robot, this script demonstrates the general layout of a robot eval loop.
 """
 
 from datetime import datetime
@@ -21,7 +20,7 @@ import jax.numpy as jnp
 import numpy as np
 from widowx_envs.widowx_env_service import WidowXClient, WidowXConfigs, WidowXStatus
 
-from octo.model.octo_model import OCTOModel
+from octo.model.octo_model import OctoModel
 from octo.utils.gym_wrappers import HistoryWrapper, RHCWrapper, UnnormalizeActionProprio
 
 np.set_printoptions(suppress=True)
@@ -97,7 +96,7 @@ def main(_):
         assert STEP_DURATION == 0.2, STEP_DURATION_MESSAGE
 
     # load models
-    model = OCTOModel.load_pretrained(
+    model = OctoModel.load_pretrained(
         FLAGS.checkpoint_weights_path,
         FLAGS.checkpoint_step,
     )
@@ -112,7 +111,7 @@ def main(_):
     # create policy functions
     @jax.jit
     def sample_actions(
-        pretrained_model: OCTOModel,
+        pretrained_model: OctoModel,
         observations,
         tasks,
         rng,

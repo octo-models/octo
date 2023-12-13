@@ -41,7 +41,7 @@ from aloha_pro.aloha_scripts.sim_env import (
 )
 
 from octo.utils.gym_wrappers import HistoryWrapper, RHCWrapper, UnnormalizeActionProprio
-from octo.model.octo_model import OCTOModel
+from octo.model.octo_model import OctoModel
 
 np.set_printoptions(suppress=True)
 
@@ -150,7 +150,7 @@ def supply_rng(f, rng=jax.random.PRNGKey(0)):
 
 @partial(jax.jit, static_argnames="argmax")
 def sample_actions(
-    pretrained_model: OCTOModel,
+    pretrained_model: OctoModel,
     observations,
     tasks,
     rng,
@@ -175,7 +175,7 @@ def sample_actions(
 
 
 def load_checkpoint(weights_path, step):
-    model = OCTOModel.load_pretrained(weights_path, step=int(step))
+    model = OctoModel.load_pretrained(weights_path, step=int(step))
 
     policy_fn = supply_rng(
         partial(
@@ -224,7 +224,7 @@ def main(_):
 
     policy_name = list(policies.keys())[policy_idx]
     policy_fn, model = policies[policy_name]
-    model: OCTOModel  # type hinting
+    model: OctoModel  # type hinting
 
     # set up environment
     if FLAGS.is_sim:

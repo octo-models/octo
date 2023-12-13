@@ -24,11 +24,11 @@ def get_config(
     window_size=1,
     pred_horizon=50,
 ):
-    # If starting with an OCTO-wrist model, there should be two image keys
+    # If starting with an Octo-wrist model, there should be two image keys
     # first image key should be the third-person view
     # and second image key should be the wrist view
 
-    # If starting with an OCTO model, there should be one image key
+    # If starting with an Octo model, there should be one image key
     # and it should be the third-person view
 
     FINETUNING_KWARGS = dict(
