@@ -1,8 +1,9 @@
 """
-This script shows how to evaluate a finetuned Octo model on a real WidowX robot.
-To reproduce the robot setup, follow the instructions at https://rail-berkeley.github.io/bridgedata/
-To install the robot controller, please follow the instructions here: https://github.com/rail-berkeley/bridge_data_robot
-Even if you don't plan to run on a WidowX robot, this script demonstrates the general layout of a robot eval loop.
+This script shows how we evaluated a finetuned Octo model on a real WidowX robot. While the exact specifics may not
+be applicable to your use case, this script serves as a didactic example of how to use Octo in a real-world setting.
+
+If you wish, you may reproduce these results by [reproducing the robot setup](https://rail-berkeley.github.io/bridgedata/)
+and installing [the robot controller](https://github.com/rail-berkeley/bridge_data_robot)
 """
 
 from datetime import datetime
