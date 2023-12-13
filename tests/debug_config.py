@@ -1,7 +1,7 @@
 from copy import deepcopy
 
-from config import get_config as get_base_config
 from ml_collections import ConfigDict
+from scripts.configs.config import get_config as get_base_config
 
 
 def update_config(config: ConfigDict, **kwargs):
