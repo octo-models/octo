@@ -3,7 +3,7 @@ from contextlib import contextmanager
 from fnmatch import fnmatch
 import logging
 import time
-from typing import List, Optional
+from typing import Callable, List, Optional
 
 import flax
 from flax import struct
@@ -431,3 +431,35 @@ def process_text(batch: Data, text_processor: Optional[TextProcessor]) -> Data:
             [s.decode("utf-8") for s in batch["task"]["language_instruction"]]
         )
     return batch
+
+
+WeightLoader = Callable[[Params], Params]
+
+
+def hf_weights_loader(params, hf_model):
+    """Loads weights from a HuggingFace model into params."""
+    from transformers import AutoConfig, FlaxAutoModel, FlaxT5EncoderModel
+
+    if "t5" in hf_model:
+        config = AutoConfig.from_pretrained(hf_model)
+        model = FlaxT5EncoderModel.from_pretrained(hf_model, config=config)
+    else:
+        model = FlaxAutoModel.from_pretrained(hf_model)
+
+    model_def, model_variables = model.module, model.params
+    replaced = False
+
+    def find_and_replace(params, key, replacement):
+        nonlocal replaced
+        for k in params.keys():
+            if k == key:
+                params[k] = replacement
+                print(f"Replaced {key} in params")
+                replaced = True
+                return
+            if isinstance(params[k], type(params)):
+                find_and_replace(params[k], key, replacement)
+
+    find_and_replace(params, "hf_model", model_variables)
+    assert replaced, "Failed to load weights"
+    return params

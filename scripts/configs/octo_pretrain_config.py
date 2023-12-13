@@ -5,10 +5,10 @@ from scripts.configs.config import get_config as get_base_config
 
 from octo.data.utils.text_processing import HFTokenizer
 from octo.model.components.action_heads import DiffusionActionHead
-from octo.model.components.hf_weight_loaders import hf_weights_loader
 from octo.model.components.tokenizers import ImageTokenizer, LanguageTokenizer
 from octo.model.components.vit_encoders import SmallStem16
 from octo.utils.spec import ModuleSpec
+from octo.utils.train_utils import hf_weights_loader
 
 
 def update_config(config, **kwargs):
