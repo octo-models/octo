@@ -23,18 +23,39 @@ from orca.utils.typing import Config, Data, Params, PRNGKey, Sequence
 
 @struct.dataclass
 class ORCAModel:
-    """Recommended way of interacting with a pretrained ORCA model.
+    """Recommended way of interacting with ORCA models.
 
-    Usage:
-        model = ORCAModel.load_pretrained(checkpoint_dir)
+    Usage for inference:
 
-        # Create the task dict
-        tasks = model.create_tasks(texts=["go to the red room"])
-        # or
-        tasks = model.create_tasks(goals={"image_primary": goal_images})
+        >>> model = ORCAModel.load_pretrained(checkpoint_dir)
+        >>> tasks = model.create_tasks(texts=["go to the red room"])
+        >>> # or tasks = model.create_tasks(goals={"image_primary": goal_images})
+        >>> actions = model.sample_actions(observations, tasks, rng=jax.random.PRNGKey(0))
 
-        # Run the model
-        model.sample_actions(observations, tasks, rng=jax.random.PRNGKey(0))
+    Usage for finetuning:
+
+        >>> model = ORCAModel.load_pretrained(checkpoint_dir)
+        >>> train_state = orca.utils.train_utils.TrainState.create(
+            rng=jax.random.PRNGKey(0),
+            model=model,
+            tx=optax.adamw(...)
+        )
+        >>> # access params through train_state.model.params
+        >>> train_state, metrics = your_update_function(train_state, batch)
+        >>> # when it's time to save (note that this only saves the model parameters,
+        >>> # not the full optimizer state)
+        >>> train_state.model.save_pretrained(step, save_dir)
+
+    Usage for pretraining:
+
+        >>> model = ORCAModel.from_config(
+                config,
+                example_batch,
+                text_processor
+            )  # initializes params
+        >>> # Continue as in finetuning example
+
+    See full usage examples in train.py and finetune.py.
 
     """
 
