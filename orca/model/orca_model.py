@@ -32,7 +32,7 @@ class ORCAModel:
         >>> tasks = model.create_tasks(texts=["go to the red room"])
         >>> # or tasks = model.create_tasks(goals={"image_primary": goal_images})
         >>> a = policy_fn(observations, tasks, rng=jax.random.PRNGKey(0))
-    
+
     Usage for finetuning:
 
         >>> model = ORCAModel.load_pretrained(checkpoint_dir)
@@ -42,7 +42,7 @@ class ORCAModel:
             tx=optax.adamw(...),
         ) # or use orca.utils.train_utils.TrainState which treats ORCAModel as a first class citizen
         >>> train_state, metrics = your_update_function(train_state, batch)
-    
+
     Usage for pre-training:
 
         >>> model = ORCAModel.from_config(
@@ -51,6 +51,8 @@ class ORCAModel:
                 text_processor
             )
         >>> # Continue as in finetuning example
+
+    See full usage examples in train.py and finetune.py.
 
     """
 
