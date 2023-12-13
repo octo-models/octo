@@ -301,11 +301,3 @@ class LowdimObsTokenizer(BinTokenizer):
             tokens = tokenizer_inputs[..., None]
         mask = jnp.ones(tokens.shape[:-1])
         return TokenGroup(tokens, mask)
-
-
-TOKENIZERS = {
-    "image_tokenizer": ImageTokenizer,
-    "language_tokenizer": LanguageTokenizer,
-    "bin_tokenizer": BinTokenizer,
-    "lowdim_obs_tokenizer": LowdimObsTokenizer,
-}
