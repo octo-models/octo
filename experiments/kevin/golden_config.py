@@ -1,7 +1,7 @@
 import copy
 from copy import deepcopy
 
-from config import get_config as get_base_config
+from scripts.configs.config import get_config as get_base_config
 from ml_collections import ConfigDict
 
 from orca.data.utils.text_processing import HFTokenizer

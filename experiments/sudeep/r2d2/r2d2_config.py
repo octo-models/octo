@@ -1,6 +1,6 @@
 from copy import deepcopy
 
-from config import update_config
+from scripts.configs.config import update_config
 from ml_collections import ConfigDict
 from ml_collections.config_dict import placeholder
 

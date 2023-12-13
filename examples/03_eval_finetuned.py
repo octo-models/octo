@@ -61,8 +61,9 @@ def main(_):
     env = RHCWrapper(env, exec_horizon=50)
 
     # wrap env to handle action/proprio normalization -- match normalization type to the one used during finetuning
-    norm_stats = ORCAModel.load_dataset_statistics(FLAGS.finetuned_path)
-    env = UnnormalizeActionProprio(env, norm_stats, normalization_type="normal")
+    env = UnnormalizeActionProprio(
+        env, model.dataset_statistics, normalization_type="normal"
+    )
 
     # jit model action prediction function for faster inference
     policy_fn = jax.jit(model.sample_actions)
@@ -76,7 +77,7 @@ def main(_):
         task = model.create_tasks(texts=language_instruction)
 
         # run rollout for 400 steps
-        images = [obs["image_0"][0]]
+        images = [obs["image_primary"][0]]
         episode_return = 0.0
         while len(images) < 400:
             # model returns actions of shape [batch, pred_horizon, action_dim] -- remove batch
@@ -88,7 +89,7 @@ def main(_):
             # step env -- info contains full "chunk" of observations for logging
             # obs only contains observation for final step of chunk
             obs, reward, done, trunc, info = env.step(actions)
-            images.extend([o["image_0"][0] for o in info["observations"]])
+            images.extend([o["image_primary"][0] for o in info["observations"]])
             episode_return += reward
             if done or trunc:
                 break

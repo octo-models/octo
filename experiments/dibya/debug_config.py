@@ -1,7 +1,7 @@
 from copy import deepcopy
 
-from config import get_config as get_base_config
-from config import update_config
+from scripts.configs.config import get_config as get_base_config
+from scripts.configs.config import update_config
 
 
 def get_config():
