@@ -122,7 +122,6 @@ def get_dataset_config(window_size=1):
         # oxe_kwargs will generate dataset_kwargs_list and sampling weights
         "oxe_kwargs": dict(
             data_mix=placeholder(str),
-            # for v4 TPUs: "gs://rail-octo-central2/resize_336_336"
             data_dir=placeholder(str),
             load_camera_views=("primary", "wrist"),
             load_depth=False,
