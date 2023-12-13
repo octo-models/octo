@@ -1,7 +1,6 @@
 import datetime
 from functools import partial
 import imp
-import json
 import os
 
 from absl import app, flags, logging
@@ -165,8 +164,8 @@ def main(_):
 
     dataset = make_single_dataset(
         FLAGS.config.dataset_kwargs,
-        FLAGS.config.traj_transform_kwargs,
-        FLAGS.config.frame_transform_kwargs,
+        traj_transform_kwargs=FLAGS.config.traj_transform_kwargs,
+        frame_transform_kwargs=FLAGS.config.frame_transform_kwargs,
         train=True,
     )
     train_data_iter = (
@@ -185,11 +184,19 @@ def main(_):
     #
     #########
 
+    rng = jax.random.PRNGKey(FLAGS.config.seed)
+    rng, init_rng = jax.random.split(rng)
     pretrained_model = ORCAModel.load_pretrained(
         FLAGS.config.pretrained_path,
         step=FLAGS.config.pretrained_step,
     )
-    model = ORCAModel.from_config(config, example_batch, text_processor)
+    model = ORCAModel.from_config(
+        config,
+        example_batch,
+        text_processor,
+        rng=init_rng,
+        dataset_statistics=dataset.dataset_statistics,
+    )
     merged_params = merge_params(model.params, pretrained_model.params)
     model = model.replace(params=merged_params)
     del pretrained_model
@@ -201,8 +208,6 @@ def main(_):
     #
     #########
 
-    rng = jax.random.PRNGKey(FLAGS.config.seed)
-
     params = model.params
     if FLAGS.config.optimizer.frozen_keys is None:
         FLAGS.config.optimizer.frozen_keys = model.config["optimizer"]["frozen_keys"]
@@ -212,8 +217,7 @@ def main(_):
         **FLAGS.config.optimizer.to_dict(),
     )
     train_state = TrainState.create(
-        apply_fn=model.model_def.apply,
-        params=params,
+        model=model,
         tx=tx,
         rng=rng,
     )
@@ -235,24 +239,16 @@ def main(_):
         logging.info("Saving to %s", save_dir)
         save_callback = SaveCallback(save_dir)
 
-        # Save model config
+        # Add window_size to top of config, to make eval easier
         new_config = ConfigDict(model.config)
         new_config.window_size = example_batch["observation"]["pad_mask"].shape[1]
+        model.replace(config=new_config)
 
-        with save_callback.open("config.json", "w") as config_file:
-            config_file.write(new_config.to_json_best_effort())
-
-        # Save finetuning config
-        with save_callback.open("finetune_config.json", "w") as config_file:
+        # Save finetuning config since it's not saved by SaveCallback, i.e. as part of model.save_pretrained()
+        with open(
+            tf.io.gfile.join(save_dir, "finetune_config.json"), "w"
+        ) as config_file:
             config_file.write(FLAGS.config.to_json_best_effort())
-
-        with save_callback.open("dataset_statistics.json", "w") as f:
-            stats = jax.tree_map(lambda x: x.tolist(), dataset.dataset_statistics)
-            json.dump(stats, f)
-
-        # Save example batch to verify shapes later
-        with save_callback.open("example_batch.msgpack", "wb") as f:
-            f.write(flax.serialization.msgpack_serialize(example_batch))
     else:
         save_dir = None
         save_callback = SaveCallback(None)

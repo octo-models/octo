@@ -1,12 +1,10 @@
-from config import wrap
 from ml_collections import ConfigDict
 from ml_collections.config_dict import FieldReference, placeholder
 
 
-@wrap
 def get_config(
-    task="image_conditioned",
     mode="full",
+    task="multimodal",
 ):
     assert task in ["image_conditioned", "language_conditioned", "multimodal"]
     assert mode in ["full", "head_only", "head_mlp_only"]
@@ -47,7 +45,7 @@ def get_config(
     else:
         raise ValueError("Invalid mode")
 
-    max_steps = FieldReference(20000)
+    max_steps = FieldReference(50000)
     window_size = FieldReference(default=1)
 
     config = dict(
