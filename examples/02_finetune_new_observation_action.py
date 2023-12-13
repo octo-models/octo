@@ -59,26 +59,25 @@ def main(_):
         dataset_kwargs=dict(
             name="aloha_sim_cube_scripted_dataset",
             data_dir=FLAGS.data_dir,
-            image_obs_keys=["top"],
+            image_obs_keys={"primary": "top"},
             state_obs_keys=["state"],
+            language_key="language_instruction",
             state_encoding=StateEncoding.JOINT_BIMANUAL,
             action_encoding=ActionEncoding.JOINT_POS_BIMANUAL,
             action_proprio_normalization_type="normal",
         ),
         traj_transform_kwargs=dict(
             window_size=1,
-            additional_action_window_size=49,  # so we get 50 actions for our action chunk
+            future_action_window_size=49,  # so we get 50 actions for our action chunk
             goal_relabeling_strategy="no_image_conditioning",  # train only language-conditioned policy
             action_encoding=ActionEncoding.JOINT_POS_BIMANUAL,
-        ),
-        frame_transform_kwargs=dict(
-            resize_size=(256, 256),
             task_augment_strategy="delete_task_conditioning",
             task_augment_kwargs=dict(
-                delete_key_groups_probs=[
-                    (["image_.*"], 1.0)
-                ],  # delete goal images in task definition
+                keep_image_prob=0.0  # delete goal images in task definition
             ),
+        ),
+        frame_transform_kwargs=dict(
+            resize_size={"primary": (256, 256)},
         ),
         train=True,
     )
@@ -103,7 +102,8 @@ def main(_):
 
     # load pre-training config and modify --> remove wrist cam, add proprio input, change action head
     # following Zhao et al. we use "action chunks" of length 50 and L1 loss for ALOHA
-    config = ORCAModel.load_config(FLAGS.pretrained_path)
+    pretrained_model = ORCAModel.load_pretrained(FLAGS.pretrained_path)
+    config = pretrained_model.config
     del config["model"]["observation_tokenizers"]["wrist"]
     ###
     config["model"]["observation_tokenizers"]["proprio"] = ModuleSpec.create(
@@ -156,14 +156,14 @@ def main(_):
 
     # define loss function and train step
     def loss_fn(params, batch, rng, train=True):
-        bound_model = model.model_def.bind({"params": params}, rngs={"dropout": rng})
-        transformer_embeddings = bound_model.orca_transformer(
+        bound_module = model.module.bind({"params": params}, rngs={"dropout": rng})
+        transformer_embeddings = bound_module.orca_transformer(
             batch["observation"],
             batch["tasks"],
             batch["observation"]["pad_mask"],
             train=train,
         )
-        action_loss, action_metrics = bound_model.heads["action"].loss(
+        action_loss, action_metrics = bound_module.heads["action"].loss(
             transformer_embeddings,  # Action head knows to pull out the action readout_key
             batch["action"],
             pad_mask=batch["observation"]["pad_mask"],
