@@ -6,7 +6,7 @@
 This repo contains code for training and finetuning ORCA generalist robotic models (GRMs).
 ORCA models are transformer-based diffusion policies, trained on a diverse mix of >1M robot trajectories.
 
-![ORCA model](docs/assets/orca_model.jpeg)
+![ORCA model](docs/assets/teaser.png)
 
 Out of the box, ORCA supports multiple RGB camera inputs, can control various robot arms,
 and can be instructed via language commands or goal images.
