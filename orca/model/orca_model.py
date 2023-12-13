@@ -210,6 +210,10 @@ class ORCAModel:
             step (int, optional): If multiple checkpoints are present, which one to load. Defaults to the latest.
         """
         if checkpoint_path.startswith("hf://"):
+            if step:
+                raise ValueError(
+                    "You can't set config['pretrained_step'] when loading from HuggingFace."
+                )
             checkpoint_path = _download_from_huggingface(
                 checkpoint_path.removeprefix("hf://")
             )
