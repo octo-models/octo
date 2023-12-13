@@ -28,7 +28,7 @@ from octo.utils.gym_wrappers import (
     TemporalEnsembleWrapper,
     UnnormalizeActionProprio,
 )
-from octo.model.octo_model import OCTOModel
+from octo.model.octo_model import OctoModel
 
 np.set_printoptions(suppress=True)
 
@@ -125,7 +125,7 @@ def main(_):
         )
         assert tf.io.gfile.exists(weights_path), weights_path
         run_name = weights_path.rpartition("/")[2]
-        models[f"{run_name}-{step}"] = OCTOModel.load_pretrained(
+        models[f"{run_name}-{step}"] = OctoModel.load_pretrained(
             weights_path, step=int(step)
         )
 
@@ -193,7 +193,7 @@ def main(_):
         policy_name = list(policies.keys())[policy_idx]
         policy_fn = policies[policy_name]
         model = models[policy_name]
-        model: OCTOModel  # type hinting
+        model: OctoModel  # type hinting
 
         if not modality:
             modality = click.prompt(

@@ -8,7 +8,7 @@ import jax
 import jax.numpy as jnp
 import tensorflow as tf
 
-from octo.model.octo_model import OCTOModel
+from octo.model.octo_model import OctoModel
 
 
 def supply_rng(f, rng=jax.random.PRNGKey(0)):
@@ -22,7 +22,7 @@ def supply_rng(f, rng=jax.random.PRNGKey(0)):
 
 @partial(jax.jit, static_argnames="argmax")
 def sample_actions(
-    pretrained_model: OCTOModel,
+    pretrained_model: OctoModel,
     observations,
     tasks,
     rng,

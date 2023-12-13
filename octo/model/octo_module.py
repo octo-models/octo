@@ -17,9 +17,9 @@ from octo.utils.spec import ModuleSpec
 from octo.utils.typing import Data, Sequence
 
 
-class OCTOTransformer(nn.Module):
+class OctoTransformer(nn.Module):
     """
-    This module forms the base of the OCTO architecture.
+    This module forms the base of the Octo architecture.
 
     The core idea is to run a causal transformer on the following sequence,
 
@@ -303,12 +303,12 @@ class OCTOTransformer(nn.Module):
         return jnp.broadcast_to(embedding, tokens.shape)
 
 
-class OCTOModule(nn.Module):
+class OctoModule(nn.Module):
     """
-    Bundles OCTOTransformer with various heads (useful for keeping all parameters in one place).
+    Bundles OctoTransformer with various heads (useful for keeping all parameters in one place).
     """
 
-    octo_transformer: OCTOTransformer
+    octo_transformer: OctoTransformer
     heads: Dict[str, nn.Module]
 
     def __call__(self, observations, tasks, pad_mask, train=True, verbose=False):
@@ -321,10 +321,10 @@ class OCTOModule(nn.Module):
                 where each element has shape (batch, *).
             pad_mask: A boolean mask of shape (batch, horizon) where False indicates a padded timestep.
             train: Run in training mode
-            verbose: If True, prints out the structure of the OCTOTransformer (useful for debugging!)
+            verbose: If True, prints out the structure of the OctoTransformer (useful for debugging!)
 
         Returns:
-            transformer_outputs: See OCTOTransformer.__call__
+            transformer_outputs: See OctoTransformer.__call__
             head_outputs: dictionary of outputs from heads {head_name: output}
         """
         transformer_outputs = self.octo_transformer(
@@ -345,9 +345,9 @@ class OCTOModule(nn.Module):
         transformer_kwargs: Dict,
         token_embedding_size: int,
         max_horizon: int,
-    ) -> "OCTOModule":
+    ) -> "OctoModule":
         """
-        Canonical way to create an OCTOModule from configuration.
+        Canonical way to create an OctoModule from configuration.
 
         Args:
             observation_tokenizers: dict of {tokenizer_name: tokenizer_spec} (see tokenizers.py)
@@ -375,7 +375,7 @@ class OCTOModule(nn.Module):
 
         head_defs = {k: ModuleSpec.instantiate(spec)() for k, spec in heads.items()}
 
-        model_def = OCTOTransformer(
+        model_def = OctoTransformer(
             observation_tokenizers=observation_tokenizer_defs,
             task_tokenizers=task_tokenizer_defs,
             readouts=readouts,

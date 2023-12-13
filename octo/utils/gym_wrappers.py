@@ -43,7 +43,7 @@ def space_stack(space: gym.Space, repeat: int):
             {k: space_stack(v, repeat) for k, v in space.spaces.items()}
         )
     else:
-        raise ValueError(f"Space {space} is not supported by OCTO Gym wrappers.")
+        raise ValueError(f"Space {space} is not supported by Octo Gym wrappers.")
 
 
 def listdict2dictlist(LD):

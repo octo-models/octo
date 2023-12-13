@@ -22,7 +22,7 @@ import wandb
 import octo
 from octo.data.dataset import make_dataset, make_interleaved_dataset
 from octo.data.utils.text_processing import text_processors
-from octo.model import create_model_def, OCTOModule
+from octo.model import create_model_def, OctoModule
 from octo.model.components.hf_weight_loaders import weights_loaders
 from octo.utils.jax_utils import initialize_compilation_cache
 from octo.utils.train_utils import (
@@ -263,7 +263,7 @@ def main(_):
     # )  # Ensures that there is a full horizon of actions to predict for each timestep
 
     def loss_fn(params, state, batch, rng, train=True):
-        def get_loss(model: OCTOModule, observations, tasks, actions, train):
+        def get_loss(model: OctoModule, observations, tasks, actions, train):
             # only use first horizon timesteps as input to transformer
             # to ensure that there is a full horizon of actions to predict for each timestep
             # observations = jax.tree_map(lambda x: x[:, :horizon], observations)

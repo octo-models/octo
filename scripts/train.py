@@ -21,7 +21,7 @@ import wandb
 import octo
 from octo.data.dataset import make_interleaved_dataset
 from octo.data.oxe import make_oxe_dataset_kwargs_and_weights
-from octo.model.octo_model import OCTOModel
+from octo.model.octo_model import OctoModel
 from octo.utils import jax_utils
 from octo.utils.spec import ModuleSpec
 from octo.utils.train_callbacks import (
@@ -179,7 +179,7 @@ def main(_):
     # set up model and initialize weights
     rng = jax.random.PRNGKey(FLAGS.config.seed)
     rng, init_rng = jax.random.split(rng)
-    model = OCTOModel.from_config(
+    model = OctoModel.from_config(
         FLAGS.config.to_dict(),
         example_batch,
         text_processor,
