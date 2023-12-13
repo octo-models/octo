@@ -19,8 +19,9 @@ def get_config(
         "name": "bridge_dataset",
         # On v4, this might be "gs://rail-orca-central2/resize_256_256"
         "data_dir": "./tests/debug_dataset",
-        "image_obs_keys": ["image_0", None],
+        "image_obs_keys": {"primary": "image_0", "wrist": None},
         "state_obs_keys": ["state", None],
+        "language_key": "language_instruction",
         "action_proprio_normalization_type": "normal",
         # standardize_fn is dynamically loaded from a file
         # for example: "experiments/kevin/custom_standardization_transforms.py:aloha_dataset_transform"
@@ -93,27 +94,24 @@ def get_config(
 
     if task == "image_conditioned":
         goal_relabeling_strategy = "uniform"
-        delete_key_groups_probs = [
-            (["language_instruction"], 1.0),
-        ]
+        keep_image_prob = 1.0
     elif task == "language_conditioned":
         goal_relabeling_strategy = "no_image_conditioning"
-        delete_key_groups_probs = [
-            (["image_.*"], 1.0),
-        ]
+        keep_image_prob = 0.0
     elif task == "multimodal":
         goal_relabeling_strategy = "uniform"
-        delete_key_groups_probs = [
-            (["image_.*"], 0.5),
-            (["language_instruction"], 0.5),
-        ]
+        keep_image_prob = 0.5
     else:
         raise ValueError("Invalid modality")
 
     traj_transform_kwargs = dict(
         window_size=window_size,
-        additional_action_window_size=0,
+        future_action_window_size=3,
         goal_relabeling_strategy=goal_relabeling_strategy,
+        task_augment_strategy="delete_task_conditioning",
+        task_augment_kwargs=dict(
+            keep_image_prob=keep_image_prob,
+        ),
         # If the default data loading speed is too slow, try these:
         # num_parallel_calls=16,  # for less CPU-intensive ops
     )
@@ -144,18 +142,14 @@ def get_config(
         ],
     )
     frame_transform_kwargs = dict(
-        resize_size=[
-            (256, 256),  # workspace (3rd person) camera is at 256x256
-            (128, 128),  # wrist camera is at 128x128
-        ],
+        resize_size={
+            "primary": (256, 256),  # workspace (3rd person) camera is at 256x256
+            "wrist": (128, 128),  # wrist camera is at 128x128
+        },
         image_augment_kwargs=[
             workspace_augment_kwargs,
             wrist_augment_kwargs,
         ],
-        task_augment_strategy="delete_task_conditioning",
-        task_augment_kwargs=dict(
-            delete_key_groups_probs=delete_key_groups_probs,
-        ),
     )
     # If the default data loading speed is too slow, try these:
     config[

@@ -125,7 +125,7 @@ def main(_):
         step=FLAGS.config.pretrained_step,
     )
     flat_config = flax.traverse_util.flatten_dict(
-        pretrained_model.config.to_dict(), keep_empty_nodes=True
+        pretrained_model.config, keep_empty_nodes=True
     )
     for d_key in flax.traverse_util.flatten_dict(
         FLAGS.config.get("config_delete_keys", ConfigDict()).to_dict()
@@ -136,6 +136,7 @@ def main(_):
 
     config = ConfigDict(flax.traverse_util.unflatten_dict(flat_config))
     config.update(FLAGS.config.get("update_config", ConfigDict()))
+    config = config.to_dict()
     check_config_diff(config, pretrained_model.config)
 
     #########
@@ -199,7 +200,6 @@ def main(_):
     merged_params = merge_params(model.params, pretrained_model.params)
     model = model.replace(params=merged_params)
     del pretrained_model
-    model_def = model.model_def
 
     #########
     #
@@ -267,14 +267,14 @@ def main(_):
     #########
 
     def loss_fn(params, state, batch, rng, train=True):
-        model = model_def.bind({"params": params}, rngs={"dropout": rng})
-        transformer_embeddings = model.orca_transformer(
+        bound_module = model.module.bind({"params": params}, rngs={"dropout": rng})
+        transformer_embeddings = bound_module.orca_transformer(
             batch["observation"],
             batch["task"],
             batch["observation"]["pad_mask"],
             train=train,
         )
-        action_loss, action_metrics = model.heads["action"].loss(
+        action_loss, action_metrics = bound_module.heads["action"].loss(
             transformer_embeddings,  # Action head knows to pull out the action readout_key
             batch["action"],
             pad_mask=batch["observation"]["pad_mask"],
@@ -291,17 +291,17 @@ def main(_):
     def train_step(state, batch):
         rng, dropout_rng = jax.random.split(state.rng)
         (loss, info), grads = jax.value_and_grad(loss_fn, has_aux=True)(
-            state.params, state, batch, dropout_rng, train=True
+            state.model.params, state, batch, dropout_rng, train=True
         )
         # Gradient Metrics (TODO: Does the finetuner need these?) ###
         grad_norm = optax.global_norm(grads)
-        updates, _ = state.tx.update(grads, state.opt_state, state.params)
+        updates, _ = state.tx.update(grads, state.opt_state, state.model.params)
         update_norm = optax.global_norm(updates)
         info.update(
             {
                 "grad_norm": grad_norm,
                 "update_norm": update_norm,
-                "param_norm": param_norm_callable(state.params),
+                "param_norm": param_norm_callable(state.model.params),
                 "learning_rate": lr_callable(state.step),
             }
         )
