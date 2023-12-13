@@ -16,25 +16,25 @@ import tensorflow as tf
 
 from octo.data.utils.text_processing import TextProcessor
 from octo.model.components.action_heads import ActionHead
-from octo.model.octo_module import OCTOModule
+from octo.model.octo_module import OctoModule
 from octo.utils.spec import ModuleSpec
 from octo.utils.typing import Config, Data, Params, PRNGKey, Sequence
 
 
 @struct.dataclass
-class OCTOModel:
-    """Recommended way of interacting with OCTO models.
+class OctoModel:
+    """Recommended way of interacting with Octo models.
 
     Usage for inference:
 
-        >>> model = OCTOModel.load_pretrained(checkpoint_dir)
+        >>> model = OctoModel.load_pretrained(checkpoint_dir)
         >>> tasks = model.create_tasks(texts=["go to the red room"])
         >>> # or tasks = model.create_tasks(goals={"image_primary": goal_images})
         >>> actions = model.sample_actions(observations, tasks, rng=jax.random.PRNGKey(0))
 
     Usage for finetuning:
 
-        >>> model = OCTOModel.load_pretrained(checkpoint_dir)
+        >>> model = OctoModel.load_pretrained(checkpoint_dir)
         >>> train_state = octo.utils.train_utils.TrainState.create(
             rng=jax.random.PRNGKey(0),
             model=model,
@@ -48,7 +48,7 @@ class OCTOModel:
 
     Usage for pretraining:
 
-        >>> model = OCTOModel.from_config(
+        >>> model = OctoModel.from_config(
                 config,
                 example_batch,
                 text_processor
@@ -59,7 +59,7 @@ class OCTOModel:
 
     """
 
-    module: OCTOModule = struct.field(pytree_node=False)
+    module: OctoModule = struct.field(pytree_node=False)
     text_processor: TextProcessor = struct.field(pytree_node=False)
     config: Config = struct.field(pytree_node=False)
     params: Params
@@ -202,7 +202,7 @@ class OCTOModel:
         cls,
         checkpoint_path: str,
         step: Optional[int] = None,
-    ) -> "OCTOModel":
+    ) -> "OctoModel":
         """Loads a model from a checkpoint that was saved via `save_pretrained`.
 
         Args:
@@ -253,8 +253,8 @@ class OCTOModel:
                 np.array, dataset_statistics, is_leaf=lambda x: not isinstance(x, dict)
             )
 
-        # create model def (an OCTOModule)
-        module = OCTOModule.create(**config["model"])
+        # create model def (an OctoModule)
+        module = OctoModule.create(**config["model"])
         # infer params shape without actually doing any computation
         params_shape = jax.eval_shape(
             partial(module.init, train=False),
@@ -365,7 +365,7 @@ class OCTOModel:
             rng (Optional[PRNGKey], optional): RNG key for initializing the model.
             dataset_statistics (Optional[Dict[str, Any]], optional): Dataset statistics.
         """
-        module = OCTOModule.create(**config["model"])
+        module = OctoModule.create(**config["model"])
         rng = rng if rng is not None else jax.random.PRNGKey(0)
         example_batch = multihost_utils.process_allgather(example_batch)
         example_batch = jax.tree_map(lambda x: x[:1], example_batch)

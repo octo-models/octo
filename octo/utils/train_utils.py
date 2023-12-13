@@ -15,7 +15,7 @@ import numpy as np
 import optax
 
 from octo.data.utils.text_processing import TextProcessor
-from octo.model.octo_model import OCTOModel
+from octo.model.octo_model import OctoModel
 from octo.utils import jax_utils
 from octo.utils.typing import Config, Data, Params, PRNGKey
 
@@ -23,7 +23,7 @@ from octo.utils.typing import Config, Data, Params, PRNGKey
 @struct.dataclass
 class TrainState:
     rng: PRNGKey
-    model: OCTOModel
+    model: OctoModel
     step: int
     opt_state: optax.OptState
     tx: optax.GradientTransformation = struct.field(pytree_node=False)
@@ -32,7 +32,7 @@ class TrainState:
     def create(
         cls,
         rng: PRNGKey,
-        model: OCTOModel,
+        model: OctoModel,
         tx: optax.GradientTransformation,
     ):
         opt_state = tx.init(model.params)
@@ -290,7 +290,7 @@ def freeze_weights(
 def create_optimizer(
     params_or_params_shape: Params, **kwargs: dict
 ) -> optax.GradientTransformation:
-    """Creates optimizer for OCTO.
+    """Creates optimizer for Octo.
 
     kwargs are the kwargs for optax.adamw; if the "learning_rate" key is a dict, it is interpreted
     as the kwargs for create_lr_schedule (see above), otherwise it is interpreted as a constant

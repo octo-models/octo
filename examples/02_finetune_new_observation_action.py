@@ -1,5 +1,5 @@
 """
-This script demonstrates how to finetune OCTO to a new observation space (single camera + proprio)
+This script demonstrates how to finetune Octo to a new observation space (single camera + proprio)
 and new action space (bimanual) using a simulated ALOHA cube handover dataset (https://tonyzhaozh.github.io/aloha/).
 """
 from absl import app, flags, logging
@@ -14,7 +14,7 @@ from octo.data.dataset import make_single_dataset
 from octo.data.oxe.oxe_dataset_configs import ActionEncoding, StateEncoding
 from octo.model.components.action_heads import L1ActionHead
 from octo.model.components.tokenizers import LowdimObsTokenizer
-from octo.model.octo_model import OCTOModel
+from octo.model.octo_model import OctoModel
 from octo.utils.jax_utils import initialize_compilation_cache
 from octo.utils.spec import ModuleSpec
 from octo.utils.train_utils import (
@@ -27,7 +27,7 @@ from octo.utils.train_utils import (
 FLAGS = flags.FLAGS
 
 flags.DEFINE_string(
-    "pretrained_path", None, "Path to pre-trained OCTO checkpoint directory."
+    "pretrained_path", None, "Path to pre-trained Octo checkpoint directory."
 )
 flags.DEFINE_string("data_dir", None, "Path to finetuning dataset, in RLDS format.")
 flags.DEFINE_string("save_dir", None, "Directory for saving finetuning checkpoints.")
@@ -48,7 +48,7 @@ def main(_):
 
     # load pre-trained model
     logging.info("Loading pre-trained model...")
-    pretrained_model = OCTOModel.load_pretrained(FLAGS.pretrained_path)
+    pretrained_model = OctoModel.load_pretrained(FLAGS.pretrained_path)
 
     # make finetuning dataset
     # apply Gaussian normalization, load chunks of 50 actions since we'll train with action chunking
@@ -102,7 +102,7 @@ def main(_):
 
     # load pre-training config and modify --> remove wrist cam, add proprio input, change action head
     # following Zhao et al. we use "action chunks" of length 50 and L1 loss for ALOHA
-    pretrained_model = OCTOModel.load_pretrained(FLAGS.pretrained_path)
+    pretrained_model = OctoModel.load_pretrained(FLAGS.pretrained_path)
     config = pretrained_model.config
     del config["model"]["observation_tokenizers"]["wrist"]
     ###
@@ -122,10 +122,10 @@ def main(_):
         readout_key="readout_action",
     )
 
-    # initialize weights for modified OCTO model, then merge in all applicable pre-trained weights
+    # initialize weights for modified Octo model, then merge in all applicable pre-trained weights
     # new position encodings for proprio inputs & weights for new action head will remain "from scratch"
     logging.info("Updating model for new observation & action space...")
-    model = OCTOModel.from_config(
+    model = OctoModel.from_config(
         config,
         example_batch,
         text_processor,

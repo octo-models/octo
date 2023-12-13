@@ -21,7 +21,7 @@ import jax.numpy as jnp
 import numpy as np
 from widowx_envs.widowx_env_service import WidowXClient, WidowXConfigs, WidowXStatus
 
-from octo.model.octo_model import OCTOModel
+from octo.model.octo_model import OctoModel
 from octo.utils.gym_wrappers import HistoryWrapper, RHCWrapper, UnnormalizeActionProprio
 
 np.set_printoptions(suppress=True)
@@ -97,7 +97,7 @@ def main(_):
         assert STEP_DURATION == 0.2, STEP_DURATION_MESSAGE
 
     # load models
-    model = OCTOModel.load_pretrained(
+    model = OctoModel.load_pretrained(
         FLAGS.checkpoint_weights_path,
         FLAGS.checkpoint_step,
     )
@@ -112,7 +112,7 @@ def main(_):
     # create policy functions
     @jax.jit
     def sample_actions(
-        pretrained_model: OCTOModel,
+        pretrained_model: OctoModel,
         observations,
         tasks,
         rng,

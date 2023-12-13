@@ -1,6 +1,6 @@
 """
-This script demonstrates how to load and rollout a finetuned OCTO model.
-We use the OCTO model finetuned on ALOHA sim data from the examples/finetune_new_observation_action.py script.
+This script demonstrates how to load and rollout a finetuned Octo model.
+We use the Octo model finetuned on ALOHA sim data from the examples/finetune_new_observation_action.py script.
 
 For installing the ALOHA sim environment, clone: https://github.com/tonyzhaozh/act
 Then run:
@@ -20,13 +20,13 @@ import wandb
 
 sys.path.append("/nfs/nfs2/users/karl/code/act")
 
-from octo.model.octo_model import OCTOModel
+from octo.model.octo_model import OctoModel
 from octo.utils.gym_wrappers import HistoryWrapper, RHCWrapper, UnnormalizeActionProprio
 
 FLAGS = flags.FLAGS
 
 flags.DEFINE_string(
-    "finetuned_path", None, "Path to finetuned OCTO checkpoint directory."
+    "finetuned_path", None, "Path to finetuned Octo checkpoint directory."
 )
 
 
@@ -36,7 +36,7 @@ def main(_):
 
     # load finetuned model
     logging.info("Loading finetuned model...")
-    model = OCTOModel.load_pretrained(FLAGS.finetuned_path)
+    model = OctoModel.load_pretrained(FLAGS.finetuned_path)
 
     # make gym environment
     ##################################################################################################################
