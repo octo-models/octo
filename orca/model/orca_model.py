@@ -188,6 +188,11 @@ class ORCAModel:
             checkpoint_path (str): A path to either a directory of checkpoints or a single checkpoint.
             step (int, optional): If multiple checkpoints are present, which one to load. Defaults to the latest.
         """
+        if checkpoint_path.startswith("hf://"):
+            checkpoint_path = _download_from_huggingface(
+                checkpoint_path.removeprefix("hf://")
+            )
+
         # load config
         with tf.io.gfile.GFile(
             tf.io.gfile.join(checkpoint_path, "config.json"), "r"
@@ -421,3 +426,10 @@ def _verify_shapes(
         raise AssertionError(f"{name} does not match example batch.")
 
     return weak_fail or fail
+
+
+def _download_from_huggingface(huggingface_repo_id: str):
+    import huggingface_hub
+
+    folder = huggingface_hub.snapshot_download(huggingface_repo_id)
+    return folder
