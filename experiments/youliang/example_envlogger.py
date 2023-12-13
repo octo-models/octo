@@ -3,7 +3,7 @@ import time
 import cv2
 import argparse
 import numpy as np
-from orca.sim.widowx_sim_env import WidowXSimEnv
+from octo.sim.widowx_sim_env import WidowXSimEnv
 
 # env logger
 # https://github.com/rail-berkeley/oxe_envlogger
@@ -21,19 +21,19 @@ if __name__ == "__main__":
 
     # this describes custom data to be logged which is not in the observation
     # or action space of the environment
-    step_metadata_info={
-        'language_instruction': tfds.features.Text(
-            doc="verbose language instructions")
+    step_metadata_info = {
+        "language_instruction": tfds.features.Text(doc="verbose language instructions")
     }
 
     # This will wrap the environment with the logger to log the data
     # as tfds dataset
-    env = OXEEnvLogger(env,
-                       "widowx",
-                       directory=os.path.expanduser("~/logs"),
-                       max_episodes_per_file=10,
-                       step_metadata_info=step_metadata_info,
-                       )
+    env = OXEEnvLogger(
+        env,
+        "widowx",
+        directory=os.path.expanduser("~/logs"),
+        max_episodes_per_file=10,
+        step_metadata_info=step_metadata_info,
+    )
     time.sleep(1)
 
     # set all custom metadata before calling reset() and step()

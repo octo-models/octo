@@ -30,7 +30,7 @@ repos:
     hooks:
       - id: isort
         exclude: ^experiments/
-        args: ["--profile", "black", "--src", "orca", "--src", "experiments"]
+        args: ["--profile", "black", "--src", "octo", "--src", "experiments"]
   - repo: https://github.com/srstevenson/nb-clean
     rev: 3.1.0
     hooks:

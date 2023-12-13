@@ -1,4 +1,4 @@
-# ORCA Eval Environments
+# OCTO Eval Environments
 
 The `step` and `reset` functions of the Gym environment should return observations with the images, depth images, and/or
 proprioceptive information that the policy expects as input. Specifically, the returned observations should be dictionaries

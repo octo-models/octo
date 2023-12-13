@@ -19,7 +19,7 @@ def update_config(config, **kwargs):
 
 def get_config(config_string):
     base_wandb_config = dict(
-        project="orca", group=placeholder(str), entity=placeholder(str)
+        project="octo", group=placeholder(str), entity=placeholder(str)
     )
 
     base_config = dict(
@@ -31,7 +31,7 @@ def get_config(config_string):
         log_interval=1000,
         eval_interval=20000,
         save_interval=5000,
-        save_dir="gs://karl-central-1", #placeholder(str),
+        save_dir="gs://karl-central-1",  # placeholder(str),
         resume_path=placeholder(str),
         seed=42,
         text_processor=None,
@@ -70,7 +70,7 @@ def get_config(config_string):
         "data_kwargs_list": [
             {
                 "name": "bridge_dataset",
-                "data_dir": "gs://rail-orca-central1", #"/nfs/kun2/datasets/tfds",
+                "data_dir": "gs://rail-octo-central1",  # "/nfs/kun2/datasets/tfds",
                 "image_obs_keys": ["image_0"],
                 "state_obs_keys": ["state"],
             },

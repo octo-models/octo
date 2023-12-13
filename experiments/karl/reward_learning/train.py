@@ -19,20 +19,20 @@ import tensorflow as tf
 import tqdm
 import wandb
 
-import orca
-from orca.data.dataset import make_dataset, make_interleaved_dataset
-from orca.data.utils.text_processing import text_processors
-from orca.model import create_model_def, ORCAModule
-from orca.model.components.hf_weight_loaders import weights_loaders
-from orca.utils.jax_utils import initialize_compilation_cache
-from orca.utils.train_utils import (
+import octo
+from octo.data.dataset import make_dataset, make_interleaved_dataset
+from octo.data.utils.text_processing import text_processors
+from octo.model import create_model_def, OCTOModule
+from octo.model.components.hf_weight_loaders import weights_loaders
+from octo.utils.jax_utils import initialize_compilation_cache
+from octo.utils.train_utils import (
     batched_apply,
     create_train_state,
     filter_eval_datasets,
     format_name_with_config,
     Timer,
 )
-from orca.utils.visualization_lib import Visualizer
+from octo.utils.visualization_lib import Visualizer
 
 try:
     from jax_smi import initialise_tracking  # type: ignore
@@ -89,7 +89,7 @@ def main(_):
         **FLAGS.config.wandb,
     )
 
-    codebase_directory = osp.abspath(osp.join(osp.dirname(orca.__file__), ".."))
+    codebase_directory = osp.abspath(osp.join(osp.dirname(octo.__file__), ".."))
     wandb.run.log_code(codebase_directory)  # TODO: replace w/ codesave_library?
 
     if FLAGS.config.save_dir is not None:
@@ -263,12 +263,12 @@ def main(_):
     # )  # Ensures that there is a full horizon of actions to predict for each timestep
 
     def loss_fn(params, state, batch, rng, train=True):
-        def get_loss(model: ORCAModule, observations, tasks, actions, train):
+        def get_loss(model: OCTOModule, observations, tasks, actions, train):
             # only use first horizon timesteps as input to transformer
             # to ensure that there is a full horizon of actions to predict for each timestep
             # observations = jax.tree_map(lambda x: x[:, :horizon], observations)
 
-            transformer_embeddings = model.orca_transformer(
+            transformer_embeddings = model.octo_transformer(
                 observations, tasks, observations["pad_mask"], train=train
             )
             # action_loss, action_metrics = model.heads["action"].loss(

@@ -4,7 +4,7 @@ import os
 from ml_collections import ConfigDict
 from ml_collections.config_dict import placeholder
 from scripts.configs.config import update_config
-from orca.data.oxe.oxe_dataset_mixes import *
+from octo.data.oxe.oxe_dataset_mixes import *
 
 LOCAL_MIX = [
     ("berkeley_cable_routing", 2.0),
@@ -29,9 +29,10 @@ LOCAL_MIX2 = [
     ("viola", 10.0),
 ]
 
+
 def get_config(config_string):
     base_wandb_config = dict(
-        project="orca", group=placeholder(str), entity=placeholder(str)
+        project="octo", group=placeholder(str), entity=placeholder(str)
     )
 
     base_config = dict(

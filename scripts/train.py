@@ -18,19 +18,19 @@ import optax
 import tqdm
 import wandb
 
-import orca
-from orca.data.dataset import make_interleaved_dataset
-from orca.data.oxe import make_oxe_dataset_kwargs_and_weights
-from orca.model.orca_model import ORCAModel
-from orca.utils import jax_utils
-from orca.utils.spec import ModuleSpec
-from orca.utils.train_callbacks import (
+import octo
+from octo.data.dataset import make_interleaved_dataset
+from octo.data.oxe import make_oxe_dataset_kwargs_and_weights
+from octo.model.octo_model import OCTOModel
+from octo.utils import jax_utils
+from octo.utils.spec import ModuleSpec
+from octo.utils.train_callbacks import (
     RolloutVisualizationCallback,
     SaveCallback,
     ValidationCallback,
     VisualizationCallback,
 )
-from orca.utils.train_utils import (
+from octo.utils.train_utils import (
     create_optimizer,
     filter_eval_datasets,
     format_name_with_config,
@@ -38,7 +38,7 @@ from orca.utils.train_utils import (
     Timer,
     TrainState,
 )
-from orca.utils.typing import Data
+from octo.utils.typing import Data
 
 FLAGS = flags.FLAGS
 
@@ -125,7 +125,7 @@ def main(_):
     save_callback = SaveCallback(save_dir)
 
     if jax.process_index() == 0:
-        codebase_directory = osp.abspath(osp.join(osp.dirname(orca.__file__), ".."))
+        codebase_directory = osp.abspath(osp.join(osp.dirname(octo.__file__), ".."))
         wandb.run.log_code(codebase_directory)
 
     # set up text tokenization (this needs to happen after batching but before sharding)
@@ -179,7 +179,7 @@ def main(_):
     # set up model and initialize weights
     rng = jax.random.PRNGKey(FLAGS.config.seed)
     rng, init_rng = jax.random.split(rng)
-    model = ORCAModel.from_config(
+    model = OCTOModel.from_config(
         FLAGS.config.to_dict(),
         example_batch,
         text_processor,
@@ -223,7 +223,7 @@ def main(_):
 
     def loss_fn(params, batch, rng, train=True):
         bound_module = model.module.bind({"params": params}, rngs={"dropout": rng})
-        transformer_embeddings = bound_module.orca_transformer(
+        transformer_embeddings = bound_module.octo_transformer(
             batch["observation"],
             batch["task"],
             batch["observation"]["pad_mask"],

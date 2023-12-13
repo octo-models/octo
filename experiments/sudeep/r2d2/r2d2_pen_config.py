@@ -11,7 +11,7 @@ def get_config(
     assert transformer_size in ["vanilla", "vit_s", "vit_b", "vit_l"]
 
     base_wandb_config = dict(
-        project="orca", group=placeholder(str), entity=placeholder(str)
+        project="octo", group=placeholder(str), entity=placeholder(str)
     )
 
     base_config = dict(
@@ -166,7 +166,7 @@ def get_config(
                     num_parallel_reads=8,  # for reading from GCS
                     num_parallel_calls=16,  # for the less CPU-intensive ops in initial dataset construction
                     action_proprio_normalization_type=normalization_type,
-                    data_dir="gs://rail-orca-central2",
+                    data_dir="gs://rail-octo-central2",
                     image_obs_keys=[
                         # "exterior_image_1_left",
                         # "exterior_image_2_left",

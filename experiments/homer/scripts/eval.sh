@@ -2,24 +2,24 @@ PATHS=(
    # "gs://rail-dibya-central2/experiment_output/oxe_sweep/bridge_notapod_vits_20231115_144527" # bridge only base
    # "gs://rail-dibya-central2/experiment_output/oxe_sweep/bridge_notapod_vits_20231115_144527" # bridge only base
    # "gs://rail-dibya-central2/experiment_output/oxe_sweep/bridge_notapod_vits_20231115_062209" # base
-   # "gs://rail-tpus-homer-v4/log/orca/widowx_cleaver_from_scratch_vit_ti_20231124_210045" # from scratch
-   # "gs://rail-tpus-homer-v4/log/orca_finetune/finetune_widowx_cleaver_20231122_040252" # end-to-end finetuning
-   # "gs://rail-tpus-homer-v4/log/orca_finetune/finetune_widowx_cleaver_just_head_20231129_184032"
-   # "gs://rail-tpus-homer-v4/log/orca_finetune/finetune_widowx_cleaver_just_head_20231129_184032"
-   # "gs://rail-tpus-homer-v4/log/orca_finetune/finetune_widowx_cleaver_just_head_20231129_184032"
-   # "gs://rail-dibya-central2/orca_releases/20231130/orca_small_ws2"
-   # "gs://rail-tpus-homer-v4/log/orca_finetune/finetune_full_easy_20231202_003411"
-   # "gs://rail-tpus-homer-v4/log/orca_finetune/finetune_head_only_easy_20231201_233637"
-   # "gs://rail-tpus-homer-v4/log/orca_finetune/finetune_head_only_easy_20231201_225553"
-   # "gs://rail-tpus-homer-v4/log/orca_finetune/finetune_full_easy_20231201_232840"
-   # "gs://rail-tpus-homer/log/orca/from_scratch_easy_20231202_035635"
+   # "gs://rail-tpus-homer-v4/log/octo/widowx_cleaver_from_scratch_vit_ti_20231124_210045" # from scratch
+   # "gs://rail-tpus-homer-v4/log/octo_finetune/finetune_widowx_cleaver_20231122_040252" # end-to-end finetuning
+   # "gs://rail-tpus-homer-v4/log/octo_finetune/finetune_widowx_cleaver_just_head_20231129_184032"
+   # "gs://rail-tpus-homer-v4/log/octo_finetune/finetune_widowx_cleaver_just_head_20231129_184032"
+   # "gs://rail-tpus-homer-v4/log/octo_finetune/finetune_widowx_cleaver_just_head_20231129_184032"
+   # "gs://rail-dibya-central2/octo_releases/20231130/octo_small_ws2"
+   # "gs://rail-tpus-homer-v4/log/octo_finetune/finetune_full_easy_20231202_003411"
+   # "gs://rail-tpus-homer-v4/log/octo_finetune/finetune_head_only_easy_20231201_233637"
+   # "gs://rail-tpus-homer-v4/log/octo_finetune/finetune_head_only_easy_20231201_225553"
+   # "gs://rail-tpus-homer-v4/log/octo_finetune/finetune_full_easy_20231201_232840"
+   # "gs://rail-tpus-homer/log/octo/from_scratch_easy_20231202_035635"
    # "gs://rail-dibya-central2/experiment_output/main_runs/oxe_magic_soup_vitb_20231203_021440"
    # "gs://rail-dibya-central2/experiment_output/main_runs/oxe_magic_soup_vitb_20231203_021440"
-   # "gs://rail-tpus-homer-v4/log/orca_finetune/finetune_full_vitb_20231203_231147"
-   # "gs://rail-tpus-homer-v4/log/orca_finetune/finetune_full_vitb_best_bridge_step_20231204_005209"
-   # "gs://rail-tpus-homer-v4/log/orca_finetune/finetune_full_vitb_best_bridge_step_no_aug_20231204_010743"
-   # "gs://rail-tpus-homer/log/orca/from_scratch_vit_ti_easy_no_aug_20231205_215607"
-   # "gs://rail-tpus-homer/log/orca/from_scratch_vit_ti_easy_20231205_195257"
+   # "gs://rail-tpus-homer-v4/log/octo_finetune/finetune_full_vitb_20231203_231147"
+   # "gs://rail-tpus-homer-v4/log/octo_finetune/finetune_full_vitb_best_bridge_step_20231204_005209"
+   # "gs://rail-tpus-homer-v4/log/octo_finetune/finetune_full_vitb_best_bridge_step_no_aug_20231204_010743"
+   # "gs://rail-tpus-homer/log/octo/from_scratch_vit_ti_easy_no_aug_20231205_215607"
+   # "gs://rail-tpus-homer/log/octo/from_scratch_vit_ti_easy_20231205_195257"
    # "gs://rail-dibya-central2/experiment_output/main_runs/oxe_magic_soup_vitb_nocrop_20231205_022211"
    "gs://rail-dibya-central2/experiment_output/main_runs/oxe_magic_soup_vitb_nocrop_20231205_022211"
 )

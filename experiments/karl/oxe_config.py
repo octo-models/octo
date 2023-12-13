@@ -3,12 +3,12 @@ from copy import deepcopy
 from ml_collections import ConfigDict
 from ml_collections.config_dict import placeholder
 from scripts.configs.config import update_config
-from orca.data.oxe.oxe_dataset_mixes import *
+from octo.data.oxe.oxe_dataset_mixes import *
 
 
 def get_config(config_string):
     base_wandb_config = dict(
-        project="orca", group=placeholder(str), entity=placeholder(str)
+        project="octo", group=placeholder(str), entity=placeholder(str)
     )
 
     base_config = dict(
@@ -101,7 +101,7 @@ def get_config(config_string):
 
     dataset_kwargs_list, dataset_sampling_weights = make_oxe_dataset_kwargs_and_weights(
         RT_X_MIX + OXE_FRANKA_MIX,
-        data_dir="gs://rail-orca-central2/resize_336_336",
+        data_dir="gs://rail-octo-central2/resize_336_336",
         n_third_person_cameras=1,
         n_wrist_cameras=1,
         load_depth=False,
