@@ -2,7 +2,7 @@
 This script demonstrates how to finetune Octo to a new observation space (single camera + proprio)
 and new action space (bimanual) using a simulated ALOHA cube handover dataset (https://tonyzhaozh.github.io/aloha/).
 
-To run this example, first download and extract the dataset from here: <TODO>
+To run this example, first download and extract the dataset from here: https://rail.eecs.berkeley.edu/datasets/example_sim_data.zip
 
 python examples/02_finetune_new_observation_action.py --pretrained_path=hf://rail-berkeley/octo-small --data_dir=...
 """
