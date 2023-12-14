@@ -116,8 +116,9 @@ class ImageTokenizer(nn.Module):
         # stack all spatial observation and task inputs
         enc_inputs = extract_inputs(obs_stack_keys, observations, check_spatial=True)
         if tasks and self.task_stack_keys:
-            matched_obs_keys = regex_filter(self.task_stack_keys, observations.keys())
-            for k in matched_obs_keys:
+            needed_task_keys = regex_filter(self.task_stack_keys, observations.keys())
+            # if any task inputs are missing, replace with zero padding (TODO: be more flexible)
+            for k in needed_task_keys:
                 if k not in tasks:
                     logging.info(
                         f"No task inputs matching {k} were found. Replacing with zero padding."
@@ -132,7 +133,6 @@ class ImageTokenizer(nn.Module):
                 )
             task_inputs = extract_inputs(task_stack_keys, tasks, check_spatial=True)
             task_inputs = task_inputs[:, None].repeat(enc_inputs.shape[1], axis=1)
-            # TODO: allow somehow for task inputs to be not provided...
             enc_inputs = jnp.concatenate([enc_inputs, task_inputs], axis=-1)
         b, t, h, w, c = enc_inputs.shape
         enc_inputs = jnp.reshape(enc_inputs, (b * t, h, w, c))
