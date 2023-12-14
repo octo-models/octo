@@ -138,3 +138,15 @@ To evaluate on your own environment, simply wrap it in a Gym interface and follo
 | Octo Model          | [octo_model.py](octo/model/octo_model.py)               | Main entrypoint for interacting with Octo models: loading, saving, and inference. |
 | Model Architecture  | [octo_module.py](octo/model/octo_module.py)             | Combines token sequencing, transformer backbone and readout heads.            |
 | Visualization       | [visualization_lib.py](octo/utils/visualization_lib.py) | Utilities for offline qualitative & quantitative eval.                        |
+
+
+## Citation
+
+```
+@misc{octo_2023,
+title={Octo: An Open-Source Generalist Robotics Policy},
+author = {{Octo Model Team} and Dibya Ghosh and Homer Walke and Karl Pertsch and Kevin Black and Oier Mees and Sudeep Dasari and Joey Hejna and Charles Xu and Jianlan Luo and Tobias Kreiman and {You Liang} Tan and Dorsa Sadigh and Chelsea Finn and Sergey Levine},
+howpublished  = {\url{https://octo-models.github.io}},
+year = {2023},
+}
+```
