@@ -10,15 +10,11 @@ Finally modify the sys.path.append statement below to add the ACT repo to your p
     Xvfb :1 -screen 0 1024x768x16 &
     export DISPLAY=:1
 """
-import sys
-
 from absl import app, flags, logging
 import gym
 import jax
 import numpy as np
 import wandb
-
-sys.path.append("/nfs/nfs2/users/karl/code/act")
 
 from octo.model.octo_model import OctoModel
 from octo.utils.gym_wrappers import HistoryWrapper, RHCWrapper, UnnormalizeActionProprio

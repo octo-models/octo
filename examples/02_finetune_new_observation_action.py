@@ -1,6 +1,10 @@
 """
 This script demonstrates how to finetune Octo to a new observation space (single camera + proprio)
 and new action space (bimanual) using a simulated ALOHA cube handover dataset (https://tonyzhaozh.github.io/aloha/).
+
+To run this example, first download and extract the dataset from here: <TODO>
+
+python examples/02_finetune_new_observation_action.py --pretrained_path=hf://rail-berkeley/octo-small --data_dir=...
 """
 from absl import app, flags, logging
 import flax
@@ -11,7 +15,7 @@ import tqdm
 import wandb
 
 from octo.data.dataset import make_single_dataset
-from octo.data.oxe.oxe_dataset_configs import ActionEncoding, StateEncoding
+from octo.data.utils.data_utils import NormalizationType
 from octo.model.components.action_heads import L1ActionHead
 from octo.model.components.tokenizers import LowdimObsTokenizer
 from octo.model.octo_model import OctoModel
@@ -31,6 +35,8 @@ flags.DEFINE_string(
 )
 flags.DEFINE_string("data_dir", None, "Path to finetuning dataset, in RLDS format.")
 flags.DEFINE_string("save_dir", None, "Directory for saving finetuning checkpoints.")
+flags.DEFINE_integer("batch_size", 128, "Batch size for finetuning.")
+
 flags.DEFINE_bool(
     "freeze_transformer",
     False,
@@ -39,6 +45,10 @@ flags.DEFINE_bool(
 
 
 def main(_):
+    assert (
+        FLAGS.batch_size % jax.device_count() == 0
+    ), "Batch size must be divisible by device count."
+
     initialize_compilation_cache()
     # prevent tensorflow from using GPU memory since it's only used for data loading
     tf.config.set_visible_devices([], "GPU")
@@ -62,19 +72,12 @@ def main(_):
             image_obs_keys={"primary": "top"},
             state_obs_keys=["state"],
             language_key="language_instruction",
-            state_encoding=StateEncoding.JOINT_BIMANUAL,
-            action_encoding=ActionEncoding.JOINT_POS_BIMANUAL,
-            action_proprio_normalization_type="normal",
+            action_proprio_normalization_type=NormalizationType.NORMAL,
+            absolute_action_mask=[True] * 14,
         ),
         traj_transform_kwargs=dict(
             window_size=1,
             future_action_window_size=49,  # so we get 50 actions for our action chunk
-            goal_relabeling_strategy="no_image_conditioning",  # train only language-conditioned policy
-            action_encoding=ActionEncoding.JOINT_POS_BIMANUAL,
-            task_augment_strategy="delete_task_conditioning",
-            task_augment_kwargs=dict(
-                keep_image_prob=0.0  # delete goal images in task definition
-            ),
         ),
         frame_transform_kwargs=dict(
             resize_size={"primary": (256, 256)},
@@ -84,8 +87,8 @@ def main(_):
     train_data_iter = (
         dataset.repeat()
         .unbatch()
-        .shuffle(100000)  # can reduce this if RAM consumption too high
-        .batch(128)
+        .shuffle(10000)  # can reduce this if RAM consumption too high
+        .batch(FLAGS.batch_size)
         .iterator()
     )
 
@@ -159,7 +162,7 @@ def main(_):
         bound_module = model.module.bind({"params": params}, rngs={"dropout": rng})
         transformer_embeddings = bound_module.octo_transformer(
             batch["observation"],
-            batch["tasks"],
+            batch["task"],
             batch["observation"]["pad_mask"],
             train=train,
         )

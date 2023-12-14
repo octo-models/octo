@@ -2,6 +2,7 @@ import logging
 import re
 from typing import Dict, Optional, Sequence
 
+import flax
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
@@ -115,6 +116,15 @@ class ImageTokenizer(nn.Module):
         # stack all spatial observation and task inputs
         enc_inputs = extract_inputs(obs_stack_keys, observations, check_spatial=True)
         if tasks and self.task_stack_keys:
+            matched_obs_keys = regex_filter(self.task_stack_keys, observations.keys())
+            for k in matched_obs_keys:
+                if k not in tasks:
+                    logging.info(
+                        f"No task inputs matching {k} were found. Replacing with zero padding."
+                    )
+                    tasks = flax.core.copy(
+                        tasks, {k: jnp.zeros_like(observations[k][:, 0])}
+                    )
             task_stack_keys = regex_filter(self.task_stack_keys, sorted(tasks.keys()))
             if len(task_stack_keys) == 0:
                 raise ValueError(
