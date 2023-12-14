@@ -55,6 +55,8 @@ OXE_DATASET_CONFIGS = {
         "state_encoding": StateEncoding.POS_QUAT,
         "action_encoding": ActionEncoding.EEF_POS,
     },
+    # NOTE: this is not actually the official OXE copy of bridge, it is our own more up-to-date copy that you
+    # can find at https://rail.eecs.berkeley.edu/datasets/bridge_release/data/tfds/
     "bridge_dataset": {
         "image_obs_keys": {"primary": "image_0", "secondary": "image_1", "wrist": None},
         "depth_obs_keys": {"primary": None, "secondary": None, "wrist": None},
