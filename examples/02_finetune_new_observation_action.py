@@ -105,7 +105,6 @@ def main(_):
 
     # load pre-training config and modify --> remove wrist cam, add proprio input, change action head
     # following Zhao et al. we use "action chunks" of length 50 and L1 loss for ALOHA
-    pretrained_model = OctoModel.load_pretrained(FLAGS.pretrained_path)
     config = pretrained_model.config
     del config["model"]["observation_tokenizers"]["wrist"]
     ###
