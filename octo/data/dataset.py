@@ -454,9 +454,9 @@ def make_interleaved_dataset(
     *,
     train: bool,
     shuffle_buffer_size: int,
-    batch_size: int,
     traj_transform_kwargs: dict = {},
     frame_transform_kwargs: dict = {},
+    batch_size: Optional[int] = None,
     balance_weights: bool = False,
     traj_transform_threads: Optional[int] = None,
     traj_read_threads: Optional[int] = None,
@@ -470,10 +470,10 @@ def make_interleaved_dataset(
         sample_weights: sampling weights for each dataset in list. If None, defaults to uniform.
         train: whether this is a training or validation dataset.
         shuffle_buffer_size: size of the dataset shuffle buffer (in number of frames).
-        batch_size: batch size.
         traj_transform_kwargs: kwargs passed to `apply_trajectory_transforms`. "num_parallel_calls" is
             overidden using `traj_transform_threads`.
         frame_transform_kwargs: kwargs passed to `apply_frame_transforms`.
+        batch_size: batch size, if not provided output is not batched.
         balance_weights: if True, the sample weights are multiplied by the number of frames in each dataset.
             This makes it so that, if all the sample weights are equal, one full iteration through the interleaved
             dataset will correspond to one full iteration through each individual dataset (only in expectation,
@@ -544,11 +544,13 @@ def make_interleaved_dataset(
     dataset = apply_frame_transforms(dataset, **frame_transform_kwargs, train=train)
 
     # sequential batch (parallel batch seems to use much more memory)
-    dataset = dataset.batch(batch_size)
+    if batch_size is not None:
+        dataset = dataset.batch(batch_size)
 
     # this seems to reduce memory usage without affecting speed
     dataset = dataset.with_ram_budget(1)
 
     # save for later
     dataset.dataset_statistics = all_dataset_statistics
+    dataset.sample_weights = sample_weights
     return dataset
