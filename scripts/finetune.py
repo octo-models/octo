@@ -82,6 +82,13 @@ def main(_):
     #
     #########
 
+    assert (
+        FLAGS.config.batch_size % len(devices) == 0
+    ), f"Batch size ({FLAGS.config.batch_size}) must be divisible by the number of devices ({len(devices)})"
+    assert (
+        FLAGS.config.viz_kwargs.eval_batch_size % len(devices) == 0,
+    ), f"Eval batch size ({FLAGS.config.viz_kwargs.eval_batch_size}) must be divisible by the number of devices ({len(devices)})"
+
     # create a 1D mesh with a single axis named "batch"
     mesh = Mesh(jax.devices(), axis_names="batch")
     # Our batches will be data-parallel sharded -- each device will get a slice of the batch
