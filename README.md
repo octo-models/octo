@@ -10,10 +10,10 @@ Octo models are transformer-based diffusion policies, trained on a diverse mix o
 
 ## Get Started
 
-Follow the installation instructions, then load a pre-trained OCTO model! See [examples](examples/) for guides to zero-shot evaluation and finetuning and [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1z0vELj_lX9OWeoMG_WvXnQs43aPOEAhz?usp=sharing)
+Follow the installation instructions, then load a pretrained Octo model! See [examples](examples/) for guides to zero-shot evaluation and finetuning and [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1z0vELj_lX9OWeoMG_WvXnQs43aPOEAhz?usp=sharing)
 for an inference example.
 
-```
+```python
 from octo.model.octo_model import OctoModel
 model = OctoModel.load_pretrained("hf://rail-berkeley/octo-base")
 print(model.get_pretty_spec())
