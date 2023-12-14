@@ -1,11 +1,10 @@
 import numpy as np
+from orca.data.dataset import make_interleaved_dataset
+from orca.data.oxe import make_oxe_dataset_kwargs_and_weights
 import tensorflow as tf
 import torch
 from torch.utils.data import DataLoader
 import tqdm
-
-from orca.data.dataset import make_interleaved_dataset
-from orca.data.oxe import make_oxe_dataset_kwargs_and_weights
 
 DATA_PATH = "gs://rail-orca-central2/resize_256_256"
 
@@ -61,7 +60,6 @@ dataset = make_interleaved_dataset(
         window_size=2,
         future_action_window_size=3,
         subsample_length=100,
-        max_action=4.0,
     ),
     frame_transform_kwargs=dict(
         image_augment_kwargs={
