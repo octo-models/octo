@@ -19,7 +19,7 @@ model = OctoModel.load_pretrained("hf://rail-berkeley/octo-base")
 print(model.get_pretty_spec())
 ```
 
-![Octo model](docs/assets/teaser.png)
+![Octo model](docs/assets/teaser.jpg)
 
 Out of the box, Octo supports multiple RGB camera inputs, can control various robot arms,
 and can be instructed via language commands or goal images.
