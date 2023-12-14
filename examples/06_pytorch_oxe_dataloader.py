@@ -1,3 +1,8 @@
+"""
+This example shows how to use the `octo.data` dataloader with PyTorch by wrapping it in a simple PyTorch
+dataloader. The config below also happens to be our exact pretraining config (except for the batch size and
+shuffle buffer size, which are reduced for demonstration purposes).
+"""
 import numpy as np
 from orca.data.dataset import make_interleaved_dataset
 from orca.data.oxe import make_oxe_dataset_kwargs_and_weights
