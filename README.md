@@ -1,5 +1,7 @@
 # Octo
-
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1z0vELj_lX9OWeoMG_WvXnQs43aPOEAhz?usp=sharing)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Static Badge](https://img.shields.io/badge/Project-Page-a)](https://octo-models.github.io/)
 ![](https://github.com/rail-berkeley/octo/workflows/run-debug/badge.svg)
 ![](https://github.com/rail-berkeley/octo/workflows/pre-commit/badge.svg)
 
@@ -8,7 +10,8 @@ Octo models are transformer-based diffusion policies, trained on a diverse mix o
 
 ## Get Started
 
-Follow the installation instructions, then load a pre-trained OCTO model! See [examples](examples/) for guides to zero-shot evaluation and finetuning.
+Follow the installation instructions, then load a pre-trained OCTO model! See [examples](examples/) for guides to zero-shot evaluation and finetuning and [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1z0vELj_lX9OWeoMG_WvXnQs43aPOEAhz?usp=sharing)
+for an inference example.
 
 ```
 from octo.model.octo_model import OctoModel
