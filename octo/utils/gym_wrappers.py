@@ -274,7 +274,9 @@ class UnnormalizeActionProprio(gym.ActionWrapper, gym.ObservationWrapper):
         if self.normalization_type == "normal":
             return (data * metadata["std"]) + metadata["mean"]
         elif self.normalization_type == "bounds":
-            return (data * (metadata["max"] - metadata["min"])) + metadata["min"]
+            return (
+                (data + 1) / 2 * (metadata["max"] - metadata["min"] + 1e-8)
+            ) + metadata["min"]
         else:
             raise ValueError(
                 f"Unknown action/proprio normalization type: {self.normalization_type}"
@@ -282,11 +284,14 @@ class UnnormalizeActionProprio(gym.ActionWrapper, gym.ObservationWrapper):
 
     def normalize(self, data, metadata):
         if self.normalization_type == "normal":
-            return (data / (metadata["std"] + 1e-8)) - metadata["mean"]
+            return (data - metadata["mean"]) / (metadata["std"] + 1e-8)
         elif self.normalization_type == "bounds":
             return (
-                (data + 1) / (2 * (metadata["max"] - metadata["min"] + 1e-8))
-            ) + metadata["min"]
+                2
+                * (data - metadata["min"])
+                / (metadata["max"] - metadata["min"] + 1e-8)
+                - 1
+            )
         else:
             raise ValueError(
                 f"Unknown action/proprio normalization type: {self.normalization_type}"
