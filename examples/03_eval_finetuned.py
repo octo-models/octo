@@ -61,9 +61,6 @@ def main(_):
         env, model.dataset_statistics, normalization_type="normal"
     )
 
-    # jit model action prediction function for faster inference
-    policy_fn = jax.jit(model.sample_actions)
-
     # running rollouts
     for _ in range(3):
         obs, info = env.reset()
@@ -77,7 +74,7 @@ def main(_):
         episode_return = 0.0
         while len(images) < 400:
             # model returns actions of shape [batch, pred_horizon, action_dim] -- remove batch
-            actions = policy_fn(
+            actions = model.sample_actions(
                 jax.tree_map(lambda x: x[None], obs), task, rng=jax.random.PRNGKey(0)
             )
             actions = actions[0]
