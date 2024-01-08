@@ -24,7 +24,6 @@ from widowx_envs.widowx_env_service import WidowXClient, WidowXConfigs, WidowXSt
 from octo.model.octo_model import OctoModel
 from octo.utils.gym_wrappers import (
     HistoryWrapper,
-    RHCWrapper,
     TemporalEnsembleWrapper,
     UnnormalizeActionProprio,
 )
@@ -113,6 +112,7 @@ def main(_):
     )
     env = HistoryWrapper(env, FLAGS.horizon)
     env = TemporalEnsembleWrapper(env, FLAGS.pred_horizon)
+    # switch TemporalEnsembleWrapper with RHCWrapper for receding horizon control
     # env = RHCWrapper(env, FLAGS.exec_horizon)
 
     # create policy function
