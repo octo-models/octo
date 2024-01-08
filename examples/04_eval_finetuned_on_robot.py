@@ -22,7 +22,11 @@ import numpy as np
 from widowx_envs.widowx_env_service import WidowXClient, WidowXConfigs, WidowXStatus
 
 from octo.model.octo_model import OctoModel
-from octo.utils.gym_wrappers import HistoryWrapper, RHCWrapper, UnnormalizeActionProprio
+from octo.utils.gym_wrappers import (
+    HistoryWrapper,
+    TemporalEnsembleWrapper,
+    UnnormalizeActionProprio,
+)
 
 np.set_printoptions(suppress=True)
 
@@ -87,7 +91,7 @@ def main(_):
 
     env_params = WidowXConfigs.DefaultEnvParams.copy()
     env_params.update(ENV_PARAMS)
-    env_params["state_state"] = list(start_state)
+    env_params["start_state"] = list(start_state)
     widowx_client = WidowXClient(host=FLAGS.ip, port=FLAGS.port)
     widowx_client.init(env_params, image_size=FLAGS.im_size)
     env = WidowXGym(
@@ -104,12 +108,14 @@ def main(_):
 
     # wrap the robot environment
     env = UnnormalizeActionProprio(
-        env, model.dataset_statistics, normalization_type="normal"
+        env, model.dataset_statistics["bridge_dataset"], normalization_type="normal"
     )
     env = HistoryWrapper(env, FLAGS.horizon)
-    env = RHCWrapper(env, FLAGS.exec_horizon)
+    env = TemporalEnsembleWrapper(env, FLAGS.pred_horizon)
+    # switch TemporalEnsembleWrapper with RHCWrapper for receding horizon control
+    # env = RHCWrapper(env, FLAGS.exec_horizon)
 
-    # create policy functions
+    # create policy function
     @jax.jit
     def sample_actions(
         pretrained_model: OctoModel,
@@ -127,11 +133,19 @@ def main(_):
         # remove batch dim
         return actions[0]
 
-    policy_fn = partial(
-        sample_actions,
-        model,
-        argmax=FLAGS.deterministic,
-        temperature=FLAGS.temperature,
+    def supply_rng(f, rng=jax.random.PRNGKey(0)):
+        def wrapped(*args, **kwargs):
+            nonlocal rng
+            rng, key = jax.random.split(rng)
+            return f(*args, rng=key, **kwargs)
+
+        return wrapped
+
+    policy_fn = supply_rng(
+        partial(
+            sample_actions,
+            model,
+        )
     )
 
     goal_image = jnp.zeros((FLAGS.im_size, FLAGS.im_size, 3), dtype=np.uint8)
@@ -177,11 +191,11 @@ def main(_):
         else:
             raise NotImplementedError()
 
+        input("Press [Enter] to start.")
+
         # reset env
         obs, _ = env.reset()
         time.sleep(2.0)
-
-        input("Press [Enter] to start.")
 
         # do rollout
         last_tstep = time.time()

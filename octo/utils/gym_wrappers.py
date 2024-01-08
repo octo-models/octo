@@ -222,10 +222,11 @@ class ResizeImageWrapper(gym.ObservationWrapper):
             self.observation_space, gym.spaces.Dict
         ), "Only Dict observation spaces are supported."
         spaces = self.observation_space.spaces
+        self.resize_size = resize_size
 
         if resize_size is None:
             self.keys_to_resize = {}
-        elif isinstance(self.resize_size, tuple):
+        elif isinstance(resize_size, tuple):
             self.keys_to_resize = {k: resize_size for k in spaces if "image_" in k}
         else:
             self.keys_to_resize = {
