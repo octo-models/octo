@@ -15,16 +15,18 @@ To run this script, run:
     cd examples
     python3 03_eval_finetuned.py --filetuned_path=<path_to_finetuned_aloha_checkpoint>
 """
+import sys
+
 from absl import app, flags, logging
 import gym
 import jax
 import numpy as np
-import sys
 import wandb
 
 sys.path.append("path/to/your/act")
 
-from envs.aloha_sim_env import AlohaGymEnv      # keep this to register ALOHA sim env
+from envs.aloha_sim_env import AlohaGymEnv  # keep this to register ALOHA sim env
+
 from octo.model.octo_model import OctoModel
 from octo.utils.gym_wrappers import HistoryWrapper, RHCWrapper, UnnormalizeActionProprio
 
