@@ -4,8 +4,8 @@ dataloader. The config below also happens to be our exact pretraining config (ex
 shuffle buffer size, which are reduced for demonstration purposes).
 """
 import numpy as np
-from orca.data.dataset import make_interleaved_dataset
-from orca.data.oxe import make_oxe_dataset_kwargs_and_weights
+from octo.data.dataset import make_interleaved_dataset
+from octo.data.oxe import make_oxe_dataset_kwargs_and_weights
 import tensorflow as tf
 import torch
 from torch.utils.data import DataLoader
