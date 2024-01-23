@@ -6,15 +6,26 @@ For installing the ALOHA sim environment, clone: https://github.com/tonyzhaozh/a
 Then run:
 pip3 install opencv-python modern_robotics pyrealsense2 h5py_cache pyquaternion pyyaml rospkg pexpect mujoco==2.3.3 dm_control==1.0.9 einops packaging h5py
 
-Finally modify the sys.path.append statement below to add the ACT repo to your path and start a virtual display:
+Finally, modify the `sys.path.append` statement below to add the ACT repo to your path.
+If you are running this on a head-less server, start a virtual display:
     Xvfb :1 -screen 0 1024x768x16 &
     export DISPLAY=:1
+
+To run this script, run:
+    cd examples
+    python3 03_eval_finetuned.py --filetuned_path=<path_to_finetuned_aloha_checkpoint>
 """
+import sys
+
 from absl import app, flags, logging
 import gym
 import jax
 import numpy as np
 import wandb
+
+sys.path.append("path/to/your/act")
+
+from envs.aloha_sim_env import AlohaGymEnv  # keep this to register ALOHA sim env
 
 from octo.model.octo_model import OctoModel
 from octo.utils.gym_wrappers import HistoryWrapper, RHCWrapper, UnnormalizeActionProprio
