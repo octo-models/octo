@@ -41,14 +41,14 @@ def convert_obs(obs, im_size):
     proprio = np.concatenate([obs["state"][:6], [0], obs["state"][-1:]])
     # NOTE: assume image_1 is not available
     return {
-        "image_0": image_obs,
+        "image_primary": image_obs,
         "proprio": proprio,
     }
 
 
 def null_obs(img_size):
     return {
-        "image_0": np.zeros((img_size, img_size, 3), dtype=np.uint8),
+        "image_primary": np.zeros((img_size, img_size, 3), dtype=np.uint8),
         "proprio": np.zeros((8,), dtype=np.float64),
     }
 
@@ -72,7 +72,7 @@ class WidowXGym(gym.Env):
         self.blocking = blocking
         self.observation_space = gym.spaces.Dict(
             {
-                "image_0": gym.spaces.Box(
+                "image_primary": gym.spaces.Box(
                     low=np.zeros((im_size, im_size, 3)),
                     high=255 * np.ones((im_size, im_size, 3)),
                     dtype=np.uint8,
