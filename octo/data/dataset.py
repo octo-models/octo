@@ -15,7 +15,7 @@ from octo.data.utils.data_utils import (
     allocate_threads,
     get_dataset_statistics,
     NormalizationType,
-    normalize_action_and_proprio,
+    normalize_traj_keys,
     pprint_data_mixture,
     tree_map,
 )
@@ -209,6 +209,7 @@ def make_dataset_from_rlds(
     state_obs_keys: Sequence[Optional[str]] = (),
     language_key: Optional[str] = None,
     action_proprio_normalization_type: NormalizationType = NormalizationType.NORMAL,
+    keys_to_normalize: Optional[dict] = None,
     dataset_statistics: Optional[Union[dict, str]] = None,
     absolute_action_mask: Optional[Sequence[bool]] = None,
     action_normalization_mask: Optional[Sequence[bool]] = None,
@@ -408,9 +409,10 @@ def make_dataset_from_rlds(
     dataset = dataset.traj_map(restructure, num_parallel_calls)
     dataset = dataset.traj_map(
         partial(
-            normalize_action_and_proprio,
+            normalize_traj_keys,
             metadata=dataset_statistics,
             normalization_type=action_proprio_normalization_type,
+            keys_to_normalize=keys_to_normalize,
         ),
         num_parallel_calls,
     )

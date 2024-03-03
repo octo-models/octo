@@ -181,15 +181,16 @@ def get_dataset_statistics(
     return metadata
 
 
-def normalize_action_and_proprio(
-    traj: dict, metadata: dict, normalization_type: NormalizationType
+def normalize_traj_keys(
+    traj: dict, metadata: dict, normalization_type: NormalizationType, keys_to_normalize=None
 ):
-    """Normalizes the action and proprio fields of a trajectory using the given metadata."""
+    """Normalizes the specified fields of a trajectory using the given metadata."""
     # maps keys of `metadata` to corresponding keys in `traj`
-    keys_to_normalize = {
-        "action": "action",
-        "proprio": "observation/proprio",
-    }
+    if keys_to_normalize is None:
+        keys_to_normalize = {
+            "action": "action",
+            "proprio": "observation/proprio",
+        }
     if normalization_type == NormalizationType.NORMAL:
         # normalize to mean 0, std 1
         for key, traj_key in keys_to_normalize.items():
