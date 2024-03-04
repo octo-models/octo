@@ -8,6 +8,7 @@ import dlimp as dl
 import numpy as np
 import tensorflow as tf
 import tensorflow_datasets as tfds
+import copy
 
 from octo.data import obs_transforms, traj_transforms
 from octo.data.utils import goal_relabeling, task_augmentation
@@ -501,6 +502,48 @@ def make_interleaved_dataset(
         dataset_sizes.append(dataset_statistics["num_transitions"])
         all_dataset_statistics.append(dataset_statistics)
 
+    # Get combined dataset_statistics
+    traj_keys = ['action', 'proprio'] # TODO(don't hardocde)
+    combined_dataset_statistics = copy.deepcopy(all_dataset_statistics[0])
+    for i, stat_dict in enumerate(all_dataset_statistics):
+        for traj_key in traj_keys:
+            combined_dataset_statistics[traj_key]['min'] = np.array(combined_dataset_statistics[traj_key]['min'])
+            combined_dataset_statistics[traj_key]['max'] = np.array(combined_dataset_statistics[traj_key]['max'])
+            combined_dataset_statistics[traj_key]['mean'] = np.zeros(len(combined_dataset_statistics[traj_key]['mean']))
+            combined_dataset_statistics[traj_key]['std'] = np.zeros(len(combined_dataset_statistics[traj_key]['std']))
+
+            all_dataset_statistics[i][traj_key]['min'] = np.array(stat_dict[traj_key]['min'])
+            all_dataset_statistics[i][traj_key]['max'] = np.array(stat_dict[traj_key]['max'])
+            all_dataset_statistics[i][traj_key]['mean'] = np.array(stat_dict[traj_key]['mean'])
+            all_dataset_statistics[i][traj_key]['std'] = np.array(stat_dict[traj_key]['std'])
+
+    total_transitions = 0
+    total_trajectories = 0
+    for stat_dict in all_dataset_statistics:
+        for traj_key in traj_keys:
+            combined_dataset_statistics[traj_key]['min'] = np.minimum(combined_dataset_statistics[traj_key]['min'],
+                                                                stat_dict[traj_key]['min'])
+            combined_dataset_statistics[traj_key]['max'] = np.maximum(combined_dataset_statistics[traj_key]['max'],
+                                                                stat_dict[traj_key]['max'])
+            combined_dataset_statistics[traj_key]['mean'] += stat_dict['num_transitions'] * stat_dict[traj_key]['mean']
+            total_transitions += stat_dict['num_transitions']
+            total_trajectories += stat_dict['num_trajectories']
+
+    combined_dataset_statistics['num_transitions'] = total_transitions
+    combined_dataset_statistics['num_trajectories'] = total_trajectories
+
+    for traj_key in traj_keys:
+        combined_dataset_statistics[traj_key]['mean'] /= total_transitions
+
+    for stat_dict in all_dataset_statistics:
+        for traj_key in traj_keys:
+            combined_dataset_statistics[traj_key]['std'] += ((stat_dict['num_transitions'] - 1) * stat_dict[traj_key]['std']**2)
+            combined_dataset_statistics[traj_key]['std'] += (stat_dict['num_transitions'] *  (stat_dict[traj_key]['mean'] - combined_dataset_statistics[traj_key]['mean'])**2)
+
+    for traj_key in traj_keys:
+        combined_dataset_statistics[traj_key]['std'] /= (total_transitions - 1)
+
+
     # balance and normalize weights
     if balance_weights:
         sample_weights = np.array(sample_weights) * np.array(dataset_sizes)
@@ -516,9 +559,8 @@ def make_interleaved_dataset(
 
     # construct datasets
     datasets = []
-    for dataset_kwargs, dataset_statistics, threads, reads in zip(
+    for dataset_kwargs, threads, reads in zip(
         dataset_kwargs_list,
-        all_dataset_statistics,
         threads_per_dataset,
         reads_per_dataset,
     ):
@@ -527,7 +569,7 @@ def make_interleaved_dataset(
             train=train,
             num_parallel_calls=threads,
             num_parallel_reads=reads,
-            dataset_statistics=dataset_statistics,
+            dataset_statistics=combined_dataset_statistics,
         )
         dataset = apply_trajectory_transforms(
             dataset.repeat(),
@@ -553,6 +595,6 @@ def make_interleaved_dataset(
     dataset = dataset.with_ram_budget(1)
 
     # save for later
-    dataset.dataset_statistics = all_dataset_statistics
+    dataset.dataset_statistics = combined_dataset_statistics
     dataset.sample_weights = sample_weights
     return dataset
