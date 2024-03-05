@@ -13,7 +13,7 @@ If you are running this on a head-less server, start a virtual display:
 
 To run this script, run:
     cd examples
-    python3 03_eval_finetuned.py --filetuned_path=<path_to_finetuned_aloha_checkpoint>
+    python3 03_eval_finetuned.py --finetuned_path=<path_to_finetuned_aloha_checkpoint>
 """
 import sys
 
