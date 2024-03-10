@@ -39,7 +39,7 @@ class TorchRLDSDataset(torch.utils.data.IterableDataset):
             ]
         )
         if hasattr(self._rlds_dataset, "sample_weights"):
-            lengths *= np.array(self._rlds_dataset.sample_weights)
+            lengths = np.array(self._rlds_dataset.sample_weights) * lengths
         total_len = lengths.sum()
         if self._is_train:
             return int(0.95 * total_len)
