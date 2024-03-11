@@ -532,7 +532,9 @@ def make_interleaved_dataset(
             train=train,
             num_parallel_calls=threads,
             num_parallel_reads=reads,
-            dataset_statistics=dataset_statistics if dataset_statistics is not None else data_stats,
+            dataset_statistics=dataset_statistics
+            if dataset_statistics is not None
+            else data_stats,
         )
         dataset = apply_trajectory_transforms(
             dataset.repeat(),
@@ -559,6 +561,7 @@ def make_interleaved_dataset(
 
     # save for later
     dataset.dataset_statistics = (
-        dataset_statistics if dataset_statistics is not None else all_dataset_statistics)
+        dataset_statistics if dataset_statistics is not None else all_dataset_statistics
+    )
     dataset.sample_weights = sample_weights
     return dataset

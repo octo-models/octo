@@ -3,7 +3,7 @@ import hashlib
 import json
 import logging
 import os
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import dlimp as dl
 import numpy as np
@@ -189,26 +189,37 @@ def combine_dataset_statistics(
 
     num_trajectories = [stat["num_trajectories"] for stat in all_dataset_statistics]
     num_transitions = [stat["num_transitions"] for stat in all_dataset_statistics]
-    stat_weights = [transitions / sum(num_transitions) for transitions in num_transitions]
+    stat_weights = [
+        transitions / sum(num_transitions) for transitions in num_transitions
+    ]
 
     combined_dataset_statistics = {}
     for key in merge_stat_keys:
         combined_mean = np.array(
-            [stat[key]["mean"] * w for stat, w in zip(all_dataset_statistics, stat_weights)]
+            [
+                stat[key]["mean"] * w
+                for stat, w in zip(all_dataset_statistics, stat_weights)
+            ]
         ).sum(0)
         # compute combined_std for denominator `n` instead of `n-1` since numpy uses that by default for std
         # https://stats.stackexchange.com/questions/55999/is-it-possible-to-find-the-combined-standard-deviation
         combined_std = (
             np.array(
                 [
-                    n * np.array(stat[key]["std"])**2 + n * (np.array(stat[key]["mean"]) - combined_mean)**2
+                    n * np.array(stat[key]["std"]) ** 2
+                    + n * (np.array(stat[key]["mean"]) - combined_mean) ** 2
                     for stat, n in zip(combined_dataset_statistics, num_transitions)
                 ]
-            ).sum(0) / sum(num_transitions)
+            ).sum(0)
+            / sum(num_transitions)
         ).sqrt()
         combined_dataset_statistics[key] = {
-            "min": np.array([stat[key]["min"] for stat in all_dataset_statistics]).min(0).to_list(),
-            "max": np.array([stat[key]["max"] for stat in all_dataset_statistics]).max(0).to_list(),
+            "min": np.array([stat[key]["min"] for stat in all_dataset_statistics])
+            .min(0)
+            .to_list(),
+            "max": np.array([stat[key]["max"] for stat in all_dataset_statistics])
+            .max(0)
+            .to_list(),
             "mean": combined_mean.to_list(),
             "std": combined_std.to_list(),
         }
@@ -230,8 +241,10 @@ def normalize_action_and_proprio(
     if skip_keys is not None:
         for skip_key in skip_keys:
             if skip_key not in keys_to_normalize:
-                raise ValueError(f"{skip_key} cannot be skipped during normalization since it's not a valid key, "
-                                 f"choose from {keys_to_normalize.keys()}")
+                raise ValueError(
+                    f"{skip_key} cannot be skipped during normalization since it's not a valid key, "
+                    f"choose from {keys_to_normalize.keys()}"
+                )
             keys_to_normalize.pop(skip_key)
 
     if normalization_type == NormalizationType.NORMAL:
