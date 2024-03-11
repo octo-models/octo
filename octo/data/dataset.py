@@ -212,6 +212,7 @@ def make_dataset_from_rlds(
     dataset_statistics: Optional[Union[dict, str]] = None,
     absolute_action_mask: Optional[Sequence[bool]] = None,
     action_normalization_mask: Optional[Sequence[bool]] = None,
+    norm_skip_keys: Optional[Sequence[str]] = None,
     num_parallel_reads: int = tf.data.AUTOTUNE,
     num_parallel_calls: int = tf.data.AUTOTUNE,
 ) -> Tuple[dl.DLataset, dict]:
@@ -272,6 +273,7 @@ def make_dataset_from_rlds(
         action_normalization_mask (Sequence[bool], optional): If provided, indicates which action dimensions
             should be normalized. For example, you might not want to normalize the gripper action dimension if
             it's always exactly 0 or 1. By default, all action dimensions are normalized.
+        norm_skip_keys (Sequence[str], optional): Provided keys will be skipped during normalization.
         num_parallel_reads (int): number of parallel read workers. Default to AUTOTUNE.
         num_parallel_calls (int): number of parallel calls for traj_map operations. Default to AUTOTUNE.
     Returns:
@@ -411,6 +413,7 @@ def make_dataset_from_rlds(
             normalize_action_and_proprio,
             metadata=dataset_statistics,
             normalization_type=action_proprio_normalization_type,
+            skip_keys=norm_skip_keys,
         ),
         num_parallel_calls,
     )
@@ -456,6 +459,7 @@ def make_interleaved_dataset(
     shuffle_buffer_size: int,
     traj_transform_kwargs: dict = {},
     frame_transform_kwargs: dict = {},
+    dataset_statistics: Optional[Union[dict, str]] = None,
     batch_size: Optional[int] = None,
     balance_weights: bool = False,
     traj_transform_threads: Optional[int] = None,
@@ -473,6 +477,9 @@ def make_interleaved_dataset(
         traj_transform_kwargs: kwargs passed to `apply_trajectory_transforms`. "num_parallel_calls" is
             overidden using `traj_transform_threads`.
         frame_transform_kwargs: kwargs passed to `apply_frame_transforms`.
+        dataset_statistics: (dict|str, optional): dict (or path to JSON file) that contains dataset statistics
+            for normalization, see `make_dataset_from_rlds` for details. If set, applies *the same* normalization
+            statistics to all interleaved datasets. By default, each dataset is normalized by its own statistics.
         batch_size: batch size, if not provided output is not batched.
         balance_weights: if True, the sample weights are multiplied by the number of frames in each dataset.
             This makes it so that, if all the sample weights are equal, one full iteration through the interleaved
@@ -495,9 +502,9 @@ def make_interleaved_dataset(
     dataset_sizes = []
     all_dataset_statistics = []
     for dataset_kwargs in dataset_kwargs_list:
-        _, dataset_statistics = make_dataset_from_rlds(**dataset_kwargs, train=train)
-        dataset_sizes.append(dataset_statistics["num_transitions"])
-        all_dataset_statistics.append(dataset_statistics)
+        _, data_stats = make_dataset_from_rlds(**dataset_kwargs, train=train)
+        dataset_sizes.append(data_stats["num_transitions"])
+        all_dataset_statistics.append(data_stats)
 
     # balance and normalize weights
     if balance_weights:
@@ -514,7 +521,7 @@ def make_interleaved_dataset(
 
     # construct datasets
     datasets = []
-    for dataset_kwargs, dataset_statistics, threads, reads in zip(
+    for dataset_kwargs, data_stats, threads, reads in zip(
         dataset_kwargs_list,
         all_dataset_statistics,
         threads_per_dataset,
@@ -525,7 +532,7 @@ def make_interleaved_dataset(
             train=train,
             num_parallel_calls=threads,
             num_parallel_reads=reads,
-            dataset_statistics=dataset_statistics,
+            dataset_statistics=dataset_statistics if dataset_statistics is not None else data_stats,
         )
         dataset = apply_trajectory_transforms(
             dataset.repeat(),
@@ -551,6 +558,7 @@ def make_interleaved_dataset(
     dataset = dataset.with_ram_budget(1)
 
     # save for later
-    dataset.dataset_statistics = all_dataset_statistics
+    dataset.dataset_statistics = (
+        dataset_statistics if dataset_statistics is not None else all_dataset_statistics)
     dataset.sample_weights = sample_weights
     return dataset
