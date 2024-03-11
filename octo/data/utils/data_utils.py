@@ -203,25 +203,25 @@ def combine_dataset_statistics(
         ).sum(0)
         # compute combined_std for denominator `n` instead of `n-1` since numpy uses that by default for std
         # https://stats.stackexchange.com/questions/55999/is-it-possible-to-find-the-combined-standard-deviation
-        combined_std = (
+        combined_std = np.sqrt(
             np.array(
                 [
                     n * np.array(stat[key]["std"]) ** 2
                     + n * (np.array(stat[key]["mean"]) - combined_mean) ** 2
-                    for stat, n in zip(combined_dataset_statistics, num_transitions)
+                    for stat, n in zip(all_dataset_statistics, num_transitions)
                 ]
             ).sum(0)
             / sum(num_transitions)
-        ).sqrt()
+        )
         combined_dataset_statistics[key] = {
             "min": np.array([stat[key]["min"] for stat in all_dataset_statistics])
             .min(0)
-            .to_list(),
+            .tolist(),
             "max": np.array([stat[key]["max"] for stat in all_dataset_statistics])
             .max(0)
-            .to_list(),
-            "mean": combined_mean.to_list(),
-            "std": combined_std.to_list(),
+            .tolist(),
+            "mean": combined_mean.tolist(),
+            "std": combined_std.tolist(),
         }
 
     combined_dataset_statistics["num_trajectories"] = num_trajectories
