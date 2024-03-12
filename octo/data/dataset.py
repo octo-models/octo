@@ -19,6 +19,7 @@ from octo.data.utils.data_utils import (
     pprint_data_mixture,
     tree_map,
 )
+from octo.utils.spec import ModuleSpec
 
 
 def apply_trajectory_transforms(
@@ -213,6 +214,7 @@ def make_dataset_from_rlds(
     absolute_action_mask: Optional[Sequence[bool]] = None,
     action_normalization_mask: Optional[Sequence[bool]] = None,
     norm_skip_keys: Optional[Sequence[str]] = None,
+    filter_functions: Sequence[ModuleSpec] = (),
     num_parallel_reads: int = tf.data.AUTOTUNE,
     num_parallel_calls: int = tf.data.AUTOTUNE,
 ) -> Tuple[dl.DLataset, dict]:
@@ -274,6 +276,8 @@ def make_dataset_from_rlds(
             should be normalized. For example, you might not want to normalize the gripper action dimension if
             it's always exactly 0 or 1. By default, all action dimensions are normalized.
         norm_skip_keys (Sequence[str], optional): Provided keys will be skipped during normalization.
+        filter_functions (Sequence[ModuleSpec]): ModuleSpecs for filtering functions applied to the
+            raw dataset.
         num_parallel_reads (int): number of parallel read workers. Default to AUTOTUNE.
         num_parallel_calls (int): number of parallel calls for traj_map operations. Default to AUTOTUNE.
     Returns:
@@ -372,7 +376,10 @@ def make_dataset_from_rlds(
     elif dataset_statistics is None:
         full_dataset = dl.DLataset.from_rlds(
             builder, split="all", shuffle=False, num_parallel_reads=num_parallel_reads
-        ).traj_map(restructure, num_parallel_calls)
+        )
+        for filter_fcn_spec in filter_functions:
+            full_dataset = full_dataset.filter(ModuleSpec.instantiate(filter_fcn_spec))
+        full_dataset = full_dataset.traj_map(restructure, num_parallel_calls)
         # tries to load from cache, otherwise computes on the fly
         dataset_statistics = get_dataset_statistics(
             full_dataset,
@@ -380,6 +387,7 @@ def make_dataset_from_rlds(
                 str(builder.info),
                 str(state_obs_keys),
                 inspect.getsource(standardize_fn) if standardize_fn is not None else "",
+                *map(ModuleSpec.to_string, filter_functions),
             ),
             save_dir=builder.data_dir,
         )
@@ -406,7 +414,8 @@ def make_dataset_from_rlds(
     dataset = dl.DLataset.from_rlds(
         builder, split=split, shuffle=shuffle, num_parallel_reads=num_parallel_reads
     )
-
+    for filter_fcn_spec in filter_functions:
+        dataset = dataset.filter(ModuleSpec.instantiate(filter_fcn_spec))
     dataset = dataset.traj_map(restructure, num_parallel_calls)
     dataset = dataset.traj_map(
         partial(

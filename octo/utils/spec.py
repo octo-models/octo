@@ -66,6 +66,15 @@ class ModuleSpec(TypedDict):
         cls = _import_from_string(spec["module"], spec["name"])
         return partial(cls, *spec["args"], **spec["kwargs"])
 
+    @staticmethod
+    def to_string(spec: "ModuleSpec"):  # type: ignore
+        return (
+            f"{spec['module']}:{spec['name']}"
+            f"({', '.join(spec['args'])}"
+            f"{', ' if spec['args'] and spec['kwargs'] else ''}"
+            f"{', '.join(f'{k}={v}' for k, v in spec['kwargs'].items())})"
+        )
+
 
 def _infer_full_name(o: object):
     if hasattr(o, "__module__") and hasattr(o, "__name__"):
