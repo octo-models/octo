@@ -336,6 +336,7 @@ def make_dataset_from_rlds(
 
         # add timestep info
         new_obs["timestep"] = tf.range(traj_len)
+        new_obs['next_action'] = old_obs['next_action']
 
         # extracts `language_key` into the "task" dict
         task = {}
@@ -380,6 +381,7 @@ def make_dataset_from_rlds(
         for filter_fcn_spec in filter_functions:
             full_dataset = full_dataset.filter(ModuleSpec.instantiate(filter_fcn_spec))
         full_dataset = full_dataset.traj_map(restructure, num_parallel_calls)
+
         # tries to load from cache, otherwise computes on the fly
         dataset_statistics = get_dataset_statistics(
             full_dataset,
