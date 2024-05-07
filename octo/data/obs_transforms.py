@@ -38,6 +38,7 @@ def augment(
 
     return obs
 
+
 def image_dropout(
     obs: dict,
     seed: tf.Tensor,
@@ -91,6 +92,7 @@ def image_dropout(
             lambda: tf.zeros_like(obs[key]),
         )
     return obs
+
 
 def decode_and_resize(
     obs: dict,
