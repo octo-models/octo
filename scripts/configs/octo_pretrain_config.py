@@ -116,6 +116,11 @@ def get_config(config_string=None):
             ),
             traj_transform_kwargs=dict(
                 future_action_window_size=3,
+                task_augment_strategy="delete_and_rephrase",
+                task_augment_kwargs=dict(
+                    pickle_file_path="gs://rail-datasets-europe-west4/oxe/resize_256_256/paraphrases_oxe.pkl",
+                    rephrase_prob=0.5,
+                ),
             ),
             batch_size=128,
             shuffle_buffer_size=500000,
