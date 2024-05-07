@@ -117,6 +117,9 @@ def get_config(config_string=None):
             traj_transform_kwargs=dict(
                 future_action_window_size=3,
             ),
+            frame_transform_kwargs=dict(
+                image_dropout_prob=0.5,
+            ),
             batch_size=128,
             shuffle_buffer_size=500000,
             balance_weights=True,
