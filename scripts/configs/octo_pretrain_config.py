@@ -123,6 +123,9 @@ def get_config(config_string=None):
                     rephrase_prob=0.5,
                 ),
             ),
+            frame_transform_kwargs=dict(
+                image_dropout_prob=0.5,
+            ),
             batch_size=128,
             shuffle_buffer_size=500000,
             balance_weights=True,
