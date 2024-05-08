@@ -116,6 +116,12 @@ def get_config(config_string=None):
             ),
             traj_transform_kwargs=dict(
                 future_action_window_size=3,
+                task_augment_strategy="delete_and_rephrase",
+                task_augment_kwargs=dict(
+                    paraphrases_repo="rail-berkeley/OXE_paraphrases",
+                    paraphrases_filename="paraphrases_oxe.pkl",
+                    rephrase_prob=0.5,
+                ),
             ),
             frame_transform_kwargs=dict(
                 image_dropout_prob=0.5,
