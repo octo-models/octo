@@ -57,6 +57,7 @@ def get_config(config_string=None):
         use_map=False,
         pred_horizon=4,
         action_dim=7,
+        dropout_rate=0.0,
     )
 
     # We augment differently for the primary and wrist cameras
