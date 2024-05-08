@@ -442,7 +442,7 @@ class DiffusionActionHead(nn.Module):
     # diffusion-specific config with sane defaults
     time_dim: int = 32
     num_blocks: int = 3
-    dropout_rate: float = 0.1
+    dropout_rate: float = 0.0
     hidden_dim: int = 256
     use_layer_norm: bool = True
     diffusion_steps: int = 20
