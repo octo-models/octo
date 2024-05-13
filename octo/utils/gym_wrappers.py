@@ -4,12 +4,11 @@ from typing import Optional, Sequence, Tuple, Union
 
 import gym
 import gym.spaces
-import jax
 import numpy as np
 import tensorflow as tf
 
 
-def stack_and_pad(history: list, num_obs: int):
+def stack_and_pad(history: deque, num_obs: int):
     """
     Converts a list of observation dictionaries (`history`) into a single observation dictionary
     by stacking the values. Adds a padding mask to the observation that denotes which timesteps
@@ -18,9 +17,9 @@ def stack_and_pad(history: list, num_obs: int):
     horizon = len(history)
     full_obs = {k: np.stack([dic[k] for dic in history]) for k in history[0]}
     pad_length = horizon - min(num_obs, horizon)
-    pad_mask = np.ones(horizon)
-    pad_mask[:pad_length] = 0
-    full_obs["pad_mask"] = pad_mask
+    timestep_pad_mask = np.ones(horizon)
+    timestep_pad_mask[:pad_length] = 0
+    full_obs["timestep_pad_mask"] = timestep_pad_mask
     return full_obs
 
 
@@ -51,7 +50,9 @@ def listdict2dictlist(LD):
 
 
 def add_octo_env_wrappers(
-    env: gym.Env, config: dict, dataset_statistics: dict, **kwargs
+    env: gym.Env,
+    config: dict,
+    **kwargs,
 ):
     """Adds env wrappers for action normalization, multi-action
     future prediction, image resizing, and history stacking.
@@ -63,22 +64,10 @@ def add_octo_env_wrappers(
         config: PretrainedModel.config
         dataset_statistics: from PretrainedModel.load_dataset_statistics
         # Additional (optional) kwargs
-        normalization_type: str for UnnormalizeActionProprio
         exec_horizon: int for RHCWrapper
         resize_size: None or tuple or list of tuples for ResizeImageWrapper
         horizon: int for HistoryWrapper
     """
-    normalization_type = kwargs.get(
-        "normalization_type",
-        config["dataset_kwargs"]["common_dataset_kwargs"][
-            "action_proprio_normalization_type"
-        ],
-    )
-
-    logging.info(
-        "Unnormalizing proprio and actions w/ statistics: ", dataset_statistics
-    )
-    env = UnnormalizeActionProprio(env, dataset_statistics, normalization_type)
     exec_horizon = kwargs.get(
         "exec_horizon", config["model"]["heads"]["action"]["kwargs"]["pred_horizon"]
     )
@@ -105,7 +94,7 @@ class HistoryWrapper(gym.Wrapper):
     """
     Accumulates the observation history into `horizon` size chunks. If the length of the history
     is less than the length of the horizon, we pad the history to the full horizon length.
-    A `pad_mask` key is added to the final observation dictionary that denotes which timesteps
+    A `timestep_pad_mask` key is added to the final observation dictionary that denotes which timesteps
     are padding.
     """
 
@@ -210,6 +199,10 @@ class TemporalEnsembleWrapper(gym.Wrapper):
 
         return self.env.step(action)
 
+    def reset(self, **kwargs):
+        self.act_history = deque(maxlen=self.pred_horizon)
+        return self.env.reset(**kwargs)
+
 
 class ResizeImageWrapper(gym.ObservationWrapper):
     def __init__(
@@ -250,78 +243,3 @@ class ResizeImageWrapper(gym.ObservationWrapper):
             image = tf.cast(tf.clip_by_value(tf.round(image), 0, 255), tf.uint8).numpy()
             observation[k] = image
         return observation
-
-
-class UnnormalizeActionProprio(gym.ActionWrapper, gym.ObservationWrapper):
-    """
-    Un-normalizes the action and proprio.
-    """
-
-    def __init__(
-        self,
-        env: gym.Env,
-        action_proprio_metadata: dict,
-        normalization_type: str,
-    ):
-        self.action_proprio_metadata = jax.tree_map(
-            lambda x: np.array(x),
-            action_proprio_metadata,
-            is_leaf=lambda x: isinstance(x, list),
-        )
-        self.normalization_type = normalization_type
-        super().__init__(env)
-
-    def unnormalize(self, data, metadata):
-        mask = metadata.get("mask", np.ones_like(metadata["mean"], dtype=bool))
-        if self.normalization_type == "normal":
-            return np.where(
-                mask,
-                (data * metadata["std"]) + metadata["mean"],
-                data,
-            )
-        elif self.normalization_type == "bounds":
-            return np.where(
-                mask,
-                ((data + 1) / 2 * (metadata["max"] - metadata["min"] + 1e-8))
-                + metadata["min"],
-                data,
-            )
-        else:
-            raise ValueError(
-                f"Unknown action/proprio normalization type: {self.normalization_type}"
-            )
-
-    def normalize(self, data, metadata):
-        mask = metadata.get("mask", np.ones_like(metadata["mean"], dtype=bool))
-        if self.normalization_type == "normal":
-            return np.where(
-                mask,
-                (data - metadata["mean"]) / (metadata["std"] + 1e-8),
-                data,
-            )
-        elif self.normalization_type == "bounds":
-            return np.where(
-                mask,
-                np.clip(
-                    2
-                    * (data - metadata["min"])
-                    / (metadata["max"] - metadata["min"] + 1e-8)
-                    - 1,
-                    -1,
-                    1,
-                ),
-                data,
-            )
-        else:
-            raise ValueError(
-                f"Unknown action/proprio normalization type: {self.normalization_type}"
-            )
-
-    def action(self, action):
-        return self.unnormalize(action, self.action_proprio_metadata["action"])
-
-    def observation(self, obs):
-        obs["proprio"] = self.normalize(
-            obs["proprio"], self.action_proprio_metadata["proprio"]
-        )
-        return obs

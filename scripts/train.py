@@ -53,13 +53,12 @@ config_flags.DEFINE_config_file(
     lock_config=False,
 )
 
-NUM_ACTIONS_FOR_VIS = 8
-
 
 def main(_):
     jax_utils.initialize_compilation_cache()
 
     assert FLAGS.config.dataset_kwargs.batch_size % jax.device_count() == 0
+    assert FLAGS.config.dataset_kwargs.batch_size % jax.process_count() == 0
 
     # create a 1D mesh with a single axis named "batch"
     mesh = Mesh(jax.devices(), axis_names="batch")
@@ -107,6 +106,8 @@ def main(_):
                 wandb_id,
             )
             logging.info("Saving to %s", save_dir)
+            if jax.process_index() == 0:
+                wandb.config.update(dict(save_dir=save_dir), allow_val_change=True)
         else:
             save_dir = None
             logging.info("save_dir not passed in, not saving checkpoints")
@@ -150,16 +151,8 @@ def main(_):
         )
         del FLAGS.config.dataset_kwargs["oxe_kwargs"]
 
+    FLAGS.config.dataset_kwargs.batch_size //= jax.process_count()
     train_data = make_interleaved_dataset(**FLAGS.config.dataset_kwargs, train=True)
-
-    # consolidate dataset statistics into one big dict
-    dataset_statistics = {
-        dataset_kwargs["name"]: statistics
-        for dataset_kwargs, statistics in zip(
-            FLAGS.config.dataset_kwargs["dataset_kwargs_list"],
-            train_data.dataset_statistics,
-        )
-    }
 
     train_data_iter = map(
         shard,
@@ -185,7 +178,7 @@ def main(_):
         text_processor,
         verbose=True,
         rng=init_rng,
-        dataset_statistics=dataset_statistics,
+        dataset_statistics=train_data.dataset_statistics,
     )
 
     # create optimizer
@@ -218,21 +211,22 @@ def main(_):
         start_step = FLAGS.config.start_step or 0
     train_state = train_state.replace(step=start_step)
 
-    # replicate train state across devices
-    train_state = jax_utils.replicate(train_state)
+    # refreshes the train state so it doesn't crash w/ certain pre-trained loaders
+    train_state = jax.device_get(train_state)
 
     def loss_fn(params, batch, rng, train=True):
         bound_module = model.module.bind({"params": params}, rngs={"dropout": rng})
         transformer_embeddings = bound_module.octo_transformer(
             batch["observation"],
             batch["task"],
-            batch["observation"]["pad_mask"],
+            batch["observation"]["timestep_pad_mask"],
             train=train,
         )
         action_loss, action_metrics = bound_module.heads["action"].loss(
             transformer_embeddings,  # action head knows to pull out the "action" readout_key
             batch["action"],
-            pad_mask=batch["observation"]["pad_mask"],
+            batch["observation"]["timestep_pad_mask"],
+            batch["action_pad_mask"],
             train=train,
         )
         return action_loss, action_metrics
@@ -284,13 +278,14 @@ def main(_):
         **FLAGS.config.viz_kwargs.to_dict(),
     )
     if "rollout_kwargs" in FLAGS.config:
+        rollout_kwargs = FLAGS.config.rollout_kwargs.to_dict()
+        dataset_name = rollout_kwargs.pop("dataset_name")
         rollout_callback = RolloutVisualizationCallback(
             text_processor=text_processor,
-            history_length=FLAGS.config["window_size"],
-            model_pred_horizon=FLAGS.config["model"]["heads"]["action"]["kwargs"].get(
-                "pred_horizon", 1
-            ),
-            **FLAGS.config.rollout_kwargs.to_dict(),
+            unnormalization_statistics=train_data.dataset_statistics[dataset_name][
+                "action"
+            ],
+            **rollout_kwargs,
         )
     else:
         rollout_callback = None

@@ -2,7 +2,7 @@ from copy import deepcopy
 import imp
 import os
 
-from ml_collections import ConfigDict
+from ml_collections import ConfigDict, FieldReference
 
 get_base_config = imp.load_source(
     "config", os.path.join(os.path.dirname(__file__), "config.py")
@@ -26,8 +26,8 @@ def update_config(config, **kwargs):
 def get_config(config_string=None):
     config = get_base_config(config_string)
 
-    config["window_size"] = 2
-    config["num_steps"] = 300000
+    action_dim = FieldReference(7)
+
     config["model"]["observation_tokenizers"] = {
         "primary": ModuleSpec.create(
             ImageTokenizer,
@@ -55,8 +55,9 @@ def get_config(config_string=None):
         DiffusionActionHead,
         readout_key="readout_action",
         use_map=False,
-        pred_horizon=4,
-        action_dim=7,
+        action_horizon=4,
+        action_dim=action_dim,
+        n_diffusion_samples=1,
         dropout_rate=0.0,
     )
 
@@ -98,25 +99,29 @@ def get_config(config_string=None):
         "primary": (256, 256),  # workspace camera is at 256x256
         "wrist": (128, 128),  # wrist camera is at 128x128
     }
-    config["dataset_kwargs"]["frame_transform_kwargs"]["image_augment_kwargs"] = [
-        primary_augment_kwargs,
-        wrist_augment_kwargs,
-    ]
+    config["dataset_kwargs"]["frame_transform_kwargs"]["image_augment_kwargs"] = {
+        "primary": primary_augment_kwargs,
+        "wrist": wrist_augment_kwargs,
+    }
 
     config = update_config(
         config,
+        num_steps=300000,
+        window_size=2,
         optimizer=dict(
             frozen_keys=("*hf_model*",),
         ),
         dataset_kwargs=dict(
             oxe_kwargs=dict(
                 data_mix="oxe_magic_soup",
-                data_dir="gs://rail-octo-central2/resize_256_256",
+                data_dir="gs://rail-orca-central2/resize_256_256",
                 load_camera_views=("primary", "wrist"),
                 load_depth=False,
+                force_recompute_dataset_statistics=False,
             ),
             traj_transform_kwargs=dict(
-                future_action_window_size=3,
+                action_horizon=4,
+                max_action_dim=action_dim,
                 task_augment_strategy="delete_and_rephrase",
                 task_augment_kwargs=dict(
                     paraphrases_repo="rail-berkeley/OXE_paraphrases",
@@ -124,10 +129,7 @@ def get_config(config_string=None):
                     rephrase_prob=0.5,
                 ),
             ),
-            frame_transform_kwargs=dict(
-                image_dropout_prob=0.5,
-            ),
-            batch_size=128,
+            batch_size=512,
             shuffle_buffer_size=500000,
             balance_weights=True,
         ),

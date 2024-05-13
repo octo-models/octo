@@ -1,6 +1,8 @@
 from ml_collections import ConfigDict
 from ml_collections.config_dict import FieldReference, placeholder
 
+from octo.utils.spec import ModuleSpec
+
 
 def get_config(config_string="full,multimodal"):
     mode, task = config_string.split(",")
@@ -17,15 +19,16 @@ def get_config(config_string="full,multimodal"):
         "name": "bridge_dataset",
         "data_dir": "./tests/debug_dataset",
         "image_obs_keys": {"primary": "image_0", "wrist": None},
-        "state_obs_keys": ["state", None],
+        "proprio_obs_key": "proprio",
         "language_key": "language_instruction",
         "action_proprio_normalization_type": "normal",
-        # All actions are relative deltas, except for the last one (gripper) which is absolute
-        # Specifying this is only necessary if you want to predict > 1 step into the future
-        "absolute_action_mask": [False, False, False, False, False, False, True],
+        # We want to avoid normalizing the gripper
+        "action_normalization_mask": [True, True, True, True, True, True, False],
         # standardize_fn is dynamically loaded from a file
         # for example: "experiments/kevin/custom_standardization_transforms.py:aloha_dataset_transform"
-        "standardize_fn": "octo/data/oxe/oxe_standardization_transforms.py:bridge_dataset_transform",
+        "standardize_fn": ModuleSpec.create(
+            "octo.data.oxe.oxe_standardization_transforms:bridge_dataset_transform",
+        ),
         # If the default data loading speed is too slow, try these:
         # "num_parallel_reads": 8,  # for reading from disk / GCS
         # "num_parallel_calls": 16,  # for initial dataset construction
@@ -107,7 +110,7 @@ def get_config(config_string="full,multimodal"):
 
     traj_transform_kwargs = dict(
         window_size=window_size,
-        future_action_window_size=3,
+        action_horizon=4,
         goal_relabeling_strategy=goal_relabeling_strategy,
         task_augment_strategy="delete_task_conditioning",
         task_augment_kwargs=dict(
@@ -147,10 +150,10 @@ def get_config(config_string="full,multimodal"):
             "primary": (256, 256),  # workspace (3rd person) camera is at 256x256
             "wrist": (128, 128),  # wrist camera is at 128x128
         },
-        image_augment_kwargs=[
-            workspace_augment_kwargs,
-            wrist_augment_kwargs,
-        ],
+        image_augment_kwargs=dict(
+            primary=workspace_augment_kwargs,
+            wrist=wrist_augment_kwargs,
+        ),
     )
     # If the default data loading speed is too slow, try these:
     config[

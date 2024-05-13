@@ -15,7 +15,6 @@ import tqdm
 import wandb
 
 from octo.data.dataset import make_single_dataset
-from octo.data.utils.data_utils import NormalizationType
 from octo.model.components.action_heads import L1ActionHead
 from octo.model.components.tokenizers import LowdimObsTokenizer
 from octo.model.octo_model import OctoModel
@@ -70,14 +69,12 @@ def main(_):
             name="aloha_sim_cube_scripted_dataset",
             data_dir=FLAGS.data_dir,
             image_obs_keys={"primary": "top"},
-            state_obs_keys=["state"],
+            proprio_obs_key="state",
             language_key="language_instruction",
-            action_proprio_normalization_type=NormalizationType.NORMAL,
-            absolute_action_mask=[True] * 14,
         ),
         traj_transform_kwargs=dict(
             window_size=1,
-            future_action_window_size=49,  # so we get 50 actions for our action chunk
+            action_horizon=50,
         ),
         frame_transform_kwargs=dict(
             resize_size={"primary": (256, 256)},
@@ -116,10 +113,10 @@ def main(_):
         high=2.0,
         obs_keys=["proprio"],
     )
-    # Fully override the old action head with a new one (for smaller changes, you can use update_module_config)
+    # Fully override the old action head with a new one (for smaller changes, you can use update_config)
     config["model"]["heads"]["action"] = ModuleSpec.create(
         L1ActionHead,
-        pred_horizon=50,
+        action_horizon=50,
         action_dim=14,
         readout_key="readout_action",
     )
@@ -162,13 +159,14 @@ def main(_):
         transformer_embeddings = bound_module.octo_transformer(
             batch["observation"],
             batch["task"],
-            batch["observation"]["pad_mask"],
+            batch["observation"]["timestep_pad_mask"],
             train=train,
         )
         action_loss, action_metrics = bound_module.heads["action"].loss(
             transformer_embeddings,  # Action head knows to pull out the action readout_key
             batch["action"],
-            pad_mask=batch["observation"]["pad_mask"],
+            batch["observation"]["timestep_pad_mask"],
+            batch["action_pad_mask"],
             train=train,
         )
         return action_loss, action_metrics

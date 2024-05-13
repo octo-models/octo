@@ -64,7 +64,7 @@ dataset = make_interleaved_dataset(
     traj_transform_kwargs=dict(
         goal_relabeling_strategy="uniform",
         window_size=2,
-        future_action_window_size=3,
+        action_horizon=4,
         subsample_length=100,
     ),
     frame_transform_kwargs=dict(

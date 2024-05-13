@@ -42,14 +42,12 @@ def convert_obs(obs, im_size):
     # NOTE: assume image_1 is not available
     return {
         "image_primary": image_obs,
-        "proprio": proprio,
     }
 
 
 def null_obs(img_size):
     return {
         "image_primary": np.zeros((img_size, img_size, 3), dtype=np.uint8),
-        "proprio": np.zeros((8,), dtype=np.float64),
     }
 
 
