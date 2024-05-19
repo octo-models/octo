@@ -73,16 +73,6 @@ OXE_DATASET_CONFIGS = {
         "proprio_encoding": ProprioEncoding.POS_EULER,
         "action_encoding": ActionEncoding.EEF_POS,
     },
-    "taco_extra": {
-        "image_obs_keys": {
-            "primary": "rgb_static",
-            "secondary": None,
-            "wrist": "rgb_gripper",
-        },
-        "depth_obs_keys": {"primary": None, "secondary": None, "wrist": None},
-        "proprio_encoding": ProprioEncoding.POS_EULER,
-        "action_encoding": ActionEncoding.EEF_POS,
-    },
     "jaco_play": {
         "image_obs_keys": {
             "primary": "image",

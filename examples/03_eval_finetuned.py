@@ -24,8 +24,7 @@ import jax
 import numpy as np
 import wandb
 
-# sys.path.append("path/to/your/act")
-sys.path.append("/nfs/nfs2/users/homer/act")
+sys.path.append("path/to/your/act")
 
 # keep this to register ALOHA sim env
 from envs.aloha_sim_env import AlohaGymEnv  # noqa
@@ -69,6 +68,7 @@ def main(_):
     env = HistoryWrapper(env, horizon=1)
     env = RHCWrapper(env, exec_horizon=50)
 
+    # the supply_rng wrapper supplies a new random key to sample_actions every time it's called
     policy_fn = supply_rng(
         partial(
             model.sample_actions,

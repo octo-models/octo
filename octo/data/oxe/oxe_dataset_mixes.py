@@ -10,7 +10,6 @@ RT_X_MIX = [
     ("kuka", 0.8341046294),
     ("bridge_dataset", 1.0),
     ("taco_play", 2.0),
-    ("taco_extra", 2.0),
     ("jaco_play", 2.0),
     ("berkeley_cable_routing", 3.0),
     ("roboturk", 1.0),
@@ -49,7 +48,6 @@ OXE_MAGIC_SOUP = [
     ("kuka", 0.8341046294),
     ("bridge_dataset", 1.0),
     ("taco_play", 2.0),
-    ("taco_extra", 2.0),
     ("jaco_play", 1.0),
     ("berkeley_cable_routing", 1.0),
     ("roboturk", 2.0),
@@ -80,7 +78,6 @@ OXE_FLEX_ACT_SOUP = [
     ("kuka", 0.8341046294),
     ("bridge_dataset", 1.0),
     ("taco_play", 2.0),
-    ("taco_extra", 2.0),
     ("jaco_play", 1.0),
     ("berkeley_cable_routing", 1.0),
     ("roboturk", 2.0),
@@ -116,52 +113,11 @@ OXE_FLEX_ACT_SOUP = [
 ]
 
 
-OXE_EXPANDED_SOUP = [
-    ("fractal20220817_data", 0.54087122203),
-    ("kuka", 0.4),
-    ("bridge_dataset", 1.0),
-    ("taco_play", 2.0),
-    ("taco_extra", 2.0),
-    ("jaco_play", 1.0),
-    ("berkeley_cable_routing", 1.0),
-    ("roboturk", 2.0),
-    ("nyu_door_opening_surprising_effectiveness", 1.0),
-    ("viola", 1.0),
-    ("berkeley_autolab_ur5", 2.0),
-    ("toto", 1.0),
-    ("language_table", 0.1),
-    ("stanford_hydra_dataset_converted_externally_to_rlds", 2.0),
-    ("austin_buds_dataset_converted_externally_to_rlds", 1.0),
-    ("nyu_franka_play_dataset_converted_externally_to_rlds", 3.0),
-    ("furniture_bench_dataset_converted_externally_to_rlds", 0.1),
-    # ("ucsd_kitchen_dataset_converted_externally_to_rlds", 2.0), --> weird actions
-    ("austin_sailor_dataset_converted_externally_to_rlds", 1.0),
-    ("austin_sirius_dataset_converted_externally_to_rlds", 1.0),
-    ("bc_z", 0.2),
-    # ("berkeley_mvp_converted_externally_to_rlds", 1.0), # JOINT_POS
-    # ("berkeley_rpt_converted_externally_to_rlds", 1.0), # JOINT_POS
-    ("dlr_edan_shared_control_converted_externally_to_rlds", 1.0),
-    ("iamlab_cmu_pickup_insert_converted_externally_to_rlds", 1.0),
-    # ("uiuc_d3field", 1.0),  --> somehow raw data is broken
-    ("utaustin_mutex", 1.0),
-    ("berkeley_fanuc_manipulation", 2.0),
-    ("cmu_stretch", 1.0),
-    # ("gnm_dataset", 0.5), # NAV_2D
-    # ("aloha_static_dataset", 3.0), # JOINT_POS_BIMANUAL
-    # ("aloha_dagger_dataset", 1.0), # JOINT_POS_BIMANUAL
-    # ("aloha_mobile_dataset", 1.0), # JOINT_POS_BIMANUAL
-    # ("fmb_dataset", 1.0),  --> doesn't exist?
-    ("dobbe", 0.3),
-    # ("roboset", 0.1), # JOINT_POS
-    ("rh20t", 0.1),
-]
-
 OXE_FULL_MIX = [
     ("fractal20220817_data", 1.0),
     ("kuka", 1.0),
     ("bridge_dataset", 1),
     ("taco_play", 1.0),
-    ("taco_extra", 1.0),
     ("jaco_play", 1.0),
     ("berkeley_cable_routing", 1.0),
     ("roboturk", 1.0),
@@ -215,6 +171,5 @@ OXE_NAMED_MIXES = {
     "rtx": RT_X_MIX,
     "rtx_franka": RT_X_MIX + OXE_FRANKA_MIX,
     "oxe_magic_soup": OXE_MAGIC_SOUP,
-    "oxe_expanded_soup": OXE_EXPANDED_SOUP,
     "oxe_flex_act_soup": OXE_FLEX_ACT_SOUP,
 }
