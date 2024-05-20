@@ -49,6 +49,7 @@ def get_config(config_string=None):
             finetune_encoder=False,
         ),
     }
+    config["model"]["repeat_task_tokens"] = True
     config["model"]["readouts"] = {"action": 1}
     config["model"]["heads"]["action"] = ModuleSpec.create(
         DiffusionActionHead,
@@ -56,6 +57,7 @@ def get_config(config_string=None):
         use_map=False,
         pred_horizon=4,
         action_dim=7,
+        dropout_rate=0.0,
     )
 
     # We augment differently for the primary and wrist cameras
@@ -115,6 +117,15 @@ def get_config(config_string=None):
             ),
             traj_transform_kwargs=dict(
                 future_action_window_size=3,
+                task_augment_strategy="delete_and_rephrase",
+                task_augment_kwargs=dict(
+                    paraphrases_repo="rail-berkeley/OXE_paraphrases",
+                    paraphrases_filename="paraphrases_oxe.pkl",
+                    rephrase_prob=0.5,
+                ),
+            ),
+            frame_transform_kwargs=dict(
+                image_dropout_prob=0.5,
             ),
             batch_size=128,
             shuffle_buffer_size=500000,

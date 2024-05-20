@@ -17,7 +17,7 @@ def stack_and_pad(history: list, num_obs: int):
     """
     horizon = len(history)
     full_obs = {k: np.stack([dic[k] for dic in history]) for k in history[0]}
-    pad_length = horizon - max(num_obs, horizon)
+    pad_length = horizon - min(num_obs, horizon)
     pad_mask = np.ones(horizon)
     pad_mask[:pad_length] = 0
     full_obs["pad_mask"] = pad_mask

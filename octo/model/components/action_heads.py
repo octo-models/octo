@@ -140,8 +140,8 @@ def discrete_loss(
     labels = discrete_tokenizer(ground_truth_value)
     labels_one_hot = jax.nn.one_hot(labels, logits.shape[-1])
 
-    loss = -jnp.sum(logits * labels_one_hot, axis=-1)
-    loss = masked_mean(loss, mask)
+    loss = jnp.sum(jax.nn.log_softmax(logits, axis=-1) * labels_one_hot, axis=-1)
+    loss = -masked_mean(loss, mask)
 
     # compute accuracy between predicted actions and target actions
     pred_label = jnp.argmax(logits, axis=-1)
@@ -442,7 +442,7 @@ class DiffusionActionHead(nn.Module):
     # diffusion-specific config with sane defaults
     time_dim: int = 32
     num_blocks: int = 3
-    dropout_rate: float = 0.1
+    dropout_rate: float = 0.0
     hidden_dim: int = 256
     use_layer_norm: bool = True
     diffusion_steps: int = 20

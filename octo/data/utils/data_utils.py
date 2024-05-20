@@ -3,7 +3,7 @@ import hashlib
 import json
 import logging
 import os
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import dlimp as dl
 import numpy as np
@@ -181,8 +181,56 @@ def get_dataset_statistics(
     return metadata
 
 
+def combine_dataset_statistics(
+    all_dataset_statistics: Sequence[dict],
+) -> dict:
+    """Merges dataset statistics from multiple datasets."""
+    merge_stat_keys = ["action", "proprio"]
+
+    num_trajectories = [stat["num_trajectories"] for stat in all_dataset_statistics]
+    num_transitions = [stat["num_transitions"] for stat in all_dataset_statistics]
+    stat_weights = [
+        transitions / sum(num_transitions) for transitions in num_transitions
+    ]
+
+    combined_dataset_statistics = {}
+    for key in merge_stat_keys:
+        combined_mean = np.array(
+            [
+                stat[key]["mean"] * w
+                for stat, w in zip(all_dataset_statistics, stat_weights)
+            ]
+        ).sum(0)
+        # compute combined_std for denominator `n` instead of `n-1` since numpy uses that by default for std
+        # https://stats.stackexchange.com/questions/55999/is-it-possible-to-find-the-combined-standard-deviation
+        combined_std = np.sqrt(
+            np.array(
+                [
+                    n * np.array(stat[key]["std"]) ** 2
+                    + n * (np.array(stat[key]["mean"]) - combined_mean) ** 2
+                    for stat, n in zip(all_dataset_statistics, num_transitions)
+                ]
+            ).sum(0)
+            / sum(num_transitions)
+        )
+        combined_dataset_statistics[key] = {
+            "min": np.array([stat[key]["min"] for stat in all_dataset_statistics])
+            .min(0)
+            .tolist(),
+            "max": np.array([stat[key]["max"] for stat in all_dataset_statistics])
+            .max(0)
+            .tolist(),
+            "mean": combined_mean.tolist(),
+            "std": combined_std.tolist(),
+        }
+
+    combined_dataset_statistics["num_trajectories"] = num_trajectories
+    combined_dataset_statistics["num_transitions"] = num_transitions
+    return combined_dataset_statistics
+
+
 def normalize_action_and_proprio(
-    traj: dict, metadata: dict, normalization_type: NormalizationType
+    traj: dict, metadata: dict, normalization_type: NormalizationType, skip_keys=None
 ):
     """Normalizes the action and proprio fields of a trajectory using the given metadata."""
     # maps keys of `metadata` to corresponding keys in `traj`
@@ -190,6 +238,15 @@ def normalize_action_and_proprio(
         "action": "action",
         "proprio": "observation/proprio",
     }
+    if skip_keys is not None:
+        for skip_key in skip_keys:
+            if skip_key not in keys_to_normalize:
+                raise ValueError(
+                    f"{skip_key} cannot be skipped during normalization since it's not a valid key, "
+                    f"choose from {keys_to_normalize.keys()}"
+                )
+            keys_to_normalize.pop(skip_key)
+
     if normalization_type == NormalizationType.NORMAL:
         # normalize to mean 0, std 1
         for key, traj_key in keys_to_normalize.items():

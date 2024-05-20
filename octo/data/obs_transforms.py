@@ -2,7 +2,7 @@
 Contains observation-level transforms used in the octo data pipeline. These transforms operate on the
 "observation" dictionary, and are applied at a per-frame level.
 """
-from typing import Mapping, Tuple, Union
+from typing import Mapping, Optional, Tuple, Union
 
 from absl import logging
 import dlimp as dl
@@ -36,6 +36,61 @@ def augment(
             lambda: obs[f"image_{name}"],  # skip padding images
         )
 
+    return obs
+
+
+def image_dropout(
+    obs: dict,
+    seed: tf.Tensor,
+    dropout_prob: float,
+    always_keep_key: Optional[str] = None,
+) -> dict:
+    """Independently drops out image keys, each with probability `dropout_prob`, but always keeps at least one
+    image present.
+    """
+    image_keys = [key for key in obs if key.startswith("image_")]
+    if not image_keys:
+        return obs
+    pad_mask = tf.stack([obs["pad_mask_dict"][key] for key in image_keys])
+    # if any non-padding images exist, pick one of them to keep no matter what
+    shuffle_seed, seed = tf.unstack(tf.random.split(seed))
+
+    if always_keep_key:
+        assert (
+            always_keep_key in image_keys
+        ), f"Specified always_keep_key {always_keep_key} not present in image_keys: {image_keys} during dropout."
+        always_keep_index = tf.constant(
+            image_keys.index(always_keep_key), dtype=tf.int64
+        )
+    else:
+        always_keep_index = tf.cond(
+            tf.reduce_any(pad_mask),
+            # pick a random index from the non-padding images
+            lambda: tf.random.experimental.stateless_shuffle(
+                tf.where(pad_mask)[:, 0], seed=shuffle_seed
+            )[0],
+            # all images are padding, so it doesn't matter
+            lambda: tf.constant(0, dtype=tf.int64),
+        )
+
+    # drop images independently, except for the one at always_keep_index
+    rands = tf.random.stateless_uniform([len(image_keys)], seed=seed)
+    pad_mask = tf.logical_and(
+        pad_mask,
+        tf.logical_or(
+            tf.range(len(image_keys), dtype=tf.int64) == always_keep_index,
+            rands > dropout_prob,
+        ),
+    )
+
+    # perform the dropout and update pad_mask_dict
+    for i, key in enumerate(image_keys):
+        obs["pad_mask_dict"][key] = pad_mask[i]
+        obs[key] = tf.cond(
+            pad_mask[i],
+            lambda: obs[key],
+            lambda: tf.zeros_like(obs[key]),
+        )
     return obs
 
 

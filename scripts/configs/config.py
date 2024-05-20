@@ -135,6 +135,7 @@ def get_dataset_config(window_size=1):
         ),
         "frame_transform_kwargs": dict(
             resize_size=(256, 256),
+            image_dropout_prob=0.0,
             image_augment_kwargs=dict(
                 random_resized_crop=dict(scale=[0.8, 1.0], ratio=[0.9, 1.1]),
                 random_brightness=[0.2],
