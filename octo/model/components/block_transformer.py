@@ -291,8 +291,10 @@ class BlockTransformer(nn.Module):
             self.verify_causality(prefix_groups, timestep_groups)
 
         if not self.use_correct_attention:
-            # Eventually deprecate
-            logging.warning("Using old (incorrect) attention computation.")
+            # No longer used in new models, but keeping for backward compatibility w/ models released in DEcember
+            logging.warning(
+                "Using old attention computation from released December models."
+            )
             side = "left"
         else:
             side = "right"
