@@ -242,7 +242,7 @@ class BinTokenizer(nn.Module):
         high (float): Upper bound for bin range.
     """
 
-    n_bins: int
+    n_bins: int = 256
     bin_type: str = "uniform"
     low: float = 0
     high: float = 1
