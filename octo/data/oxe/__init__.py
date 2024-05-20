@@ -1,5 +1,6 @@
 import copy
 import logging
+import os
 from typing import Any, Dict, List, Sequence, Tuple, Union
 
 from octo.data.oxe.oxe_dataset_configs import ActionEncoding, OXE_DATASET_CONFIGS
@@ -73,6 +74,12 @@ def make_oxe_dataset_kwargs(
     del dataset_kwargs["action_encoding"]
 
     dataset_kwargs["standardize_fn"] = OXE_STANDARDIZATION_TRANSFORMS[name]
+
+    if "data_dir" in dataset_kwargs:
+        if dataset_kwargs["data_dir"][0] == "~":
+            dataset_kwargs["data_dir"] = os.path.expanduser("~") + dataset_kwargs["data_dir"][1:]
+        data_dir = dataset_kwargs["data_dir"]
+        del dataset_kwargs["data_dir"]
 
     return {"name": name, "data_dir": data_dir, **dataset_kwargs}
 
