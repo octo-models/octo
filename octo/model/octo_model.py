@@ -14,6 +14,7 @@ import numpy as np
 import orbax.checkpoint
 import tensorflow as tf
 
+from octo.data.utils.data_utils import NormalizationType
 from octo.data.utils.text_processing import TextProcessor
 from octo.model.components.action_heads import ActionHead
 from octo.model.octo_module import OctoModule
@@ -175,6 +176,7 @@ class OctoModel:
         observations: Data,
         tasks: Data,
         unnormalization_statistics: Optional[Data] = None,
+        normalization_type: NormalizationType = NormalizationType.NORMAL,
         timestep_pad_mask: Optional[ArrayLike] = None,
         train: bool = False,
         argmax: bool = False,
@@ -189,6 +191,7 @@ class OctoModel:
             tasks: dict of tasks of shape (batch_size, *)
             unnormalization_statistics: dict of statistics for unnormalizing actions (must contain "mean",
                 "std", and optionally "mask")
+            normalization_type: type of normalization applied to the actions
             timestep_pad_mask: (batch_size, window_size) Boolean mask that is False when the timestep corresponds to padding
             train: whether to run in train mode
             ...see `action_heads.py` for the rest of the kwargs.
@@ -216,16 +219,36 @@ class OctoModel:
             else None,
         )
         if unnormalization_statistics is not None:
-            mask = unnormalization_statistics.get(
-                "mask", jnp.ones_like(unnormalization_statistics["mean"], dtype=bool)
-            )
-            action = action[..., : len(mask)]
-            action = jnp.where(
-                mask,
-                (action * unnormalization_statistics["std"])
-                + unnormalization_statistics["mean"],
-                action,
-            )
+            if normalization_type == NormalizationType.NORMAL:
+                mask = unnormalization_statistics.get(
+                    "mask",
+                    jnp.ones_like(unnormalization_statistics["mean"], dtype=bool),
+                )
+                action = action[..., : len(mask)]
+                action = jnp.where(
+                    mask,
+                    (action * unnormalization_statistics["std"])
+                    + unnormalization_statistics["mean"],
+                    action,
+                )
+            elif normalization_type == NormalizationType.BOUNDS:
+                mask = unnormalization_statistics.get(
+                    "mask", jnp.ones_like(unnormalization_statistics["p01"], dtype=bool)
+                )
+                action = action[..., : len(mask)]
+                action = jnp.where(
+                    mask,
+                    (action + 1)
+                    * (
+                        unnormalization_statistics["p99"]
+                        - unnormalization_statistics["p01"]
+                    )
+                    / 2
+                    + unnormalization_statistics["p01"],
+                    action,
+                )
+            else:
+                raise ValueError(f"Unknown normalization type: {normalization_type}")
         return action
 
     @classmethod
