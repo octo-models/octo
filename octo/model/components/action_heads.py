@@ -409,7 +409,7 @@ class DiffusionActionHead(nn.Module):
     hidden_dim: int = 256
     use_layer_norm: bool = True
     diffusion_steps: int = 20
-    n_diffusion_samples: int = 4
+    n_diffusion_samples: int = 1
 
     def setup(self):
         if self.use_map:
