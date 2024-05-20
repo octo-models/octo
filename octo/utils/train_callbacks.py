@@ -333,7 +333,7 @@ class RolloutVisualizationCallback(Callback):
     visualizer_kwargs_list: Sequence[Mapping[str, Any]]
     text_processor: TextProcessor
     trajs_for_rollouts: int
-    unnormalization_statistics: dict
+    action_proprio_metadata: dict
     modes_to_evaluate: str = ("text_conditioned", "image_conditioned")
 
     def __post_init__(self):
@@ -346,6 +346,7 @@ class RolloutVisualizationCallback(Callback):
 
         self.rollout_visualizers = [
             RolloutVisualizer(
+                action_proprio_metadata=self.action_proprio_metadata,
                 **kwargs,
             )
             for kwargs in self.visualizer_kwargs_list
@@ -358,7 +359,7 @@ class RolloutVisualizationCallback(Callback):
                 partial(
                     get_policy_sampled_actions,
                     train_state,
-                    unnormalization_statistics=self.unnormalization_statistics,
+                    unnormalization_statistics=self.action_proprio_metadata["action"],
                     zero_text=self.zero_text,
                     samples_per_state=1,
                     policy_mode=mode,

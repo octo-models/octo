@@ -282,9 +282,7 @@ def main(_):
         dataset_name = rollout_kwargs.pop("dataset_name")
         rollout_callback = RolloutVisualizationCallback(
             text_processor=text_processor,
-            unnormalization_statistics=train_data.dataset_statistics[dataset_name][
-                "action"
-            ],
+            action_proprio_metadata=train_data.dataset_statistics[dataset_name],
             **rollout_kwargs,
         )
     else:

@@ -4,7 +4,7 @@ import matplotlib
 
 matplotlib.use("Agg")
 from dataclasses import dataclass
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import dlimp as dl
 import flax
@@ -20,7 +20,12 @@ import tensorflow as tf
 import tqdm
 import wandb
 
-from octo.utils.gym_wrappers import HistoryWrapper, RHCWrapper, TemporalEnsembleWrapper
+from octo.utils.gym_wrappers import (
+    HistoryWrapper,
+    NormalizeProprio,
+    RHCWrapper,
+    TemporalEnsembleWrapper,
+)
 
 BASE_METRIC_KEYS = {
     "mse": ("mse", tuple()),  # What is the MSE
@@ -275,6 +280,7 @@ class RolloutVisualizer:
         use_temp_ensembling (bool): Whether to use temporal ensembling or receding horizon control.
         vis_fps (int): FPS of logged rollout video
         video_subsample_rate (int): Subsampling rate for video logging (to reduce video size for high-frequency control)
+        action_proprio_metadata (dict): Dictionary of normalization statistics for proprio and actions.
     """
 
     name: str
@@ -286,9 +292,12 @@ class RolloutVisualizer:
     use_temp_ensembling: bool = True
     vis_fps: int = 10
     video_subsample_rate: int = 1
+    action_proprio_metadata: Optional[dict] = None
 
     def __post_init__(self):
         self._env = gym.make(self.env_name, **self.env_kwargs)
+        if self.action_proprio_metadata is not None:
+            self._env = NormalizeProprio(self._env, self.action_proprio_metadata)
         self._env = HistoryWrapper(
             self._env,
             self.history_length,
@@ -321,7 +330,7 @@ class RolloutVisualizer:
                 # policy outputs are shape [batch, n_samples, pred_horizon, act_dim]
                 # we remove batch dimension & use first sampled action, ignoring other samples
                 actions = policy_fn(jax.tree_map(lambda x: x[None], obs), task)
-                actions = actions[0, 0]
+                actions = np.array(actions[0, 0])
                 obs, reward, done, trunc, info = self._env.step(actions)
                 if "observations" in info:
                     images.extend(

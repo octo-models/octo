@@ -4,6 +4,7 @@ from typing import Optional, Sequence, Tuple, Union
 
 import gym
 import gym.spaces
+import jax
 import numpy as np
 import tensorflow as tf
 
@@ -243,3 +244,38 @@ class ResizeImageWrapper(gym.ObservationWrapper):
             image = tf.cast(tf.clip_by_value(tf.round(image), 0, 255), tf.uint8).numpy()
             observation[k] = image
         return observation
+
+
+class NormalizeProprio(gym.ObservationWrapper):
+    """
+    Un-normalizes the proprio.
+    """
+
+    def __init__(
+        self,
+        env: gym.Env,
+        action_proprio_metadata: dict,
+    ):
+        self.action_proprio_metadata = jax.tree_map(
+            lambda x: np.array(x),
+            action_proprio_metadata,
+            is_leaf=lambda x: isinstance(x, list),
+        )
+        super().__init__(env)
+
+    def normalize(self, data, metadata):
+        mask = metadata.get("mask", np.ones_like(metadata["mean"], dtype=bool))
+        return np.where(
+            mask,
+            (data - metadata["mean"]) / (metadata["std"] + 1e-8),
+            data,
+        )
+
+    def observation(self, obs):
+        if "proprio" in self.action_proprio_metadata:
+            obs["proprio"] = self.normalize(
+                obs["proprio"], self.action_proprio_metadata["proprio"]
+            )
+        else:
+            assert "proprio" not in obs, "Cannot normalize proprio without metadata."
+        return obs

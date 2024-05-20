@@ -30,7 +30,7 @@ sys.path.append("path/to/your/act")
 from envs.aloha_sim_env import AlohaGymEnv  # noqa
 
 from octo.model.octo_model import OctoModel
-from octo.utils.gym_wrappers import HistoryWrapper, RHCWrapper
+from octo.utils.gym_wrappers import HistoryWrapper, NormalizeProprio, RHCWrapper
 from octo.utils.train_callbacks import supply_rng
 
 FLAGS = flags.FLAGS
@@ -63,6 +63,9 @@ def main(_):
     #   }
     ##################################################################################################################
     env = gym.make("aloha-sim-cube-v0")
+
+    # wrap env to normalize proprio
+    env = NormalizeProprio(env, model.dataset_statistics)
 
     # add wrappers for history and "receding horizon control", i.e. action chunking
     env = HistoryWrapper(env, horizon=1)
