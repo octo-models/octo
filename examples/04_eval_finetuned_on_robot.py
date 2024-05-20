@@ -129,8 +129,8 @@ def main(_):
         # remove batch dim
         return actions[0]
 
-    policy_fn = partial(
-        supply_rng(
+    policy_fn = supply_rng(
+        partial(
             sample_actions,
             model,
             argmax=FLAGS.deterministic,
