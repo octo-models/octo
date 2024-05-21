@@ -58,7 +58,9 @@ def main(_):
     jax_utils.initialize_compilation_cache()
 
     assert FLAGS.config.dataset_kwargs.batch_size % jax.device_count() == 0
+    assert FLAGS.config.viz_kwargs.eval_batch_size % jax.device_count() == 0
     assert FLAGS.config.dataset_kwargs.batch_size % jax.process_count() == 0
+    assert FLAGS.config.viz_kwargs.eval_batch_size % jax.process_count() == 0
 
     # create a 1D mesh with a single axis named "batch"
     mesh = Mesh(jax.devices(), axis_names="batch")

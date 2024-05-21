@@ -108,18 +108,6 @@ def subsample(traj: dict, subsample_length: int) -> dict:
     return traj
 
 
-def zero_out_future_proprio(traj: dict) -> dict:
-    """Removes all proprio inputs after first one to prevent causal confusion."""
-    traj["observation"]["proprio"] = tf.concat(
-        (
-            traj["observation"]["proprio"][:, :1],
-            tf.zeros_like(traj["observation"]["proprio"][:, 1:]),
-        ),
-        axis=1,
-    )
-    return traj
-
-
 def add_pad_mask_dict(traj: dict) -> dict:
     """Adds a dictionary indicating which elements of the observation/task should be treated as padding.
 

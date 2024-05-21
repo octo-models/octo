@@ -44,8 +44,6 @@ def get_config(config_string="full,multimodal"):
             "heads_*.map_head.probe",
             "heads_*.map_head.MultiHeadDotProductAttention_0.*",
         )
-    elif mode == "frozen_transformer":
-        frozen_keys = ("octo_transformer.BlockTransformer_0.*",)
     else:
         raise ValueError("Invalid mode")
 
