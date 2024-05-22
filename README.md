@@ -158,10 +158,11 @@ Octo was pretrained with an action chunking size of 4, meaning it predicts the n
 ## Citation
 
 ```
-@misc{octo_2023,
+@inproceedings{octo_2023,
     title={Octo: An Open-Source Generalist Robot Policy},
-    author = {{Octo Model Team} and Dibya Ghosh and Homer Walke and Karl Pertsch and Kevin Black and Oier Mees and Sudeep Dasari and Joey Hejna and Charles Xu and Jianlan Luo and Tobias Kreiman and {You Liang} Tan and Dorsa Sadigh and Chelsea Finn and Sergey Levine},
-    howpublished  = {\url{https://octo-models.github.io}},
-    year = {2023},
+    author = {{Octo Model Team} and Dibya Ghosh and Homer Walke and Karl Pertsch and Kevin Black and Oier Mees and Sudeep Dasari and Joey Hejna and Charles Xu and Jianlan Luo and Tobias Kreiman and {You Liang} Tan and Pannag Sanketi and Quan Vuong and Ted Xiao and Dorsa Sadigh and Chelsea Finn and Sergey Levine},
+    booktitle = {Proceedings of Robotics: Science and Systems},
+    address  = {Delft, Netherlands},
+    year = {2024},
 }
 ```
