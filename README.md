@@ -148,7 +148,7 @@ While `timestep_pad_mask` indicates which observations should be attended to on 
 Octo was pretrained with an action chunking size of 4, meaning it predicts the next 4 actions at once. You can choose to execute all these actions before sampling new ones, or only execute the first action before sampling new ones (also known as receding horizon control). You can also do something more advanced like [temporal ensembling](octo/utils/gym_wrappers.py).
 
 ## Updates for Version 1.5
-- Language task tokens are now repeated at every timestep in the context window.
+- Improved cross-attention between visual and language tokens by repeating language tokens at every timestep in the context window.
 - Augmented the language instructions in the data with rephrasings from GPT-3.5.
 - Bug fixes:
   - Turned off dropout in the diffusion head due to incompatibility with layer norm.
