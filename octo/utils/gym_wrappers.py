@@ -1,6 +1,6 @@
 from collections import deque
 import logging
-from typing import Optional, Sequence, Tuple, Union
+from typing import Dict, Optional, Sequence, Tuple
 
 import gym
 import gym.spaces
@@ -52,42 +52,33 @@ def listdict2dictlist(LD):
 
 def add_octo_env_wrappers(
     env: gym.Env,
-    config: dict,
-    **kwargs,
+    action_proprio_metadata: dict,
+    horizon: int,
+    exec_horizon: int,
+    resize_size: Optional[Dict[str, Tuple]] = None,
+    use_temp_ensembling: bool = True,
 ):
-    """Adds env wrappers for action normalization, multi-action
-    future prediction, image resizing, and history stacking.
-
-    Uses defaults from model config, but all can be overridden through kwargs.
+    """Adds env wrappers for proprio normalization, action prediction,
+    image resizing, and history stacking.
 
     Arguments:
         env: gym Env
-        config: PretrainedModel.config
-        dataset_statistics: from PretrainedModel.load_dataset_statistics
-        # Additional (optional) kwargs
-        exec_horizon: int for RHCWrapper
-        resize_size: None or tuple or list of tuples for ResizeImageWrapper
+        action_proprio_metadata: dict containing proprio stats for NormalizeProprio
         horizon: int for HistoryWrapper
+        exec_horizon: int for RHCWrapper or TemporalEnsembleWrapper
+        resize_size: None or tuple or list of tuples for ResizeImageWrapper
+        use_temp_ensembling: whether to use TemporalEnsembleWrapper or RHCWrapper
     """
-    exec_horizon = kwargs.get(
-        "exec_horizon", config["model"]["heads"]["action"]["kwargs"]["pred_horizon"]
-    )
-
-    logging.info("Running receding horizon control with exec_horizon: ", exec_horizon)
-    env = RHCWrapper(env, exec_horizon)
-    resize_size = kwargs.get(
-        "resize_size",
-        config["dataset_kwargs"]["frame_transform_kwargs"]["resize_size"],
-    )
-
-    logging.info("Resizing images w/ parameters", resize_size)
+    env = NormalizeProprio(env, action_proprio_metadata)
     env = ResizeImageWrapper(env, resize_size)
 
-    horizon = kwargs.get("horizon", config["window_size"])
-    logging.info("Adding history of size: ", horizon)
     env = HistoryWrapper(env, horizon)
 
-    logging.info("New observation space: ", env.observation_space)
+    if use_temp_ensembling:
+        env = TemporalEnsembleWrapper(env, exec_horizon)
+    else:
+        env = RHCWrapper(env, exec_horizon)
+
     return env
 
 
@@ -206,10 +197,23 @@ class TemporalEnsembleWrapper(gym.Wrapper):
 
 
 class ResizeImageWrapper(gym.ObservationWrapper):
+    """
+    Resizes images from a robot environment to the size the model expects.
+
+    We attempt to match the resizing operations done in the model's data pipeline.
+    First, we resize the image using lanczos interpolation to match the resizing done
+    when converting the raw data into RLDS. Then, we crop and resize the image with
+    bilinear interpolation to match the average of the crop and resize image augmentation
+    performed during training.
+    """
+
     def __init__(
         self,
         env: gym.Env,
-        resize_size: Optional[Union[Tuple, Sequence[Tuple]]],
+        resize_size: Optional[Dict[str, Tuple]] = None,
+        augmented_keys: Sequence[str] = ("image_primary",),
+        avg_scale: float = 0.9,
+        avg_ratio: float = 1.0,
     ):
         super().__init__(env)
         assert isinstance(
@@ -217,14 +221,26 @@ class ResizeImageWrapper(gym.ObservationWrapper):
         ), "Only Dict observation spaces are supported."
         spaces = self.observation_space.spaces
         self.resize_size = resize_size
+        self.augmented_keys = augmented_keys
+        if len(self.augmented_keys) > 0:
+            new_height = tf.clip_by_value(tf.sqrt(avg_scale / avg_ratio), 0, 1)
+            new_width = tf.clip_by_value(tf.sqrt(avg_scale * avg_ratio), 0, 1)
+            height_offset = (1 - new_height) / 2
+            width_offset = (1 - new_width) / 2
+            self.bounding_box = tf.stack(
+                [
+                    height_offset,
+                    width_offset,
+                    height_offset + new_height,
+                    width_offset + new_width,
+                ],
+            )
 
         if resize_size is None:
             self.keys_to_resize = {}
-        elif isinstance(resize_size, tuple):
-            self.keys_to_resize = {k: resize_size for k in spaces if "image_" in k}
         else:
             self.keys_to_resize = {
-                f"image_{i}": resize_size[i] for i in range(len(resize_size))
+                f"image_{i}": resize_size[i] for i in resize_size.keys()
             }
         logging.info(f"Resizing images: {self.keys_to_resize}")
         for k, size in self.keys_to_resize.items():
@@ -241,7 +257,16 @@ class ResizeImageWrapper(gym.ObservationWrapper):
             image = tf.image.resize(
                 observation[k], size=size, method="lanczos3", antialias=True
             )
+
+            # if this image key was augmented with random resizes and crops,
+            # we perform the average of the augmentation here
+            if k in self.augmented_keys:
+                image = tf.image.crop_and_resize(
+                    image[None], self.bounding_box[None], [0], size
+                )[0]
+
             image = tf.cast(tf.clip_by_value(tf.round(image), 0, 255), tf.uint8).numpy()
+
             observation[k] = image
         return observation
 

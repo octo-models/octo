@@ -128,7 +128,7 @@ def get_dataset_config(window_size=1):
             **task_augmentation,
         ),
         frame_transform_kwargs=dict(
-            resize_size=(256, 256),
+            resize_size=dict(primary=(256, 256)),
             image_dropout_prob=0.0,
             image_augment_kwargs=dict(
                 primary=dict(
