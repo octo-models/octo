@@ -7,6 +7,7 @@ import flax.linen as nn
 import jax
 import jax.numpy as jnp
 from jax.scipy.stats import norm
+import numpy as np
 
 from octo.model.components.base import TokenGroup
 from octo.model.components.transformer import MAPHead
@@ -115,7 +116,7 @@ class ImageTokenizer(nn.Module):
 
         # stack all spatial observation and task inputs
         enc_inputs = extract_inputs(obs_stack_keys, observations, check_spatial=True)
-        if tasks and self.task_stack_keys:
+        if self.task_stack_keys:
             needed_task_keys = regex_filter(self.task_stack_keys, observations.keys())
             # if any task inputs are missing, replace with zero padding (TODO: be more flexible)
             for k in needed_task_keys:
@@ -202,7 +203,7 @@ class LanguageTokenizer(nn.Module):
             assert self.proper_pad_mask, "Cannot skip unless using proper pad mask."
             return None
 
-        if not isinstance(tasks["language_instruction"], jax.Array):
+        if not isinstance(tasks["language_instruction"], (jax.Array, np.ndarray)):
             assert (
                 self.encoder is not None
             ), "Received language tokens but no encoder specified."
@@ -241,7 +242,7 @@ class BinTokenizer(nn.Module):
         high (float): Upper bound for bin range.
     """
 
-    n_bins: int
+    n_bins: int = 256
     bin_type: str = "uniform"
     low: float = 0
     high: float = 1

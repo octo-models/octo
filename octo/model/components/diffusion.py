@@ -1,4 +1,5 @@
 # copied from: https://raw.githubusercontent.com/rail-berkeley/bridge_data_v2/main/jaxrl_m/networks/diffusion_nets.py
+import logging
 from typing import Callable, Optional, Sequence
 
 import flax.linen as nn
@@ -27,8 +28,21 @@ class ScoreActor(nn.Module):
     reverse_network: nn.Module
 
     def __call__(self, obs_enc, actions, time, train=False):
+        """
+        Args:
+            obs_enc: (bd..., obs_dim) where bd... is broadcastable to batch_dims
+            actions: (batch_dims..., action_dim)
+            time: (batch_dims..., 1)
+        """
         t_ff = self.time_preprocess(time)
         cond_enc = self.cond_encoder(t_ff, train=train)
+        if obs_enc.shape[:-1] != cond_enc.shape[:-1]:
+            new_shape = cond_enc.shape[:-1] + (obs_enc.shape[-1],)
+            logging.debug(
+                "Broadcasting obs_enc from %s to %s", obs_enc.shape, new_shape
+            )
+            obs_enc = jnp.broadcast_to(obs_enc, new_shape)
+
         reverse_input = jnp.concatenate([cond_enc, obs_enc, actions], axis=-1)
         eps_pred = self.reverse_network(reverse_input, train=train)
         return eps_pred

@@ -273,6 +273,11 @@ class SmallStem32(SmallStem):
     patch_size: int = 32
 
 
+class ResNet26FILM(ViTResnet):
+    use_film: bool = True
+    num_layers: tuple = (2, 2, 2, 2)
+
+
 vit_encoder_configs = {
     "patchify-32-film": ft.partial(
         PatchEncoder,

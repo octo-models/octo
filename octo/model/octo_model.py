@@ -14,6 +14,7 @@ import numpy as np
 import orbax.checkpoint
 import tensorflow as tf
 
+from octo.data.utils.data_utils import NormalizationType
 from octo.data.utils.text_processing import TextProcessor
 from octo.model.components.action_heads import ActionHead
 from octo.model.octo_module import OctoModule
@@ -31,8 +32,12 @@ class OctoModel:
         >>> tasks = model.create_tasks(texts=["go to the red room"])
         >>> # or tasks = model.create_tasks(goals={"image_primary": goal_images})
         >>> actions = model.sample_actions(observations, tasks, rng=jax.random.PRNGKey(0))
-        >>> # Note: these are normalized actions (processed to mean 0 and std 1). To get the raw actions,
-            # un-normalize them using model.dataset_statistics
+        >>> # Note: these are normalized actions (processed to mean 0 and std 1). To get correct actions
+        >>> # for a particular embodiment, you must additionally specify unnormalization statistics.
+        >>> # For example, to get actions for one of Octo's pretraining datasets:
+        >>> actions = model.sample_actions(observations, tasks, rng=jax.random.PRNGKey(0),
+        >>>     unnormalization_statistics=model.dataset_statistics["DATASET_NAME_HERE"]["action"]
+        >>> )
 
     Usage for finetuning:
 
@@ -129,7 +134,11 @@ class OctoModel:
 
     @partial(jax.jit, static_argnames=("train",))
     def run_transformer(
-        self, observations: Data, tasks: Data, pad_mask: ArrayLike, train: bool = False
+        self,
+        observations: Data,
+        tasks: Data,
+        timestep_pad_mask: ArrayLike,
+        train: bool = False,
     ):
         """Runs the transformer, but does shape checking on the inputs.
 
@@ -138,7 +147,7 @@ class OctoModel:
                 Shape must be consistent with self.example_batch["observation"]
             tasks: dict of tasks of shape (batch_size, *shape)
                 Shape must be consistent with self.example_batch["task"]
-            pad_mask: (batch_size, window_size) Boolean mask that is False when the timestep corresponds to padding
+            timestep_pad_mask: (batch_size, window_size) Boolean mask that is False when the timestep corresponds to padding
             train: whether to run in train mode
         """
         _verify_shapes(
@@ -153,17 +162,22 @@ class OctoModel:
             {"params": self.params},
             observations,
             tasks,
-            pad_mask,
+            timestep_pad_mask,
             train=train,
             method="octo_transformer",
         )
 
-    @partial(jax.jit, static_argnames=("train", "sample_shape", "argmax"))
+    @partial(
+        jax.jit,
+        static_argnames=("train", "sample_shape", "argmax"),
+    )
     def sample_actions(
         self,
         observations: Data,
         tasks: Data,
-        pad_mask: Optional[ArrayLike] = None,
+        unnormalization_statistics: Optional[Data] = None,
+        normalization_type: NormalizationType = NormalizationType.NORMAL,
+        timestep_pad_mask: Optional[ArrayLike] = None,
         train: bool = False,
         argmax: bool = False,
         sample_shape: Tuple[int, ...] = (),
@@ -175,29 +189,67 @@ class OctoModel:
         Args:
             observations: dictionary of arrays of shape (batch_size, window_size, *)
             tasks: dict of tasks of shape (batch_size, *)
-            pad_mask: (batch_size, window_size) Boolean mask that is False when the timestep corresponds to padding
+            unnormalization_statistics: dict of statistics for unnormalizing actions (must contain "mean",
+                "std", and optionally "mask")
+            normalization_type: type of normalization applied to the actions
+            timestep_pad_mask: (batch_size, window_size) Boolean mask that is False when the timestep corresponds to padding
             train: whether to run in train mode
             ...see `action_heads.py` for the rest of the kwargs.
         Returns:
-            actions: (*sample_shape, batch_size, pred_horizon, action_dim)
+            actions: (*sample_shape, batch_size, action_horizon, action_dim)
         """
-        if pad_mask is None:
-            pad_mask = observations["pad_mask"]
+        if timestep_pad_mask is None:
+            timestep_pad_mask = observations["timestep_pad_mask"]
 
         transformer_outputs = self.run_transformer(
-            observations, tasks, pad_mask, train=train
+            observations, tasks, timestep_pad_mask, train=train
         )
         action_head: ActionHead = self.module.bind({"params": self.params}).heads[
             "action"
         ]
-        return action_head.predict_action(
+        action = action_head.predict_action(
             transformer_outputs,
             train=train,
             argmax=argmax,
             sample_shape=sample_shape,
             rng=rng,
             temperature=temperature,
+            embodiment_action_dim=len(unnormalization_statistics["mean"])
+            if unnormalization_statistics is not None
+            else None,
         )
+        if unnormalization_statistics is not None:
+            if normalization_type == NormalizationType.NORMAL:
+                mask = unnormalization_statistics.get(
+                    "mask",
+                    jnp.ones_like(unnormalization_statistics["mean"], dtype=bool),
+                )
+                action = action[..., : len(mask)]
+                action = jnp.where(
+                    mask,
+                    (action * unnormalization_statistics["std"])
+                    + unnormalization_statistics["mean"],
+                    action,
+                )
+            elif normalization_type == NormalizationType.BOUNDS:
+                mask = unnormalization_statistics.get(
+                    "mask", jnp.ones_like(unnormalization_statistics["p01"], dtype=bool)
+                )
+                action = action[..., : len(mask)]
+                action = jnp.where(
+                    mask,
+                    (action + 1)
+                    * (
+                        unnormalization_statistics["p99"]
+                        - unnormalization_statistics["p01"]
+                    )
+                    / 2
+                    + unnormalization_statistics["p01"],
+                    action,
+                )
+            else:
+                raise ValueError(f"Unknown normalization type: {normalization_type}")
+        return action
 
     @classmethod
     def load_pretrained(
@@ -225,6 +277,12 @@ class OctoModel:
             tf.io.gfile.join(checkpoint_path, "config.json"), "r"
         ) as f:
             config = json.load(f)
+
+        # shim to support old configs
+        if "pred_horizon" in config["model"]["heads"]["action"]["kwargs"]:
+            config["model"]["heads"]["action"]["kwargs"]["action_horizon"] = config[
+                "model"
+            ]["heads"]["action"]["kwargs"].pop("pred_horizon")
 
         # load example batch
         with tf.io.gfile.GFile(
@@ -258,12 +316,20 @@ class OctoModel:
         # create model def (an OctoModule)
         module = OctoModule.create(**config["model"])
         # infer params shape without actually doing any computation
-        params_shape = jax.eval_shape(
-            partial(module.init, train=False),
-            jax.random.PRNGKey(0),
+
+        # shim for old checkpoints
+        if "timestep_pad_mask" not in example_batch["observation"]:
+            example_batch["observation"]["timestep_pad_mask"] = example_batch[
+                "observation"
+            ]["pad_mask"]
+
+        init_args = (
             example_batch["observation"],
             example_batch["task"],
-            example_batch["observation"]["pad_mask"],
+            example_batch["observation"]["timestep_pad_mask"],
+        )
+        params_shape = jax.eval_shape(
+            partial(module.init, train=False), jax.random.PRNGKey(0), *init_args
         )["params"]
         # restore params, checking to make sure the shape matches
         checkpointer = orbax.checkpoint.CheckpointManager(
@@ -375,7 +441,7 @@ class OctoModel:
         init_args = (
             example_batch["observation"],
             example_batch["task"],
-            example_batch["observation"]["pad_mask"],
+            example_batch["observation"]["timestep_pad_mask"],
         )
 
         if verbose:
@@ -401,7 +467,7 @@ class OctoModel:
     def get_pretty_spec(self):
         """Brief summary of the model's expected inputs and outputs."""
         # TODO: generalize this to print out proprio when it is being tokenized
-        window_size = self.example_batch["observation"]["pad_mask"].shape[1]
+        window_size = self.example_batch["observation"]["timestep_pad_mask"].shape[1]
 
         observation_space = {
             k: ("batch", "history_window", *v.shape[2:])
@@ -422,9 +488,12 @@ class OctoModel:
         try:
             action_head = self.module.heads["action"]
             action_head_repr = str(action_head.__class__)
-            action_dim, pred_horizon = action_head.action_dim, action_head.pred_horizon
+            action_dim, action_horizon = (
+                action_head.action_dim,
+                action_head.action_horizon,
+            )
         except:
-            action_head_repr, action_dim, pred_horizon = "", None, None
+            action_head_repr, action_dim, action_horizon = "", None, None
 
         return SPEC_TEMPLATE.format(
             window_size=window_size,
@@ -432,7 +501,7 @@ class OctoModel:
             task_space=flax.core.pretty_repr(task_space),
             action_head_repr=action_head_repr,
             action_dim=action_dim,
-            pred_horizon=pred_horizon,
+            action_horizon=action_horizon,
         )
 
 
@@ -501,7 +570,7 @@ def _download_from_huggingface(huggingface_repo_id: str):
 
 
 SPEC_TEMPLATE = """
-This model is trained with a window size of {window_size}, predicting {action_dim} dimensional actions {pred_horizon} steps into the future.
+This model is trained with a window size of {window_size}, predicting {action_dim} dimensional actions {action_horizon} steps into the future.
 Observations and tasks conform to the following spec:
 
 Observations: {observation_space}

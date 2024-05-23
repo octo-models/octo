@@ -41,7 +41,7 @@ class OctoTransformer(nn.Module):
     previous timesteps.  The easiest way to understand how the model works is to run:
 
     ```
-        >>> model(observations, tasks, pad_mask, verbose=True)
+        >>> model(observations, tasks, timestep_pad_mask, verbose=True)
     ```
 
     Generally, the model runs the transformer on something like the following sequence:
@@ -74,6 +74,7 @@ class OctoTransformer(nn.Module):
             transformer can be run with any horizon <= max_horizon, the model will only generate sane outputs for
             horizon lengths smaller or equal to the pre-training horizon.
         repeat_task_tokens: If true, repeats the task tokens at each observation timesetep.
+
     """
 
     observation_tokenizers: Dict[str, nn.Module]
@@ -83,13 +84,14 @@ class OctoTransformer(nn.Module):
     token_embedding_size: int
     max_horizon: int
     repeat_task_tokens: bool
+    use_correct_attention: bool = False
 
     @nn.compact
     def __call__(
         self,
         observations: Data,
         tasks: Data,
-        pad_mask: jax.Array,
+        timestep_pad_mask: jax.Array,
         readouts: Optional[Sequence[str]] = None,
         train: bool = False,
         verbose: bool = False,
@@ -100,7 +102,7 @@ class OctoTransformer(nn.Module):
                 Each entry has shape (batch, horizon, *).
             tasks: A dictionary containing task data for the trajectory windows.
                 Each entry has shape (batch, *).
-            pad_mask: A boolean mask of shape (batch, horizon) where False indicates a padded timestep.
+            timestep_pad_mask: A boolean mask of shape (batch, horizon) where False indicates a padded timestep.
             readouts: A list of readouts to compute. If None, defaults to all readouts. Must be a subset of the readouts specified in the model config.
             train: Whether model is being trained.
             verbose: If True, prints out the transformer structure.
@@ -201,7 +203,9 @@ class OctoTransformer(nn.Module):
             obs_tokens += self._create_positional_embedding(group_name, obs_tokens)
 
             # Update mask to account for which timesteps are padding
-            obs_pad_mask = jnp.logical_and(pad_mask[:, :, None], tokenizer_output.mask)
+            obs_pad_mask = jnp.logical_and(
+                timestep_pad_mask[:, :, None], tokenizer_output.mask
+            )
 
             all_timestep_groups.append(
                 TimestepGroup(
@@ -232,6 +236,7 @@ class OctoTransformer(nn.Module):
                         attention_rules=observation_attention_rules,
                     )
                 )
+
         #
         # Finally, add the readout tokens
         #
@@ -269,7 +274,9 @@ class OctoTransformer(nn.Module):
             self.transformer_kwargs.get("add_position_embedding", False) is False
         ), "Already added positional embeddings to the tokens"
 
-        prefix_outputs, timestep_outputs = BlockTransformer(self.transformer_kwargs)(
+        prefix_outputs, timestep_outputs = BlockTransformer(
+            self.transformer_kwargs, use_correct_attention=self.use_correct_attention
+        )(
             all_prefix_groups,
             all_timestep_groups,
             train=train,
@@ -334,7 +341,9 @@ class OctoModule(nn.Module):
     octo_transformer: OctoTransformer
     heads: Dict[str, nn.Module]
 
-    def __call__(self, observations, tasks, pad_mask, train=True, verbose=False):
+    def __call__(
+        self, observations, tasks, timestep_pad_mask, train=True, verbose=False
+    ):
         """Run transformer and the main method for all heads. Useful for init.
 
         Args:
@@ -342,7 +351,7 @@ class OctoModule(nn.Module):
                 where each element has shape (batch, horizon, *).
             tasks: A dictionary containing task data
                 where each element has shape (batch, *).
-            pad_mask: A boolean mask of shape (batch, horizon) where False indicates a padded timestep.
+            timestep_pad_mask: A boolean mask of shape (batch, horizon) where False indicates a padded timestep.
             train: Run in training mode
             verbose: If True, prints out the structure of the OctoTransformer (useful for debugging!)
 
@@ -351,7 +360,7 @@ class OctoModule(nn.Module):
             head_outputs: dictionary of outputs from heads {head_name: output}
         """
         transformer_outputs = self.octo_transformer(
-            observations, tasks, pad_mask, train=train, verbose=verbose
+            observations, tasks, timestep_pad_mask, train=train, verbose=verbose
         )
         head_outputs = {}
         for head_name, head in self.heads.items():
@@ -369,6 +378,7 @@ class OctoModule(nn.Module):
         token_embedding_size: int,
         max_horizon: int,
         repeat_task_tokens: bool = False,
+        use_correct_attention: bool = False,
     ) -> "OctoModule":
         """
         Canonical way to create an OctoModule from configuration.
@@ -408,6 +418,7 @@ class OctoModule(nn.Module):
             max_horizon=max_horizon,
             repeat_task_tokens=repeat_task_tokens,
             transformer_kwargs=transformer_kwargs,
+            use_correct_attention=use_correct_attention,
         )
 
         return cls(

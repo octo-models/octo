@@ -13,6 +13,11 @@ def augment(
     obs: dict, seed: tf.Tensor, augment_kwargs: Union[dict, Mapping[str, dict]]
 ) -> dict:
     """Augments images, skipping padding images."""
+    if not hasattr(augment_kwargs, "items"):
+        raise ValueError(
+            "augment_kwargs must be a dict with keys corresponding to image names, or a single dict "
+            "with an 'augment_order' key."
+        )
     image_names = {key[6:] for key in obs if key.startswith("image_")}
 
     # "augment_order" is required in augment_kwargs, so if it's there, we can assume that the user has passed

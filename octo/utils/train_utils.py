@@ -172,6 +172,8 @@ def filter_eval_datasets(dataset_kwargs_list, sample_weights, eval_datasets=None
         sample_weights = [1.0] * len(dataset_kwargs_list)
     if eval_datasets is None:
         return dataset_kwargs_list, sample_weights
+    if len(eval_datasets) == 0:
+        return [], []
     else:
         return list(
             map(

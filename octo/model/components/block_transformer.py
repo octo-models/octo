@@ -125,6 +125,7 @@ class BlockTransformer(nn.Module):
     transformer_kwargs: Dict
     # Enforce that timestep causal structure is not broken (future timesteps can't attend to past timesteps)
     enforce_causal: bool = True
+    use_correct_attention: bool = False
 
     @nn.compact
     def __call__(
@@ -289,8 +290,17 @@ class BlockTransformer(nn.Module):
         if self.enforce_causal:
             self.verify_causality(prefix_groups, timestep_groups)
 
+        if not self.use_correct_attention:
+            # No longer used in new models, but keeping for backward compatibility w/ models released in DEcember
+            logging.warning(
+                "Using old attention computation from released December models."
+            )
+            side = "left"
+        else:
+            side = "right"
+
         def _get_position(i, tokens_per_elem):
-            return np.searchsorted(np.cumsum(tokens_per_elem), i)
+            return np.searchsorted(np.cumsum(tokens_per_elem), i, side=side)
 
         horizon = timestep_groups[0].tokens.shape[1]
         tokens_per_prefix_group = [group.tokens.shape[1] for group in prefix_groups]

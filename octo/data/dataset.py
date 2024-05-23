@@ -1,5 +1,4 @@
 from functools import partial
-import inspect
 import json
 from typing import Callable, Mapping, Optional, Sequence, Tuple, Union
 
@@ -17,6 +16,7 @@ from octo.data.utils.data_utils import (
     NormalizationType,
     normalize_action_and_proprio,
     pprint_data_mixture,
+    sample_match_keys_uniform,
     tree_map,
 )
 from octo.utils.spec import ModuleSpec
@@ -29,13 +29,16 @@ def apply_trajectory_transforms(
     goal_relabeling_strategy: Optional[str] = None,
     goal_relabeling_kwargs: dict = {},
     window_size: int = 1,
-    future_action_window_size: int = 0,
+    action_horizon: int = 1,
     subsample_length: Optional[int] = None,
     skip_unlabeled: bool = False,
     max_action: Optional[float] = None,
     max_proprio: Optional[float] = None,
     task_augment_strategy: Optional[str] = None,
     task_augment_kwargs: dict = {},
+    max_action_dim: Optional[int] = None,
+    max_proprio_dim: Optional[int] = None,
+    post_chunk_transforms: Sequence[ModuleSpec] = (),
     num_parallel_calls: int = tf.data.AUTOTUNE,
 ) -> dl.DLataset:
     """Applies common transforms that happen at a trajectory level. Such transforms are usually some sort of
@@ -52,9 +55,9 @@ def apply_trajectory_transforms(
         goal_relabeling_strategy (str, optional): The goal relabeling strategy to use, or None for
             no goal relabeling. See `goal_relabeling.py`.
         goal_relabeling_kwargs (dict, optional): Additional keyword arguments to pass to the goal relabeling function.
-        window_size (int, optional): The length of the snippets that trajectories are chunked into.
-        future_action_window_size (int, optional): The number of future actions beyond window_size to include
-            in the chunked actions.
+        window_size (int, optional): The window size to chunk both observations and actions into.
+        action_horizon (int, optional): The size of the action chunk (present and future actions) to include in
+            the chunked actions.
         subsample_length (int, optional): If provided, trajectories longer than this will be subsampled to
             this length (after goal relabeling and chunking).
         skip_unlabeled (bool, optional): Whether to skip trajectories with no language labels.
@@ -66,6 +69,12 @@ def apply_trajectory_transforms(
             augmentation. See `task_augmentation.py`.
         task_augment_kwargs (dict, optional): Additional keyword arguments to pass to the task augmentation
             function.
+        max_action_dim (int, optional): If provided, datasets with an action dimension less than this will be
+            padded to this dimension.
+        max_proprio_dim (int, optional): If provided, datasets with a proprio dimension less than this will be
+            padded to this dimension.
+        post_chunk_transforms (Sequence[ModuleSpec]): ModuleSpecs of trajectory transforms applied after
+            chunking.
         num_parallel_calls (int, optional): number of parallel calls for map operations. Default to AUTOTUNE.
     """
     if skip_unlabeled:
@@ -92,6 +101,16 @@ def apply_trajectory_transforms(
     # marks which entires of the observation and task dicts are padding
     dataset = dataset.traj_map(traj_transforms.add_pad_mask_dict, num_parallel_calls)
 
+    # optionally pads actions and proprio to a consistent number of dimensions
+    dataset = dataset.traj_map(
+        partial(
+            traj_transforms.pad_actions_and_proprio,
+            max_action_dim=max_action_dim,
+            max_proprio_dim=max_proprio_dim,
+        ),
+        num_parallel_calls,
+    )
+
     # updates the "task" dict
     if goal_relabeling_strategy is not None:
         dataset = dataset.traj_map(
@@ -113,13 +132,12 @@ def apply_trajectory_transforms(
             num_parallel_calls,
         )
 
-    # chunks observations and actions, giving them a new axis at index 1 of size `window_size` and
-    # `window_size + future_action_window_size`, respectively
+    # chunks observations and actions
     dataset = dataset.traj_map(
         partial(
             traj_transforms.chunk_act_obs,
             window_size=window_size,
-            future_action_window_size=future_action_window_size,
+            action_horizon=action_horizon,
         ),
         num_parallel_calls,
     )
@@ -127,6 +145,12 @@ def apply_trajectory_transforms(
     if train and subsample_length is not None:
         dataset = dataset.traj_map(
             partial(traj_transforms.subsample, subsample_length=subsample_length),
+            num_parallel_calls,
+        )
+
+    for transform_spec in post_chunk_transforms:
+        dataset = dataset.traj_map(
+            ModuleSpec.instantiate(transform_spec),
             num_parallel_calls,
         )
 
@@ -217,18 +241,19 @@ def make_dataset_from_rlds(
     data_dir: str,
     *,
     train: bool,
-    standardize_fn: Optional[Callable[[dict], dict]] = None,
+    standardize_fn: Optional[ModuleSpec] = None,
     shuffle: bool = True,
     image_obs_keys: Mapping[str, Optional[str]] = {},
     depth_obs_keys: Mapping[str, Optional[str]] = {},
-    state_obs_keys: Sequence[Optional[str]] = (),
+    proprio_obs_key: Optional[str] = None,
     language_key: Optional[str] = None,
     action_proprio_normalization_type: NormalizationType = NormalizationType.NORMAL,
     dataset_statistics: Optional[Union[dict, str]] = None,
-    absolute_action_mask: Optional[Sequence[bool]] = None,
+    force_recompute_dataset_statistics: bool = False,
     action_normalization_mask: Optional[Sequence[bool]] = None,
-    norm_skip_keys: Optional[Sequence[str]] = None,
     filter_functions: Sequence[ModuleSpec] = (),
+    skip_norm: bool = False,
+    ignore_errors: bool = False,
     num_parallel_reads: int = tf.data.AUTOTUNE,
     num_parallel_calls: int = tf.data.AUTOTUNE,
 ) -> Tuple[dl.DLataset, dict]:
@@ -247,10 +272,6 @@ def make_dataset_from_rlds(
     "image_primary", "image_secondary", and "image_wrist", where "image_primary" corresponds to "workspace",
     "image_secondary" is a padding image, and "image_wrist" corresponds to "wrist".
 
-    `state_obs_keys` is a list of 1-dimensional proprioceptive keys to concatenate into a single array, which
-    will be placed in the "proprio" key of the "observation" dict. A single padding element (zero) will be
-    inserted for each None entry.
-
     The dataset will also include a "task" dict. If `language_key` is provided, then the "task" dict will
     contain the key "language_instruction", extracted from `traj[language_key]`.
 
@@ -268,30 +289,25 @@ def make_dataset_from_rlds(
             string).
         depth_obs_keys (Mapping[str, str|None]): Same as `image_obs_keys`, but for depth images. Keys will be
             prefixed with "depth_" instead of "image_".
-        state_obs_keys (Sequence[str|None]): List of 1-dimensional proprioception keys to be extracted from
-            the "observation" dict, concatenated, and mapped to "proprio". Inserts 1 element of padding (zero) for
-            each None entry.
+        proprio_obs_key (str, optional): If provided, the "obs" dict will contain the key "proprio", extracted from
+            `traj["observation"][proprio_obs_key]`.
         language_key (str, optional): If provided, the "task" dict will contain the key
-            "language_instruction", extracted from `traj[language_key]`.
+            "language_instruction", extracted from `traj[language_key]`. If language_key fnmatches multiple
+            keys, we sample one uniformly.
         action_proprio_normalization_type (str, optional): The type of normalization to perform on the action,
             proprio, or both. Can be "normal" (mean 0, std 1) or "bounds" (normalized to [-1, 1]).
         dataset_statistics: (dict|str, optional): dict (or path to JSON file) that contains dataset statistics
-            for normalization. If `action_proprio_normalization_type` is "normal", this should contain "mean" and
-            "std" keys. If `action_proprio_normalization_type` is "bounds", this should contain "min" and "max"
-            keys. May also provide "num_transitions" and "num_trajectories" keys for downstream usage (e.g., for
-            `make_interleaved_dataset`). If not provided, the statistics will be computed on the fly.
-        absolute_action_mask (Sequence[bool], optional): By default, all action dimensions are assumed to be
-            relative. This is important for when `future_action_window_size > 0`: actions that are taken
-            from beyond the end of the trajectory (or beyond the goal timestep when goal relabeling is used)
-            need to be made "neutral" to indicate that the task has been completed. For relative actions,
-            "neutral" means zero, but for absolute actions, "neutral" means repeating the last valid action.
-            This mask, if provided, indicates which action dimensions are absolute.
-        action_normalization_mask (Sequence[bool], optional): If provided, indicates which action dimensions
-            should be normalized. For example, you might not want to normalize the gripper action dimension if
-            it's always exactly 0 or 1. By default, all action dimensions are normalized.
-        norm_skip_keys (Sequence[str], optional): Provided keys will be skipped during normalization.
+            for normalization. May also provide "num_transitions" and "num_trajectories" keys for downstream usage
+            (e.g., for `make_interleaved_dataset`). If not provided, the statistics will be computed on the fly.
+        force_recompute_dataset_statistics (bool, optional): If True and `dataset_statistics` is None, will
+            recompute the dataset statistics regardless of whether they are already cached.
+        action_normalization_mask (Sequence[bool], optional): If provided, only normalizes action dimensions
+            where the corresponding mask is True. For example, you might not want to normalize the gripper
+            action dimension if it's always exactly 0 or 1. By default, all action dimensions are normalized.
         filter_functions (Sequence[ModuleSpec]): ModuleSpecs for filtering functions applied to the
             raw dataset.
+        skip_norm (bool): If true, skips normalization of actions and proprio. Default: False.
+        ignore_errors (bool): If true, skips erroneous dataset elements via dataset.ignore_errors(). Default: False.
         num_parallel_reads (int): number of parallel read workers. Default to AUTOTUNE.
         num_parallel_calls (int): number of parallel calls for traj_map operations. Default to AUTOTUNE.
     Returns:
@@ -307,13 +323,11 @@ def make_dataset_from_rlds(
         - dataset_name                  # name of the dataset
     """
     REQUIRED_KEYS = {"observation", "action"}
-    if language_key is not None:
-        REQUIRED_KEYS.add(language_key)
 
     def restructure(traj):
         # apply a standardization function, if provided
         if standardize_fn is not None:
-            traj = standardize_fn(traj)
+            traj = ModuleSpec.instantiate(standardize_fn)(traj)
 
         if not all(k in traj for k in REQUIRED_KEYS):
             raise ValueError(
@@ -337,29 +351,21 @@ def make_dataset_from_rlds(
             else:
                 new_obs[f"depth_{new}"] = old_obs[old]
 
-        if state_obs_keys:
-            new_obs["proprio"] = tf.concat(
-                [
-                    tf.zeros((traj_len, 1), dtype=tf.float32)  # padding
-                    if key is None
-                    else tf.cast(old_obs[key], tf.float32)
-                    for key in state_obs_keys
-                ],
-                axis=1,
-            )
+        if proprio_obs_key is not None:
+            new_obs["proprio"] = tf.cast(old_obs[proprio_obs_key], tf.float32)
 
         # add timestep info
         new_obs["timestep"] = tf.range(traj_len)
 
-        # extracts `language_key` into the "task" dict
+        # extracts `language_key` into the "task" dict, or samples uniformly if `language_key` fnmatches multiple keys
         task = {}
         if language_key is not None:
-            if traj[language_key].dtype != tf.string:
+            task["language_instruction"] = sample_match_keys_uniform(traj, language_key)
+            if task["language_instruction"].dtype != tf.string:
                 raise ValueError(
-                    f"Language key {language_key} has dtype {traj[language_key].dtype}, "
+                    f"Language key {language_key} has dtype {task['language_instruction'].dtype}, "
                     "but it must be tf.string."
                 )
-            task["language_instruction"] = traj.pop(language_key)
 
         traj = {
             "observation": new_obs,
@@ -368,18 +374,10 @@ def make_dataset_from_rlds(
             "dataset_name": tf.repeat(name, traj_len),
         }
 
-        if absolute_action_mask is not None:
-            if len(absolute_action_mask) != traj["action"].shape[-1]:
-                raise ValueError(
-                    f"Length of absolute_action_mask ({len(absolute_action_mask)}) "
-                    f"does not match action dimension ({traj['action'].shape[-1]})."
-                )
-            traj["absolute_action_mask"] = tf.tile(
-                tf.convert_to_tensor(absolute_action_mask, dtype=tf.bool)[None],
-                [traj_len, 1],
-            )
-
         return traj
+
+    def is_nonzero_length(traj):
+        return tf.shape(traj["action"])[0] > 0
 
     builder = tfds.builder(name, data_dir=data_dir)
 
@@ -388,22 +386,25 @@ def make_dataset_from_rlds(
         with tf.io.gfile.GFile(dataset_statistics, "r") as f:
             dataset_statistics = json.load(f)
     elif dataset_statistics is None:
-        full_dataset = dl.DLataset.from_rlds(
-            builder, split="all", shuffle=False, num_parallel_reads=num_parallel_reads
-        )
+        full_dataset = dl.DLataset.from_rlds(builder, split="all", shuffle=False)
         for filter_fcn_spec in filter_functions:
             full_dataset = full_dataset.filter(ModuleSpec.instantiate(filter_fcn_spec))
-        full_dataset = full_dataset.traj_map(restructure, num_parallel_calls)
+        if ignore_errors:
+            full_dataset = full_dataset.ignore_errors()
+        full_dataset = full_dataset.traj_map(restructure).filter(is_nonzero_length)
         # tries to load from cache, otherwise computes on the fly
         dataset_statistics = get_dataset_statistics(
             full_dataset,
             hash_dependencies=(
                 str(builder.info),
-                str(state_obs_keys),
-                inspect.getsource(standardize_fn) if standardize_fn is not None else "",
+                str(proprio_obs_key),
+                ModuleSpec.to_string(standardize_fn)
+                if standardize_fn is not None
+                else "",
                 *map(ModuleSpec.to_string, filter_functions),
             ),
             save_dir=builder.data_dir,
+            force_recompute=force_recompute_dataset_statistics,
         )
     dataset_statistics = tree_map(np.array, dataset_statistics)
 
@@ -430,16 +431,26 @@ def make_dataset_from_rlds(
     )
     for filter_fcn_spec in filter_functions:
         dataset = dataset.filter(ModuleSpec.instantiate(filter_fcn_spec))
-    dataset = dataset.traj_map(restructure, num_parallel_calls)
-    dataset = dataset.traj_map(
-        partial(
-            normalize_action_and_proprio,
-            metadata=dataset_statistics,
-            normalization_type=action_proprio_normalization_type,
-            skip_keys=norm_skip_keys,
-        ),
-        num_parallel_calls,
+    if ignore_errors:
+        dataset = dataset.ignore_errors()
+
+    dataset = dataset.traj_map(restructure, num_parallel_calls).filter(
+        is_nonzero_length
     )
+
+    if not skip_norm:
+        dataset = dataset.traj_map(
+            partial(
+                normalize_action_and_proprio,
+                metadata=dataset_statistics,
+                normalization_type=action_proprio_normalization_type,
+            ),
+            num_parallel_calls,
+        )
+    else:
+        logging.warning(
+            "Dataset normalization turned off -- set skip_norm=False to apply normalization."
+        )
 
     return dataset, dataset_statistics
 
@@ -482,7 +493,6 @@ def make_interleaved_dataset(
     shuffle_buffer_size: int,
     traj_transform_kwargs: dict = {},
     frame_transform_kwargs: dict = {},
-    dataset_statistics: Optional[Union[dict, str]] = None,
     batch_size: Optional[int] = None,
     balance_weights: bool = False,
     traj_transform_threads: Optional[int] = None,
@@ -500,9 +510,6 @@ def make_interleaved_dataset(
         traj_transform_kwargs: kwargs passed to `apply_trajectory_transforms`. "num_parallel_calls" is
             overidden using `traj_transform_threads`.
         frame_transform_kwargs: kwargs passed to `apply_frame_transforms`.
-        dataset_statistics: (dict|str, optional): dict (or path to JSON file) that contains dataset statistics
-            for normalization, see `make_dataset_from_rlds` for details. If set, applies *the same* normalization
-            statistics to all interleaved datasets. By default, each dataset is normalized by its own statistics.
         batch_size: batch size, if not provided output is not batched.
         balance_weights: if True, the sample weights are multiplied by the number of frames in each dataset.
             This makes it so that, if all the sample weights are equal, one full iteration through the interleaved
@@ -523,11 +530,14 @@ def make_interleaved_dataset(
 
     # go through datasets once to get sizes
     dataset_sizes = []
-    all_dataset_statistics = []
+    all_dataset_statistics = {}
     for dataset_kwargs in dataset_kwargs_list:
-        _, per_dataset_stats = make_dataset_from_rlds(**dataset_kwargs, train=train)
-        dataset_sizes.append(per_dataset_stats["num_transitions"])
-        all_dataset_statistics.append(per_dataset_stats)
+        _, dataset_statistics = make_dataset_from_rlds(**dataset_kwargs, train=train)
+        dataset_sizes.append(dataset_statistics["num_transitions"])
+        assert (
+            dataset_kwargs["name"] not in all_dataset_statistics
+        ), f"Duplicate name {dataset_kwargs['name']}"
+        all_dataset_statistics[dataset_kwargs["name"]] = dataset_statistics
 
     # balance and normalize weights
     if balance_weights:
@@ -544,9 +554,8 @@ def make_interleaved_dataset(
 
     # construct datasets
     datasets = []
-    for dataset_kwargs, per_dataset_stats, threads, reads in zip(
+    for dataset_kwargs, threads, reads in zip(
         dataset_kwargs_list,
-        all_dataset_statistics,
         threads_per_dataset,
         reads_per_dataset,
     ):
@@ -555,9 +564,7 @@ def make_interleaved_dataset(
             train=train,
             num_parallel_calls=threads,
             num_parallel_reads=reads,
-            dataset_statistics=dataset_statistics
-            if dataset_statistics is not None
-            else per_dataset_stats,
+            dataset_statistics=all_dataset_statistics[dataset_kwargs["name"]],
         )
         dataset = apply_trajectory_transforms(
             dataset.repeat(),
@@ -582,9 +589,9 @@ def make_interleaved_dataset(
     # this seems to reduce memory usage without affecting speed
     dataset = dataset.with_ram_budget(1)
 
+    dataset = dataset.ignore_errors(log_warning=True)
+
     # save for later
-    dataset.dataset_statistics = (
-        dataset_statistics if dataset_statistics is not None else all_dataset_statistics
-    )
+    dataset.dataset_statistics = all_dataset_statistics
     dataset.sample_weights = sample_weights
     return dataset
