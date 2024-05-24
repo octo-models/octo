@@ -32,7 +32,7 @@ def bridge_dataset_transform(trajectory: Dict[str, Any]) -> Dict[str, Any]:
             trajectory["action"][:, :6],
             binarize_gripper_actions(trajectory["action"][:, -1])[:, None],
         ],
-        axis=1,
+        axis=-1,
     )
     trajectory = relabel_actions(trajectory)
     trajectory["observation"]["proprio"] = trajectory["observation"]["state"]
