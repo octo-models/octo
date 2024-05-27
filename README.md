@@ -1,5 +1,5 @@
 # Octo
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1z0vELj_lX9OWeoMG_WvXnQs43aPOEAhz?usp=sharing)
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://githubtocolab.com/octo-models/octo/blob/main/examples/01_inference_pretrained.ipynb)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Static Badge](https://img.shields.io/badge/Project-Page-a)](https://octo-models.github.io/)
 ![](https://github.com/rail-berkeley/octo/workflows/run-debug/badge.svg)
@@ -15,7 +15,7 @@ for an inference example.
 
 ```python
 from octo.model.octo_model import OctoModel
-model = OctoModel.load_pretrained("hf://rail-berkeley/octo-base")
+model = OctoModel.load_pretrained("hf://rail-berkeley/octo-base-1.5")
 print(model.get_pretty_spec())
 ```
 
@@ -48,7 +48,7 @@ See the [Jax Github page](https://github.com/google/jax) for more details on ins
 
 Test the installation by finetuning on the debug dataset:
 ```bash
-python scripts/finetune.py --config.pretrained_path=hf://rail-berkeley/octo-small --debug
+python scripts/finetune.py --config.pretrained_path=hf://rail-berkeley/octo-small-1.5 --debug
 ```
 
 ## Checkpoints
@@ -99,7 +99,7 @@ We provide a [minimal example](examples/02_finetune_new_observation_action.py) f
 We also provide a more advanced finetuning script that allows you to change hyperparameters via a config file and logs finetuning
 metrics. To run advanced finetuning, use:
 ```bash
-python scripts/finetune.py --config.pretrained_path=hf://rail-berkeley/octo-small
+python scripts/finetune.py --config.pretrained_path=hf://rail-berkeley/octo-small-1.5
 ```
 
 We offer three finetuning modes depending on the parts of the model that are kept frozen: ```head_only```, ```head_mlp_only```, and ```full``` to finetune the full model.
@@ -114,9 +114,9 @@ Loading and running a trained Octo model is as easy as:
 ```python
 from octo.model import OctoModel
 
-model = OctoModel.load_pretrained("hf://rail-berkeley/octo-small")
+model = OctoModel.load_pretrained("hf://rail-berkeley/octo-small-1.5")
 task = model.create_tasks(texts=["pick up the spoon"])
-action = model.sample_action(observation, task, rng=jax.random.PRNGKey(0))
+action = model.sample_actions(observation, task, rng=jax.random.PRNGKey(0))
 ```
 
 We provide examples for evaluating Octo [in a simulated Gym environment](examples/03_eval_finetuned.py) as well
@@ -140,20 +140,29 @@ To evaluate on your own environment, simply wrap it in a Gym interface and follo
 | Visualization       | [visualization_lib.py](octo/utils/visualization_lib.py) | Utilities for offline qualitative & quantitative eval.                        |
 
 ## FAQ
-#### What is the `pad_mask` in the observation dictionary?
-The `pad_mask` indicates which observations should be attended to, which is important when using multiple timesteps of observation history. Octo was trained with a history window size of 2, meaning the model can predict an action using both the current observation and the previous observation. However, at the very beginning of the trajectory, there is no previous observation, so we need to set `pad_mask=False` at the corresponding index. If you use Octo with a window size of 1, pad_mask should always just be `[True]`, indicating that the one and only observation in the window should be attended to. Note that if you wrap your robot environment with the `HistoryWrapper` (see [gym_wrappers.py](octo/utils/gym_wrappers.py)), the `pad_mask` key will be added to the observation dictionary for you.
+#### What is the `timestep_pad_mask` in the observation dictionary?
+The `timestep_pad_mask` indicates which observations should be attended to, which is important when using multiple timesteps of observation history. Octo was trained with a history window size of 2, meaning the model can predict an action using both the current observation and the previous observation. However, at the very beginning of the trajectory, there is no previous observation, so we need to set `timestep_pad_mask=False` at the corresponding index. If you use Octo with a window size of 1, `timestep_pad_mask` should always just be `[True]`, indicating that the one and only observation in the window should be attended to. Note that if you wrap your robot environment with the `HistoryWrapper` (see [gym_wrappers.py](octo/utils/gym_wrappers.py)), the `timestep_pad_mask` key will be added to the observation dictionary for you.
 #### What is `pad_mask_dict` in the observation dictionary?
-While `pad_mask` indicates which observations should be attended to on a timestep level, `pad_mask_dict` indicates which elements of the observation should be attended to within a single timestep. For example, for datasets without language labels, `pad_mask_dict["language_instruction"]` is set to `False`. For datasets without a wrist camera, `pad_mask_dict["image_wrist"]` is set to `False`. For convenience, if a key is missing from the observation dict, it is equivalent to setting `pad_mask_dict` to `False` for that key.
+While `timestep_pad_mask` indicates which observations should be attended to on a timestep level, `pad_mask_dict` indicates which elements of the observation should be attended to within a single timestep. For example, for datasets without language labels, `pad_mask_dict["language_instruction"]` is set to `False`. For datasets without a wrist camera, `pad_mask_dict["image_wrist"]` is set to `False`. For convenience, if a key is missing from the observation dict, it is equivalent to setting `pad_mask_dict` to `False` for that key.
 #### Does `model.sample_actions([...])` return the full trajectory to solve a task?
 Octo was pretrained with an action chunking size of 4, meaning it predicts the next 4 actions at once. You can choose to execute all these actions before sampling new ones, or only execute the first action before sampling new ones (also known as receding horizon control). You can also do something more advanced like [temporal ensembling](octo/utils/gym_wrappers.py).
+
+## Updates for Version 1.5
+- Improved cross-attention between visual and language tokens by repeating language tokens at every timestep in the context window.
+- Augmented the language instructions in the data with rephrasings from GPT-3.5.
+- Bug fixes:
+  - Turned off dropout in the diffusion head due to incompatibility with layer norm.
+  - Fixed an off-by-one error with the attention mask.
+  - Fixed an issue where different image augmentations did not get fresh random seeds.
 
 ## Citation
 
 ```
-@misc{octo_2023,
+@inproceedings{octo_2023,
     title={Octo: An Open-Source Generalist Robot Policy},
-    author = {{Octo Model Team} and Dibya Ghosh and Homer Walke and Karl Pertsch and Kevin Black and Oier Mees and Sudeep Dasari and Joey Hejna and Charles Xu and Jianlan Luo and Tobias Kreiman and {You Liang} Tan and Dorsa Sadigh and Chelsea Finn and Sergey Levine},
-    howpublished  = {\url{https://octo-models.github.io}},
-    year = {2023},
+    author = {{Octo Model Team} and Dibya Ghosh and Homer Walke and Karl Pertsch and Kevin Black and Oier Mees and Sudeep Dasari and Joey Hejna and Charles Xu and Jianlan Luo and Tobias Kreiman and {You Liang} Tan and Pannag Sanketi and Quan Vuong and Ted Xiao and Dorsa Sadigh and Chelsea Finn and Sergey Levine},
+    booktitle = {Proceedings of Robotics: Science and Systems},
+    address  = {Delft, Netherlands},
+    year = {2024},
 }
 ```

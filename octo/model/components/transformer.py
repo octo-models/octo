@@ -238,7 +238,15 @@ def common_transformer_sizes(transformer_size: str) -> (int, dict):
             transformer_kwargs (dict): The kwargs to pass to the transformer
 
     """
-    assert transformer_size in ["dummy", "vanilla", "vit_s", "vit_b", "vit_l", "vit_h"]
+    assert transformer_size in [
+        "dummy",
+        "vanilla",
+        "vit_t",
+        "vit_s",
+        "vit_b",
+        "vit_l",
+        "vit_h",
+    ]
     default_params = {
         "attention_dropout_rate": 0.0,
         "add_position_embedding": False,
@@ -256,6 +264,12 @@ def common_transformer_sizes(transformer_size: str) -> (int, dict):
             mlp_dim=1024,
             num_attention_heads=8,
             dropout_rate=0.1,
+        ),
+        "vit_t": dict(
+            num_layers=12,
+            mlp_dim=768,
+            num_attention_heads=3,
+            dropout_rate=0.0,
         ),
         "vit_s": dict(
             num_layers=12,
@@ -286,6 +300,7 @@ def common_transformer_sizes(transformer_size: str) -> (int, dict):
     TOKEN_DIMS = {
         "dummy": 256,
         "vanilla": 256,
+        "vit_t": 192,
         "vit_s": 384,
         "vit_b": 768,
         "vit_l": 1024,

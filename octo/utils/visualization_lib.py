@@ -4,8 +4,7 @@ import matplotlib
 
 matplotlib.use("Agg")
 from dataclasses import dataclass
-import json
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, Optional
 
 import dlimp as dl
 import flax
@@ -23,9 +22,9 @@ import wandb
 
 from octo.utils.gym_wrappers import (
     HistoryWrapper,
+    NormalizeProprio,
     RHCWrapper,
     TemporalEnsembleWrapper,
-    UnnormalizeActionProprio,
 )
 
 BASE_METRIC_KEYS = {
@@ -58,14 +57,15 @@ BASE_METRIC_KEYS = {
     # What % of timesteps (near the actual gripper changes) is the predicted gripper correct?
     "gripping_accuracy": ("gripper_correct", ("gripper_changing",)),
     # Gripper prediction accuracy
-    # "gripping_accuracy_full": ("gripper_correct", tuple()),
+    "gripping_accuracy_full": ("gripper_correct", tuple()),
+    # The metrics below require propio to compute, uncomment if dataloader returns proprio
     # What is the relative height (in m) that we try to grip at, compared to the data?
-    "grip_height": ("height_to_grip", ("is_first_grip",)),
+    # "grip_height": ("height_to_grip", ("is_first_grip",)),
     # "early_gripped": ("early_gripped", ("is_first_grip",)),
     # What percentage of grips do we attempt early (early = higher than the height gripped at in the data)
-    "early_gripped_height_aware": ("early_gripped_height_aware", ("is_first_grip",)),
+    # "early_gripped_height_aware": ("early_gripped_height_aware", ("is_first_grip",)),
     # What timestep do we attempt to grip at (relative to the first timestep we should at)
-    "grip_timestep_early": ("timestep_to_grip", ("is_first_grip",)),
+    # "grip_timestep_early": ("timestep_to_grip", ("is_first_grip",)),
 }
 
 
@@ -105,8 +105,12 @@ def run_policy_on_trajectory(policy_fn, traj, *, text_processor=None):
         "n": np.array(len_traj),
         "pred_actions_chunk": actions,
         "pred_actions": actions[:, :, 0],  # only use first predicted action
-        "actions": traj["action"][:, horizon - 1, :],
-        "proprio": traj["observation"]["proprio"][:, horizon - 1],
+        "actions": traj["action"][:, horizon - 1, 0],  # only use first action
+        **(
+            {"proprio": traj["observation"]["proprio"][:, horizon - 1]}
+            if "proprio" in traj["observation"]
+            else {}
+        ),
     }
 
 
@@ -200,8 +204,9 @@ class Visualizer:
             info = add_unnormalized_info(info, self.action_proprio_stats)
             info = add_manipulation_metrics(info)
 
-            plotly_fig = plot_trajectory_actions(**info)
-            visualizations[f"traj_{n}"] = plotly_fig
+            if "unnorm_proprio" in info:
+                plotly_fig = plot_trajectory_actions(**info)
+                visualizations[f"traj_{n}"] = plotly_fig
 
             # plot qualitative action trajectory per dimension w/ and w/o action chunk
             visualizations[f"traj_{n}_mpl"] = plot_trajectory_overview_mpl(
@@ -269,50 +274,40 @@ class RolloutVisualizer:
     Args:
         env_name (str): Gym.make environment creation string
         history_length (int): Number of history steps policy gets conditioned on (window_size).
-        action_chunk (int): Number of future steps.
+        exec_horizon (int): Number of executed action steps.
         max_episode_length (int): Max number of steps per rollout episode.
+        env_kwargs (dict): Additional kwargs to pass to gym.make
+        use_temp_ensembling (bool): Whether to use temporal ensembling or receding horizon control.
         vis_fps (int): FPS of logged rollout video
         video_subsample_rate (int): Subsampling rate for video logging (to reduce video size for high-frequency control)
-        norm_statistics (Union[str, dict], optional): Stats for de-normalizing policy actions & proprio.
-        use_temporal_averaging (bool): If true, uses temporal averaging of action chunks during rollout.
+        action_proprio_metadata (dict): Dictionary of normalization statistics for proprio and actions.
     """
 
+    name: str
     env_name: str
     history_length: int
-    action_chunk: int
+    exec_horizon: int
     max_episode_length: int
+    env_kwargs: Dict[str, Any]
+    use_temp_ensembling: bool = True
     vis_fps: int = 10
     video_subsample_rate: int = 1
-    norm_statistics: Optional[Union[str, Dict[str, Any]]] = None
-    text_processor: object = None
-    use_temp_averaging: bool = False
+    action_proprio_metadata: Optional[dict] = None
 
     def __post_init__(self):
-        self._env = gym.make(self.env_name)
-        self._env = HistoryWrapper(self._env, self.history_length)
-        if self.use_temp_averaging:
-            self._env = RHCWrapper(self._env, 1)
-            self._env = TemporalEnsembleWrapper(self._env, self.action_chunk)
+        self._env = gym.make(self.env_name, **self.env_kwargs)
+        if self.action_proprio_metadata is not None:
+            self._env = NormalizeProprio(self._env, self.action_proprio_metadata)
+        self._env = HistoryWrapper(
+            self._env,
+            self.history_length,
+        )
+        if self.use_temp_ensembling:
+            self._env = TemporalEnsembleWrapper(self._env, self.exec_horizon)
         else:
-            self._env = RHCWrapper(self._env, self.action_chunk)
-        if self.norm_statistics:
-            if isinstance(self.norm_statistics, str):
-                with tf.io.gfile.GFile(self.norm_statistics, "r") as f:
-                    norm_stats = json.load(f)
-            norm_stats = jax.tree_map(
-                lambda x: np.array(x),
-                norm_stats,
-                is_leaf=lambda x: not isinstance(x, dict),
-            )
-            self._env = UnnormalizeActionProprio(
-                self._env, norm_stats, normalization_type="normal"
-            )
+            self._env = RHCWrapper(self._env, self.exec_horizon)
 
-    def run_rollouts(self, policy_fn, n_rollouts=10, n_vis_rollouts=3):
-        def extract_images(obs):
-            # obs has [window_size, ...] shape, only use first time step
-            return jnp.concatenate([obs[k][0] for k in obs if "image_" in k], axis=-2)
-
+    def run_rollouts(self, policy_fn, state, mode, n_rollouts=10, n_vis_rollouts=3):
         def listdict2dictlist(LD):
             return {k: [dic[k] for dic in LD] for k in LD[0]}
 
@@ -322,28 +317,30 @@ class RolloutVisualizer:
         }
         for rollout_idx in tqdm.tqdm(range(n_rollouts)):
             obs, info = self._env.reset()
-            task = self._env.get_task()
-            if jax.tree_util.tree_leaves(task)[0].shape[0] != 1:
-                task = jax.tree_map(lambda x: x[None], task)
-            if "language_instruction" in task:
-                if self.text_processor:
-                    task["language_instruction"] = self.text_processor.encode(
-                        [s.decode("utf-8") for s in task["language_instruction"]]
-                    )
-                else:
-                    task.pop("language_instruction")
-            images = [extract_images(obs)]
+            if mode == "text_conditioned":
+                task = state.model.create_tasks(texts=[self._env.get_instruction()])
+            elif mode == "image_conditioned":
+                task = state.model.create_tasks(goals=self._env.get_goal())
+            else:
+                raise ValueError(f"Rollout eval mode {mode} not supported")
+            images = [obs["image_primary"][-1]]
             episode_return = 0.0
             metrics = []
             while len(images) < self.max_episode_length:
                 # policy outputs are shape [batch, n_samples, pred_horizon, act_dim]
                 # we remove batch dimension & use first sampled action, ignoring other samples
-                actions = policy_fn(jax.tree_map(lambda x: x[None], obs), task)[0, 0]
+                actions = policy_fn(jax.tree_map(lambda x: x[None], obs), task)
+                actions = np.array(actions[0, 0])
                 obs, reward, done, trunc, info = self._env.step(actions)
-                images.extend([extract_images(o) for o in info["observations"]])
+                if "observations" in info:
+                    images.extend(
+                        [o["image_primary"][-1] for o in info["observations"]]
+                    )
+                else:
+                    images.append(obs["image_primary"][-1])
                 episode_return += reward
                 if "metrics" in info:
-                    metrics.extend(info["metrics"])
+                    metrics.append(info["metrics"])
                 if done or trunc:
                     break
 
@@ -371,6 +368,11 @@ class RolloutVisualizer:
                 assert (
                     images[0].shape[-1] == 3
                 ), f"Expect [height, width, channels] format, got {images[0].shape}"
+                if mode == "image_conditioned":
+                    images = [
+                        np.concatenate([task["image_primary"][0], frame], axis=0)
+                        for frame in images
+                    ]
                 rollout_info[f"rollout_{rollout_idx}_vid"] = wandb.Video(
                     np.array(images).transpose(0, 3, 1, 2)[
                         :: self.video_subsample_rate
@@ -381,19 +383,23 @@ class RolloutVisualizer:
         rollout_info["episode_returns"] = wandb.Histogram(
             rollout_info["episode_returns"]
         )
-        metrics = listdict2dictlist(rollout_info.pop("episode_metrics"))
-        for metric in metrics:
-            rollout_info[metric] = wandb.Histogram(metrics[metric])
-            rollout_info[f"avg_{metric}"] = np.mean(metrics[metric])
+        if rollout_info["episode_metrics"]:
+            metrics = listdict2dictlist(rollout_info.pop("episode_metrics"))
+            for metric in metrics:
+                rollout_info[metric] = wandb.Histogram(metrics[metric])
+                rollout_info[f"avg_{metric}"] = np.mean(metrics[metric])
+        else:
+            rollout_info.pop("episode_metrics")
         return rollout_info
 
 
-def unnormalize(arr, mean, std, **kwargs):
-    return arr * np.array(std) + np.array(mean)
-
-
-def normalize(arr, mean, std, **kwargs):
-    return (arr - np.array(mean)) / np.array(std)
+def unnormalize(arr, mean, std, mask=None, **kwargs):
+    if mask is None:
+        mask = np.ones_like(mean)
+    adim = mean.shape[0]
+    trunc_arr = arr[..., :adim]
+    unnorm_arr = np.where(mask, trunc_arr * np.array(std) + np.array(mean), trunc_arr)
+    return np.concatenate([unnorm_arr, arr[..., adim:]], axis=-1)
 
 
 def add_unnormalized_info(
@@ -411,8 +417,14 @@ def add_unnormalized_info(
             "unnorm_actions": unnormalize(
                 info["actions"], **normalization_stats["action"]
             ),
-            "unnorm_proprio": unnormalize(
-                info["proprio"], **normalization_stats["proprio"]
+            **(
+                {
+                    "unnorm_proprio": unnormalize(
+                        info["proprio"], **normalization_stats["proprio"]
+                    )
+                }
+                if "proprio" in info
+                else {}
             ),
         }
     )
@@ -442,7 +454,7 @@ def add_manipulation_metrics(info):
             **_mse_info(**kwargs),
             **_xyz_info(**kwargs),
             **_condition_info(**kwargs),
-            **_gripping_early_metrics(**kwargs),
+            **(_gripping_early_metrics(**kwargs) if "proprio" in kwargs else {}),
         }
 
     new_metrics = jax.vmap(per_sample_info, in_axes=(1, None), out_axes=1)(
@@ -543,7 +555,6 @@ def plot_trajectory_overview_mpl(
     traj,
     act,
     unnorm_actions,
-    unnorm_proprio,
     **info,
 ):
     n_act_dims = traj["action"].shape[-1]

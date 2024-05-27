@@ -1,6 +1,6 @@
 """
 This script demonstrates how to load and rollout a finetuned Octo model.
-We use the Octo model finetuned on ALOHA sim data from the examples/finetune_new_observation_action.py script.
+We use the Octo model finetuned on ALOHA sim data from the examples/02_finetune_new_observation_action.py script.
 
 For installing the ALOHA sim environment, clone: https://github.com/tonyzhaozh/act
 Then run:
@@ -15,6 +15,7 @@ To run this script, run:
     cd examples
     python3 03_eval_finetuned.py --finetuned_path=<path_to_finetuned_aloha_checkpoint>
 """
+from functools import partial
 import sys
 
 from absl import app, flags, logging
@@ -25,10 +26,12 @@ import wandb
 
 sys.path.append("path/to/your/act")
 
-from envs.aloha_sim_env import AlohaGymEnv  # keep this to register ALOHA sim env
+# keep this to register ALOHA sim env
+from envs.aloha_sim_env import AlohaGymEnv  # noqa
 
 from octo.model.octo_model import OctoModel
-from octo.utils.gym_wrappers import HistoryWrapper, RHCWrapper, UnnormalizeActionProprio
+from octo.utils.gym_wrappers import HistoryWrapper, NormalizeProprio, RHCWrapper
+from octo.utils.train_callbacks import supply_rng
 
 FLAGS = flags.FLAGS
 
@@ -49,27 +52,31 @@ def main(_):
     ##################################################################################################################
     # environment needs to implement standard gym interface + return observations of the following form:
     #   obs = {
-    #     "image_0": ...
-    #     "image_1": ...
+    #     "image_primary": ...
     #   }
     # it should also implement an env.get_task() function that returns a task dict with goal and/or language instruct.
     #   task = {
     #     "language_instruction": "some string"
     #     "goal": {
-    #       "image_0": ...
-    #       "image_1": ...
+    #       "image_primary": ...
     #     }
     #   }
     ##################################################################################################################
     env = gym.make("aloha-sim-cube-v0")
 
+    # wrap env to normalize proprio
+    env = NormalizeProprio(env, model.dataset_statistics)
+
     # add wrappers for history and "receding horizon control", i.e. action chunking
     env = HistoryWrapper(env, horizon=1)
     env = RHCWrapper(env, exec_horizon=50)
 
-    # wrap env to handle action/proprio normalization -- match normalization type to the one used during finetuning
-    env = UnnormalizeActionProprio(
-        env, model.dataset_statistics, normalization_type="normal"
+    # the supply_rng wrapper supplies a new random key to sample_actions every time it's called
+    policy_fn = supply_rng(
+        partial(
+            model.sample_actions,
+            unnormalization_statistics=model.dataset_statistics["action"],
+        ),
     )
 
     # running rollouts
@@ -85,9 +92,7 @@ def main(_):
         episode_return = 0.0
         while len(images) < 400:
             # model returns actions of shape [batch, pred_horizon, action_dim] -- remove batch
-            actions = model.sample_actions(
-                jax.tree_map(lambda x: x[None], obs), task, rng=jax.random.PRNGKey(0)
-            )
+            actions = policy_fn(jax.tree_map(lambda x: x[None], obs), task)
             actions = actions[0]
 
             # step env -- info contains full "chunk" of observations for logging

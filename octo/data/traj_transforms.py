@@ -3,78 +3,99 @@ Contains trajectory transforms used in the octo data pipeline. Trajectory transf
 that represents a single trajectory, meaning each tensor has the same leading dimension (the trajectory
 length).
 """
-import logging
+from typing import Optional
 
 import tensorflow as tf
 
 
 def chunk_act_obs(
     traj: dict,
-    window_size: int,
-    future_action_window_size: int = 0,
+    window_size: int = 1,
+    action_horizon: int = 1,
 ) -> dict:
-    """Chunks actions and observations into the given window_size.
+    """Chunks actions and observations.
 
-    "observation" keys are given a new axis (at index 1) of size `window_size` containing `window_size - 1`
-    observations from the past and the current observation. "action" is given a new axis (at index 1) of size
-    `window_size + future_action_window_size` containing `window_size - 1` actions from the past, the current
-    action, and `future_action_window_size` actions from the future. "pad_mask" is added to "observation" and
-    indicates whether an observation should be considered padding (i.e. if it would have come from a timestep
-    before the start of the trajectory).
+    "observation" keys are given a new history axis, making them of shape [traj_len, window_size, ...],
+    containing the observation history at each timestep from `t - window_size + 1` to `t`.
+
+    The "action" key is given two new axes, making it of shape [traj_len, window_size, action_horizon,
+    action_dim]. The first two axes are the same as in the observations, i.e., an action chunk `action[t, h]`
+    corresponds to an observation `observation[t, h]`. The third axis indexes into the action chunk,
+    containing the current action plus `action_horizon - 1` future actions.
+
+    The "action" key can also be pre-chunked coming into this function, meaning it starts with shape
+    [traj_len, N, action_dim] instead of [traj_len, action_dim]. In this case, `N` must be larger than or
+    equal to `action_horizon`, and only one axis will be added (the history axis). This is useful for
+    custom chunking schemes where an action may differ depending on which observation it is paired with.
     """
     traj_len = tf.shape(traj["action"])[0]
-    action_dim = traj["action"].shape[-1]
-    chunk_indices = tf.broadcast_to(
-        tf.range(-window_size + 1, 1), [traj_len, window_size]
-    ) + tf.broadcast_to(tf.range(traj_len)[:, None], [traj_len, window_size])
 
-    action_chunk_indices = tf.broadcast_to(
-        tf.range(-window_size + 1, 1 + future_action_window_size),
-        [traj_len, window_size + future_action_window_size],
-    ) + tf.broadcast_to(
-        tf.range(traj_len)[:, None],
-        [traj_len, window_size + future_action_window_size],
-    )
+    # chunk observations into histories
+    history_indices = tf.range(traj_len)[:, None] + tf.range(
+        -window_size + 1, 1
+    )  # [traj_len, window_size]
+    # indicates which observations at the beginning of the trajectory are padding
+    timestep_pad_mask = history_indices >= 0
+    # repeat the first observation at the beginning of the trajectory rather than going out of bounds
+    history_indices = tf.maximum(history_indices, 0)
+    # gather
+    traj["observation"] = tf.nest.map_structure(
+        lambda x: tf.gather(x, history_indices), traj["observation"]
+    )  # [traj_len, window_size, ...]
+    traj["observation"]["timestep_pad_mask"] = timestep_pad_mask
 
-    floored_chunk_indices = tf.maximum(chunk_indices, 0)
+    # first, chunk actions into `action_horizon` current + future actions
+    if len(traj["action"].shape) == 2:
+        # actions are not pre-chunked
+        action_chunk_indices = tf.range(traj_len)[:, None] + tf.range(
+            action_horizon
+        )  # [traj_len, action_horizon]
+        # repeat the last action at the end of the trajectory rather than going out of bounds
+        action_chunk_indices = tf.minimum(action_chunk_indices, traj_len - 1)
+        # gather
+        traj["action"] = tf.gather(
+            traj["action"], action_chunk_indices
+        )  # [traj_len, action_horizon, action_dim]
+    else:
+        # actions are pre-chunked, so we don't add a new axis
+        if traj["action"].shape[1] < action_horizon:
+            raise ValueError(
+                f"action_horizon ({action_horizon}) is greater than the pre-chunked action dimension ({traj['action'].shape[1]})"
+            )
+        traj["action"] = traj["action"][:, :action_horizon]
 
+    # then, add the history axis to actions
+    traj["action"] = tf.gather(
+        traj["action"], history_indices
+    )  # [traj_len, window_size, action_horizon, action_dim]
+
+    # finally, we deal with marking which actions are past the goal timestep (or final timestep if no goal)
     if "timestep" in traj["task"]:
         goal_timestep = traj["task"]["timestep"]
     else:
         goal_timestep = tf.fill([traj_len], traj_len - 1)
+    # computes the number of timesteps away the goal is relative to a particular action
+    t, w, h = tf.meshgrid(
+        tf.range(traj_len),
+        tf.range(window_size),
+        tf.range(action_horizon),
+        indexing="ij",
+    )
+    relative_goal_timestep = goal_timestep[:, None, None] - (
+        t - (window_size + 1) + w + h
+    )  # [traj_len, window_size, action_horizon]
+    traj["observation"]["task_completed"] = relative_goal_timestep <= 0
 
-    floored_action_chunk_indices = tf.minimum(
-        tf.maximum(action_chunk_indices, 0), goal_timestep[:, None]
+    # broadcast "action_pad_mask" to the new chunked shape, and mark actions past the goal timestep as padding
+    traj["action_pad_mask"] = tf.logical_and(
+        # [traj_len, 1, 1, action_dim]
+        traj["action_pad_mask"][:, None, None, :]
+        if len(traj["action_pad_mask"].shape) == 2
+        else traj["action_pad_mask"][:, None, :],
+        # [traj_len, window_size, action_horizon, 1]
+        tf.logical_not(traj["observation"]["task_completed"])[:, :, :, None],
     )
 
-    traj["observation"] = tf.nest.map_structure(
-        lambda x: tf.gather(x, floored_chunk_indices), traj["observation"]
-    )
-    traj["action"] = tf.gather(traj["action"], floored_action_chunk_indices)
-
-    # indicates whether an entire observation is padding
-    traj["observation"]["pad_mask"] = chunk_indices >= 0
-
-    # if no absolute_action_mask was provided, assume all actions are relative
-    if "absolute_action_mask" not in traj and future_action_window_size > 0:
-        logging.warning(
-            "future_action_window_size > 0 but no absolute_action_mask was provided. "
-            "Assuming all actions are relative for the purpose of making neutral actions."
-        )
-    absolute_action_mask = traj.get(
-        "absolute_action_mask", tf.zeros([traj_len, action_dim], dtype=tf.bool)
-    )
-    neutral_actions = tf.where(
-        absolute_action_mask[:, None, :],
-        traj["action"],  # absolute actions are repeated (already done during chunking)
-        tf.zeros_like(traj["action"]),  # relative actions are zeroed
-    )
-
-    # actions past the goal timestep become neutral
-    action_past_goal = action_chunk_indices > goal_timestep[:, None]
-    traj["action"] = tf.where(
-        action_past_goal[:, :, None], neutral_actions, traj["action"]
-    )
     return traj
 
 
@@ -103,4 +124,39 @@ def add_pad_mask_dict(traj: dict) -> dict:
                 # all other keys should not be treated as padding
                 pad_mask_dict[subkey] = tf.ones([traj_len], dtype=tf.bool)
         traj[key]["pad_mask_dict"] = pad_mask_dict
+    return traj
+
+
+def pad_actions_and_proprio(
+    traj: dict, max_action_dim: Optional[int], max_proprio_dim: Optional[int]
+) -> dict:
+    """Pads actions and proprio to a maximum number of dimensions across all datasets.
+
+    Records which action dimensions are padding in "action_pad_mask".
+    """
+    traj["action_pad_mask"] = tf.ones_like(traj["action"], dtype=tf.bool)
+    if max_action_dim is not None:
+        action_dim = traj["action"].shape[-1]
+        if action_dim > max_action_dim:
+            raise ValueError(
+                f"action_dim ({action_dim}) is greater than max_action_dim ({max_action_dim})"
+            )
+        for key in {"action", "action_pad_mask"}:
+            traj[key] = tf.pad(
+                traj[key],
+                [
+                    *[[0, 0]] * (len(traj[key].shape) - 1),
+                    [0, max_action_dim - action_dim],
+                ],
+            )
+
+    if max_proprio_dim is not None and "proprio" in traj["observation"]:
+        proprio_dim = traj["observation"]["proprio"].shape[-1]
+        if proprio_dim > max_proprio_dim:
+            raise ValueError(
+                f"proprio_dim ({proprio_dim}) is greater than max_proprio_dim ({max_proprio_dim})"
+            )
+        traj["observation"]["proprio"] = tf.pad(
+            traj["observation"]["proprio"], [[0, 0], [0, max_proprio_dim - proprio_dim]]
+        )
     return traj

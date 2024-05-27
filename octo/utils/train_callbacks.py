@@ -95,11 +95,13 @@ class SaveCallback(Callback):
             )
 
 
-def remove_text(tasks: Data, zero_text_encoding: Data):
+def remove_text(tasks: Data, zero_text_encoding: Optional[Data]):
     """Replaces language encoding inside task dict with that of the empty string.
 
     zero_text_encoding = jax.tree_map(lambda x: x[0], text_processor.encode([""]))
     """
+    if zero_text_encoding is None:
+        zero_text_encoding = jnp.zeros((1,))
     if "language_instruction" in tasks:
         new_language = jax.tree_map(
             lambda x, example: jnp.broadcast_to(example[None], x.shape),
@@ -134,18 +136,25 @@ def remove_images(tasks: Data):
     return flax.core.copy(tasks, updates)
 
 
-@partial(jax.jit, static_argnames=("samples_per_state", "policy_mode"))
+def supply_rng(f, rng=jax.random.PRNGKey(0)):
+    def wrapped(*args, **kwargs):
+        nonlocal rng
+        rng, key = jax.random.split(rng)
+        return f(*args, rng=key, **kwargs)
+
+    return wrapped
+
+
 def get_policy_sampled_actions(
     state: TrainState,
     observations,
     tasks,
-    *,
     zero_text,
     samples_per_state,
+    rng,
+    unnormalization_statistics=None,
     policy_mode=None,
 ):
-    # only use first horizon timesteps as input to predict_action
-
     if policy_mode == "text_conditioned":
         tasks = remove_images(tasks)
     elif policy_mode == "image_conditioned":
@@ -156,10 +165,11 @@ def get_policy_sampled_actions(
     actions = state.model.sample_actions(
         observations,
         tasks,
+        unnormalization_statistics=unnormalization_statistics,
         train=False,
         argmax=False,
         sample_shape=(samples_per_state,),
-        rng=state.rng,
+        rng=rng,
     )
 
     # viz expects (batch_size, n_samples, action_dim)
@@ -184,6 +194,8 @@ class ValidationCallback(Callback):
             self.zero_text = jax.tree_map(
                 lambda x: x[0], self.text_processor.encode("")
             )
+        else:
+            self.zero_text = None
         self.val_iterators = {}
         for single_dataset_kwargs in self.val_dataset_kwargs_list:
             val_dataset = create_validation_dataset(
@@ -263,7 +275,12 @@ class VisualizationCallback(Callback):
     train: bool = False
 
     def __post_init__(self):
-        self.zero_text = jax.tree_map(lambda x: x[0], self.text_processor.encode(""))
+        if self.text_processor is not None:
+            self.zero_text = jax.tree_map(
+                lambda x: x[0], self.text_processor.encode("")
+            )
+        else:
+            self.zero_text = None
 
         self.visualizers = {}
         for single_dataset_kwargs in self.val_dataset_kwargs_list:
@@ -281,12 +298,14 @@ class VisualizationCallback(Callback):
         wandb_metrics = {}
         modal_policy_fns = {
             mode: batched_apply(
-                partial(
-                    get_policy_sampled_actions,
-                    train_state,
-                    zero_text=self.zero_text,
-                    samples_per_state=self.samples_per_state,
-                    policy_mode=mode,
+                supply_rng(
+                    partial(
+                        get_policy_sampled_actions,
+                        train_state,
+                        zero_text=self.zero_text,
+                        samples_per_state=self.samples_per_state,
+                        policy_mode=mode,
+                    )
                 ),
                 self.eval_batch_size,
             )
@@ -314,20 +333,20 @@ class RolloutVisualizationCallback(Callback):
     visualizer_kwargs_list: Sequence[Mapping[str, Any]]
     text_processor: TextProcessor
     trajs_for_rollouts: int
-    model_pred_horizon: int
-    history_length: int
+    action_proprio_metadata: dict
     modes_to_evaluate: str = ("text_conditioned", "image_conditioned")
 
     def __post_init__(self):
-        self.zero_text = jax.tree_map(lambda x: x[0], self.text_processor.encode(""))
+        if self.text_processor is not None:
+            self.zero_text = jax.tree_map(
+                lambda x: x[0], self.text_processor.encode("")
+            )
+        else:
+            self.zero_text = None
 
         self.rollout_visualizers = [
             RolloutVisualizer(
-                text_processor=self.text_processor,
-                history_length=self.history_length,
-                action_chunk=self.model_pred_horizon
-                if "pred_horizon" not in kwargs
-                else kwargs["pred_horizon"],
+                action_proprio_metadata=self.action_proprio_metadata,
                 **kwargs,
             )
             for kwargs in self.visualizer_kwargs_list
@@ -336,12 +355,15 @@ class RolloutVisualizationCallback(Callback):
     def __call__(self, train_state: TrainState, step: int):
         wandb_metrics = {}
         modal_policy_fns = {
-            mode: partial(
-                get_policy_sampled_actions,
-                train_state,
-                zero_text=self.zero_text,
-                samples_per_state=1,
-                policy_mode=mode,
+            mode: supply_rng(
+                partial(
+                    get_policy_sampled_actions,
+                    train_state,
+                    unnormalization_statistics=self.action_proprio_metadata["action"],
+                    zero_text=self.zero_text,
+                    samples_per_state=1,
+                    policy_mode=mode,
+                )
             )
             for mode in self.modes_to_evaluate
         }
@@ -349,10 +371,10 @@ class RolloutVisualizationCallback(Callback):
             for mode, policy_fn in modal_policy_fns.items():
                 logging.info(f"Running rollouts for {rollout_visualizer.env_name}")
                 rollout_infos = rollout_visualizer.run_rollouts(
-                    policy_fn, n_rollouts=self.trajs_for_rollouts
+                    policy_fn, train_state, mode, n_rollouts=self.trajs_for_rollouts
                 )
                 wandb_metrics[
-                    f"rollouts_{rollout_visualizer.env_name}_chunk{rollout_visualizer.action_chunk}/{mode}"
+                    f"rollouts_{rollout_visualizer.name}/{mode}"
                 ] = rollout_infos
 
         return wandb_metrics
