@@ -79,7 +79,7 @@ class OctoTransformer(nn.Module):
 
     observation_tokenizers: Dict[str, nn.Module]
     task_tokenizers: Dict[str, nn.Module]
-    readouts: Dict[str, int]
+    readout_tokenizers: Dict[str, int | nn.Module]
     transformer_kwargs: Dict
     token_embedding_size: int
     max_horizon: int
@@ -92,7 +92,7 @@ class OctoTransformer(nn.Module):
         observations: Data,
         tasks: Data,
         timestep_pad_mask: jax.Array,
-        readouts: Optional[Sequence[str]] = None,
+        readout_tokenizers: Optional[Sequence[str]] = None,
         train: bool = False,
         verbose: bool = False,
     ) -> Dict[str, TokenGroup]:
@@ -114,15 +114,15 @@ class OctoTransformer(nn.Module):
 
         Note: Horizon can be anything <= max_horizon.
         """
-        if readouts is None:
-            readouts = list(self.readouts.keys())
+        if readout_tokenizers is None:
+            readout_tokenizers = list(self.readout_tokenizers.keys())
 
         #
         # Check that all inputs are valid
         #
 
-        assert set(readouts).issubset(
-            set(self.readouts.keys())
+        assert set(readout_tokenizers).issubset(
+            set(self.readout_tokenizers.keys())
         ), "readouts must be specified in the model config"
 
         batch_size, horizon = jax.tree_util.tree_leaves(observations)[0].shape[:2]
@@ -241,32 +241,58 @@ class OctoTransformer(nn.Module):
         # Finally, add the readout tokens
         #
 
-        for readout_name in readouts:
-            group_name = f"readout_{readout_name}"
-            # Readouts do not correspond to any inputs, just positional embeddings
-            n_tokens_for_readout = self.readouts[readout_name]
-            readout_tokens = jnp.zeros(
-                (batch_size, horizon, n_tokens_for_readout, self.token_embedding_size)
-            )
+        for name, tok in self.readout_tokenizers.items():
+            group_name = f"readout_{name}"
+            if isinstance(tok, nn.Module):
+                tokenizer_output: TokenGroup = tok(observations, tasks, train=train)
+                if tokenizer_output is None:
+                    logging.warning(f"Skipping observation tokenizer: {group_name}")
+                    continue
 
-            # Add positional embedding
-            readout_tokens += self._create_positional_embedding(
-                group_name, readout_tokens
-            )
-            readout_mask = jnp.ones((batch_size, horizon, n_tokens_for_readout))
-            readout_attention_rules = {
-                "task_*": AttentionRule.CAUSAL,
-                "obs_*": AttentionRule.CAUSAL,
-                group_name: AttentionRule.CAUSAL,
-            }  # Attend to tasks, all previous observations, and *only it's own own readout*
+                obs_tokens = nn.Dense(
+                    self.token_embedding_size, name=f"{group_name}_projection"
+                )(tokenizer_output.tokens)
+                # obs_tokens shape is (batch, horizon, n_tokens, token_embedding_size)
 
-            all_timestep_groups.append(
-                TimestepGroup(
-                    tokens=readout_tokens,
-                    mask=readout_mask,
-                    name=group_name,
-                    attention_rules=readout_attention_rules,
+                # Add positional embedding
+                obs_tokens += self._create_positional_embedding(group_name, obs_tokens)
+
+                # Update mask to account for which timesteps are padding
+                obs_pad_mask = jnp.logical_and(pad_mask[:, :, None], tokenizer_output.mask)
+
+                all_timestep_groups.append(
+                    TimestepGroup(
+                        tokens=obs_tokens,
+                        mask=obs_pad_mask,
+                        name=group_name,
+                        attention_rules=observation_attention_rules,
+                    )
                 )
+            elif isinstance(tok, int):
+                # Readouts do not correspond to any inputs, just positional embeddings
+                n_tokens_for_readout = self.readout_tokenizers[name]
+                readout_tokens = jnp.zeros(
+                    (batch_size, horizon, n_tokens_for_readout, self.token_embedding_size)
+                )
+
+                # Add positional embedding
+                readout_tokens += self._create_positional_embedding(
+                    group_name, readout_tokens
+                )
+                readout_mask = jnp.ones((batch_size, horizon, n_tokens_for_readout))
+                readout_attention_rules = {
+                    "task_*": AttentionRule.CAUSAL,
+                    "obs_*": AttentionRule.CAUSAL,
+                    group_name: AttentionRule.CAUSAL,
+                }  # Attend to tasks, all previous observations, and *only it's own own readout*
+
+                all_timestep_groups.append(
+                    TimestepGroup(
+                        tokens=readout_tokens,
+                        mask=readout_mask,
+                        name=group_name,
+                        attention_rules=readout_attention_rules,
+                    )
             )
 
         # Run the transformer!
@@ -373,7 +399,7 @@ class OctoModule(nn.Module):
         observation_tokenizers: Dict[str, ModuleSpec],
         task_tokenizers: Dict[str, ModuleSpec],
         heads: Dict[str, ModuleSpec],
-        readouts: Dict[str, int],
+        readout_tokenizers: Dict[str, int | ModuleSpec],
         transformer_kwargs: Dict,
         token_embedding_size: int,
         max_horizon: int,
@@ -407,13 +433,17 @@ class OctoModule(nn.Module):
         task_tokenizer_defs = {
             k: ModuleSpec.instantiate(spec)() for k, spec in task_tokenizers.items()
         }
+        readout_tokenizer_defs = {
+            k: ModuleSpec.instantiate(spec)() if isinstance(spec, dict) else spec
+            for k, spec in readout_tokenizers.items()
+        }
 
         head_defs = {k: ModuleSpec.instantiate(spec)() for k, spec in heads.items()}
 
         model_def = OctoTransformer(
             observation_tokenizers=observation_tokenizer_defs,
             task_tokenizers=task_tokenizer_defs,
-            readouts=readouts,
+            readout_tokenizers=readout_tokenizer_defs,
             token_embedding_size=token_embedding_size,
             max_horizon=max_horizon,
             repeat_task_tokens=repeat_task_tokens,

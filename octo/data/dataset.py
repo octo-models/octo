@@ -356,6 +356,7 @@ def make_dataset_from_rlds(
 
         # add timestep info
         new_obs["timestep"] = tf.range(traj_len)
+        new_obs['next_action'] = old_obs['next_action']
 
         # extracts `language_key` into the "task" dict, or samples uniformly if `language_key` fnmatches multiple keys
         task = {}

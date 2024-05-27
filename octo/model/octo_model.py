@@ -277,6 +277,8 @@ class OctoModel:
             tf.io.gfile.join(checkpoint_path, "config.json"), "r"
         ) as f:
             config = json.load(f)
+            if 'readouts' in config['model']:
+                config['model']['readout_tokenizers'] = config['model'].pop('readouts')
 
         # shim to support old configs
         if "pred_horizon" in config["model"]["heads"]["action"]["kwargs"]:
