@@ -142,6 +142,9 @@ def main(_):
         del batch["dataset_name"]
         return batch
 
+    # copy the original config before we modify it
+    model_config = FLAGS.config.to_dict()
+
     # load datasets
     if "oxe_kwargs" in FLAGS.config.dataset_kwargs:
         # create dataset_kwargs_list from oxe_kwargs
@@ -175,7 +178,7 @@ def main(_):
     rng = jax.random.PRNGKey(FLAGS.config.seed)
     rng, init_rng = jax.random.split(rng)
     model = OctoModel.from_config(
-        FLAGS.config.to_dict(),
+        model_config,
         example_batch,
         text_processor,
         verbose=True,
