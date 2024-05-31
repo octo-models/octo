@@ -393,8 +393,8 @@ def make_dataset_from_rlds(
             full_dataset = full_dataset.filter(ModuleSpec.instantiate(filter_fcn_spec))
         if ignore_errors:
             full_dataset = full_dataset.ignore_errors()
-        for traj in full_dataset:
-            restructure(traj)
+        # for traj in full_dataset:
+        #     restructure(traj)
         full_dataset = full_dataset.traj_map(restructure).filter(is_nonzero_length)
         # tries to load from cache, otherwise computes on the fly
         dataset_statistics = get_dataset_statistics(
