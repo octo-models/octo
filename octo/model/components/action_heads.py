@@ -244,6 +244,8 @@ class DiscreteActionHead(nn.Module, ActionHead):
     action_dim: int = 7
     vocab_size: int = 256
     normalization_type: str = "uniform"
+    low: Optional[float] = None
+    high: Optional[float] = None
 
     def setup(self):
         total_output = self.action_horizon * self.action_dim * self.vocab_size
@@ -267,6 +269,8 @@ class DiscreteActionHead(nn.Module, ActionHead):
         self.action_tokenizer = BinTokenizer(
             n_bins=self.vocab_size,
             bin_type=self.normalization_type,
+            low=self.low,
+            high=self.high
         )
 
     def __call__(

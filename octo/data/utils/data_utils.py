@@ -257,6 +257,7 @@ def normalize_action_and_proprio(
             mask = metadata[key].get(
                 "mask", tf.ones_like(metadata[key]["mean"], dtype=tf.bool)
             )
+
             traj = dl.transforms.selective_tree_map(
                 traj,
                 match=lambda k, _: k == traj_key,
