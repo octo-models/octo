@@ -258,7 +258,7 @@ class OctoTransformer(nn.Module):
                 obs_tokens += self._create_positional_embedding(group_name, obs_tokens)
 
                 # Update mask to account for which timesteps are padding
-                obs_pad_mask = jnp.logical_and(pad_mask[:, :, None], tokenizer_output.mask)
+                obs_pad_mask = jnp.logical_and(timestep_pad_mask[:, :, None], tokenizer_output.mask)
 
                 all_timestep_groups.append(
                     TimestepGroup(
