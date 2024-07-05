@@ -259,7 +259,7 @@ class OctoModel:
         unnormalization_statistics: Optional[Data] = None,
         normalization_type: NormalizationType = NormalizationType.NORMAL,
         beam:int = 1,
-        pad_mask: Optional[ArrayLike] = None,
+        timestep_pad_mask: Optional[ArrayLike] = None,
         train: bool = False,
         argmax: bool = False,
         sample_shape: Tuple[int, ...] = (),
@@ -281,7 +281,7 @@ class OctoModel:
             actions: (*sample_shape, batch_size, action_horizon, action_dim)
         """
         if timestep_pad_mask is None:
-            timestep_pad_mask = observations["timestep_pad_mask"]
+            timestep_pad_mask = observations["pad_mask"]
 
         transformer_outputs = self.run_transformer(
             observations, tasks, timestep_pad_mask, train=train
@@ -346,14 +346,14 @@ class OctoModel:
         unnormalization_statistics: Optional[Data] = None,
         normalization_type: NormalizationType = NormalizationType.NORMAL,
         beam: int = 1,
-        pad_mask: Optional[ArrayLike] = None,
+        timestep_pad_mask: Optional[ArrayLike] = None,
         train: bool = False,
         argmax: bool = False,
         sample_shape: Tuple[int, ...] = (),
         rng: Optional[PRNGKey] = None,
         temperature: float = 1.0,
     ):
-        if pad_mask is None:
+        if timestep_pad_mask is None:
             pad_mask = observations["pad_mask"]
 
         transformer_outputs = self.run_transformer(
