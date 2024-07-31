@@ -11,7 +11,7 @@ flax == 0.7.5
 ml_collections >= 0.1.0
 tqdm >= 4.60.0
 absl-py >= 0.12.0
-scipy >= 1.6.0
+scipy <=1.12.0,>= 1.6.0
 wandb >= 0.12.14
 einops >= 0.6.1
 imageio >= 2.31.1
