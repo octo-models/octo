@@ -244,11 +244,14 @@ class BinTokenizer(nn.Module):
 
     n_bins: int = 256
     bin_type: str = "uniform"
-    low: float = 0
-    high: float = 1
+    low: Optional[float] = None
+    high: Optional[float] = None
 
     def setup(self):
         if self.bin_type == "uniform":
+            if self.low is None or self.high is None:
+                raise ValueError("Low and high must be provided for uniform normalization")
+
             self.thresholds = jnp.linspace(self.low, self.high, self.n_bins + 1)
         elif self.bin_type == "normal":
             self.thresholds = norm.ppf(jnp.linspace(EPS, 1 - EPS, self.n_bins + 1))

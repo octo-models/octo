@@ -132,7 +132,9 @@ def apply_trajectory_transforms(
             num_parallel_calls,
         )
 
-    # chunks observations and actions
+    # chunks observations and actions, giving them a new axis at index 1 of size `window_size` and
+    # `window_size + future_action_window_size`, respectively
+
     dataset = dataset.traj_map(
         partial(
             traj_transforms.chunk_act_obs,
@@ -391,7 +393,9 @@ def make_dataset_from_rlds(
             full_dataset = full_dataset.filter(ModuleSpec.instantiate(filter_fcn_spec))
         if ignore_errors:
             full_dataset = full_dataset.ignore_errors()
+            
         full_dataset = full_dataset.traj_map(restructure).filter(is_nonzero_length)
+
         # tries to load from cache, otherwise computes on the fly
         dataset_statistics = get_dataset_statistics(
             full_dataset,
@@ -454,13 +458,13 @@ def make_dataset_from_rlds(
 
     return dataset, dataset_statistics
 
-
 def make_single_dataset(
     dataset_kwargs: dict,
     *,
     train: bool,
     traj_transform_kwargs: dict = {},
     frame_transform_kwargs: dict = {},
+    user_modify_traj
 ) -> dl.DLataset:
     """Creates a single dataset from kwargs. Returns a dataset of trajectories.
 
@@ -474,6 +478,9 @@ def make_single_dataset(
         **dataset_kwargs,
         train=train,
     )
+
+    dataset = dataset.traj_map(user_modify_traj)
+
     dataset = apply_trajectory_transforms(dataset, **traj_transform_kwargs, train=train)
     dataset = apply_frame_transforms(dataset, **frame_transform_kwargs, train=train)
 
