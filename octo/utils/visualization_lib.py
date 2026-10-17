@@ -546,8 +546,11 @@ class WandBFigure:
 
     def __exit__(self, exc_type, exc_value, traceback):
         self.canvas.draw()
-        out_image = np.frombuffer(self.canvas.tostring_rgb(), dtype="uint8")
-        self.image = out_image.reshape(self.fig.canvas.get_width_height()[::-1] + (3,))
+        # `tostring_rgb()` was removed in matplotlib 3.10, and reshaping against
+        # `get_width_height()` breaks whenever the rendered buffer has a different
+        # size than the logical canvas (e.g. RGBA buffers / HiDPI scaling). Read
+        # the buffer directly instead and slice RGBA -> RGB.
+        self.image = np.asarray(self.canvas.buffer_rgba())[..., :3].copy()
         plt.close(self.fig)
 
 
